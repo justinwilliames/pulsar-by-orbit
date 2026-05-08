@@ -1,0 +1,52 @@
+#!/bin/sh
+# Pre-commit hook — refuse commits containing apparent ElevenLabs API keys.
+#
+# Patterns blocked:
+#   - sk_<30+ chars>     (ElevenLabs sk-prefixed keys, current format)
+#   - xi-api-key: <30+ chars>   (header-leak style)
+#
+# Placeholders like "sk_xxx", "sk_your_key", "sk_..." pass through because
+# they're under the 30-char threshold.
+#
+# Bypass with `git commit --no-verify` if you've genuinely got a false positive.
+
+set -e
+
+BLOCK_PATTERNS='(sk_[a-zA-Z0-9_-]{30,})|(xi-api-key:[[:space:]]*[a-zA-Z0-9_-]{30,})'
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+FOUND=0
+for file in $STAGED_FILES; do
+  # Skip the hook itself and binary files
+  case "$file" in
+    .githooks/*) continue ;;
+    *.png|*.jpg|*.jpeg|*.webp|*.heic|*.gif|*.mp3|*.mp4|*.zip|*.tar|*.gz) continue ;;
+  esac
+
+  if [ -f "$file" ]; then
+    matches=$(grep -nEH "$BLOCK_PATTERNS" "$file" 2>/dev/null || true)
+    if [ -n "$matches" ]; then
+      if [ "$FOUND" = "0" ]; then
+        echo ""
+        echo "Pre-commit hook: refusing commit — possible ElevenLabs API key detected:"
+        echo ""
+        FOUND=1
+      fi
+      echo "$matches"
+    fi
+  fi
+done
+
+if [ "$FOUND" = "1" ]; then
+  echo ""
+  echo "If this is a false positive, bypass with:  git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+exit 0

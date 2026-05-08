@@ -1,6 +1,9 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["starlette", "uvicorn"]
+# dependencies = [
+#     "starlette>=0.40,<1.0",
+#     "uvicorn>=0.30,<1.0",
+# ]
 # ///
 """ElevenLabs V3 TTS HTTP Daemon for Claude Code.
 
@@ -91,12 +94,105 @@ FFMPEG = (
 
 
 CONFIG_PATH = REPO_ROOT / "config.json"
-CONFIG_KEYS = ("ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID")
+# config.json now holds non-secret config only (voice_id). The API key
+# lives in macOS Keychain.
+CONFIG_KEYS = ("ELEVENLABS_VOICE_ID",)
+
+KEYCHAIN_SERVICE = "caldwell-speak"
+KEYCHAIN_ACCOUNT_API_KEY = "elevenlabs-api-key"
+
+
+def _keychain_get(service: str, account: str) -> str:
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.rstrip("\n")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return ""
+
+
+def _keychain_set(service: str, account: str, value: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["security", "add-generic-password",
+             "-s", service, "-a", account, "-w", value, "-U"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def _keychain_delete(service: str, account: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["security", "delete-generic-password", "-s", service, "-a", account],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def _migrate_api_key_to_keychain() -> str:
+    """One-time migration: if config.json has an API key, push it to
+    Keychain and clear it from config.json. Returns migrated key, or ""
+    if no migration was needed."""
+    if not CONFIG_PATH.exists():
+        return ""
+    try:
+        data = json.loads(CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    config_key = data.get("ELEVENLABS_API_KEY")
+    if not (isinstance(config_key, str) and config_key):
+        return ""
+
+    if _keychain_get(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_API_KEY):
+        # Keychain already has its own value — just clean stale config entry
+        data.pop("ELEVENLABS_API_KEY", None)
+        try:
+            tmp = CONFIG_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, indent=2) + "\n")
+            tmp.replace(CONFIG_PATH)
+            log.info("Removed deprecated ELEVENLABS_API_KEY from config.json (Keychain has it).")
+        except OSError as e:
+            log.warning(f"Could not clean deprecated key from config.json: {e}")
+        return ""
+
+    if _keychain_set(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_API_KEY, config_key):
+        data.pop("ELEVENLABS_API_KEY", None)
+        try:
+            tmp = CONFIG_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, indent=2) + "\n")
+            tmp.replace(CONFIG_PATH)
+            log.warning("Migrated ELEVENLABS_API_KEY from config.json to macOS Keychain.")
+        except OSError as e:
+            log.warning(f"Migrated key but could not clean config.json: {e}")
+        return config_key
+
+    log.warning("Could not migrate API key to Keychain; leaving in config.json")
+    return ""
+
+
+def _load_keychain_into_env():
+    """Populate ELEVENLABS_API_KEY from Keychain if no real env var is set."""
+    if os.environ.get("ELEVENLABS_API_KEY"):
+        return
+    key = _keychain_get(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_API_KEY)
+    if key:
+        os.environ["ELEVENLABS_API_KEY"] = key
 
 
 def _load_config_json():
-    """UI-managed config. Loaded before .env so it overrides dev defaults,
-    but real env vars still override config.json (setdefault semantics)."""
+    """UI-managed non-secret config (voice_id). Loaded before .env so
+    it overrides dev defaults, but real env vars still win."""
     if not CONFIG_PATH.exists():
         return
     try:
@@ -113,7 +209,8 @@ def _load_config_json():
 
 
 def _save_config_json(updates: dict[str, str]):
-    """Atomic write. Merges with existing config; only persists CONFIG_KEYS."""
+    """Atomic write. Merges with existing config; only persists CONFIG_KEYS
+    (i.e. non-secret values). API keys go to Keychain via _keychain_set."""
     existing: dict = {}
     if CONFIG_PATH.exists():
         try:
@@ -144,11 +241,21 @@ def _load_dotenv():
         os.environ.setdefault(key, value)
 
 
-_load_config_json()  # UI-managed config wins over .env
-_load_dotenv()       # .env fills any gaps
+# Priority for ELEVENLABS_API_KEY: real env > Keychain > .env
+# Priority for ELEVENLABS_VOICE_ID: real env > config.json > .env
+_load_keychain_into_env()       # Pull API key from Keychain if env not set
+_migrate_api_key_to_keychain()  # One-time: move from config.json to Keychain
+_load_keychain_into_env()       # If migration just happened, env may need refresh
+_load_config_json()             # Voice ID and any future non-secret keys
+_load_dotenv()                  # Dev-time fallback for everything
 
 DASHBOARD_PORT = int(os.environ.get("SPEAK_PORT", "7865"))
 CACHE_DIR = Path(os.environ.get("SPEAK_CACHE_DIR", str(REPO_ROOT / "cache")))
+
+# Spend caps (free-tier protection). Override via env vars or config.json.
+RATE_LIMIT_PER_MIN = int(os.environ.get("SPEAK_RATE_LIMIT_PER_MIN", "20"))
+DAILY_CHAR_CAP = int(os.environ.get("SPEAK_DAILY_CHAR_CAP", "2000"))
+USAGE_LOG_PATH = REPO_ROOT / "logs" / "usage.json"
 
 
 def _load_voices() -> tuple[dict[str, str], dict[str, str]]:
@@ -176,6 +283,95 @@ def _load_voices() -> tuple[dict[str, str], dict[str, str]]:
 
 
 VOICE_ROSTER, VOICE_BY_NAME = _load_voices()
+
+
+# --- Spend Cap Tracker ---
+
+class QuotaTracker:
+    """Tracks per-minute call rate and per-day character usage. In-memory
+    rate limit (60s window); daily char count persisted to logs/usage.json
+    so daemon restart doesn't reset the cap mid-day."""
+
+    def __init__(self):
+        self._call_times: collections.deque[float] = collections.deque(maxlen=1000)
+        self._daily_chars: int = 0
+        self._daily_date: str = ""
+        self._load()
+
+    def _today(self) -> str:
+        return time.strftime("%Y-%m-%d")
+
+    def _load(self):
+        try:
+            if USAGE_LOG_PATH.exists():
+                data = json.loads(USAGE_LOG_PATH.read_text())
+                if isinstance(data, dict):
+                    self._daily_date = data.get("date", "")
+                    self._daily_chars = int(data.get("chars", 0))
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            log.warning(f"Failed to load usage log: {e}")
+        if self._daily_date != self._today():
+            self._daily_date = self._today()
+            self._daily_chars = 0
+
+    def _save(self):
+        try:
+            USAGE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = USAGE_LOG_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({
+                "date": self._daily_date,
+                "chars": self._daily_chars,
+            }))
+            tmp.replace(USAGE_LOG_PATH)
+        except OSError as e:
+            log.warning(f"Failed to save usage log: {e}")
+
+    def _prune_calls(self, now: float):
+        cutoff = now - 60.0
+        while self._call_times and self._call_times[0] < cutoff:
+            self._call_times.popleft()
+
+    def _roll_day_if_needed(self):
+        today = self._today()
+        if today != self._daily_date:
+            self._daily_date = today
+            self._daily_chars = 0
+            self._save()
+
+    def check(self, text_len: int) -> tuple[bool, str]:
+        """Returns (allowed, error_message). Does NOT increment."""
+        now = time.time()
+        self._prune_calls(now)
+        self._roll_day_if_needed()
+        if RATE_LIMIT_PER_MIN > 0 and len(self._call_times) >= RATE_LIMIT_PER_MIN:
+            return False, f"Rate limit: {RATE_LIMIT_PER_MIN} calls/minute exceeded"
+        if DAILY_CHAR_CAP > 0 and (self._daily_chars + text_len) > DAILY_CHAR_CAP:
+            remaining = max(0, DAILY_CHAR_CAP - self._daily_chars)
+            return False, f"Daily character cap reached ({self._daily_chars}/{DAILY_CHAR_CAP}, {remaining} left). Resets at midnight."
+        return True, ""
+
+    def increment(self, text_len: int):
+        now = time.time()
+        self._call_times.append(now)
+        self._roll_day_if_needed()
+        self._daily_chars += text_len
+        self._save()
+
+    def status(self) -> dict:
+        now = time.time()
+        self._prune_calls(now)
+        self._roll_day_if_needed()
+        return {
+            "minute_calls": len(self._call_times),
+            "minute_limit": RATE_LIMIT_PER_MIN,
+            "daily_chars": self._daily_chars,
+            "daily_cap": DAILY_CHAR_CAP,
+            "daily_date": self._daily_date,
+            "limits_active": RATE_LIMIT_PER_MIN > 0 or DAILY_CHAR_CAP > 0,
+        }
+
+
+QUOTA = QuotaTracker()
 
 _api_voices_cache: dict[str, str] | None = None
 
@@ -809,6 +1005,17 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     if not vid:
         return JSONResponse({"error": "No voice specified and ELEVENLABS_VOICE_ID not set"}, status_code=400)
 
+    # Spend cap check — refuses BEFORE hitting ElevenLabs (no credits spent)
+    ok, err = QUOTA.check(len(text))
+    if not ok:
+        log.warning(f"Quota refused: {err}")
+        await request.app.state.broadcaster.send("quota_blocked", {
+            "reason": err,
+            **QUOTA.status(),
+        })
+        return JSONResponse({"error": err, "quota": QUOTA.status()}, status_code=429)
+    QUOTA.increment(len(text))
+
     entry_id = uuid.uuid4().hex[:8]
     entry = QueueEntry(
         id=entry_id,
@@ -878,6 +1085,18 @@ async def handle_speak_dialogue(request: StarletteRequest) -> JSONResponse:
             return JSONResponse({"error": f"Cannot resolve voice: {voice}"}, status_code=400)
         inputs.append({"voice_id": vid, "text": text})
         labels.append(voice_label(vid))
+
+    # Spend cap check on total dialogue chars
+    total_chars = sum(len(line.get("text", "")) for line in dialogue)
+    ok, err = QUOTA.check(total_chars)
+    if not ok:
+        log.warning(f"Quota refused (dialogue): {err}")
+        await request.app.state.broadcaster.send("quota_blocked", {
+            "reason": err,
+            **QUOTA.status(),
+        })
+        return JSONResponse({"error": err, "quota": QUOTA.status()}, status_code=429)
+    QUOTA.increment(total_chars)
 
     voices_str = " + ".join(sorted(set(labels)))
     preview = " / ".join(f"{l}: \"{t['text'][:25]}\"" for l, t in zip(labels, dialogue))
@@ -1196,18 +1415,29 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
     # Determine the key to use for validating voice_id
     effective_key = new_key if new_key else os.environ.get("ELEVENLABS_API_KEY", "")
 
-    updates: dict[str, str] = {}
+    config_updates: dict[str, str] = {}  # Non-secret values for config.json
+    env_updates: dict[str, str] = {}     # Hot-reload mutations to os.environ
     voice_meta: dict = {}
 
     if new_key:
         ok, err = await asyncio.to_thread(_validate_api_key, new_key)
         if not ok:
             return JSONResponse({"error": err, "field": "api_key"}, status_code=400)
-        updates["ELEVENLABS_API_KEY"] = new_key
+        # Write to Keychain, not config.json
+        if not await asyncio.to_thread(
+            _keychain_set, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_API_KEY, new_key
+        ):
+            return JSONResponse({
+                "error": "Could not write API key to macOS Keychain. "
+                         "Check that the security command is available.",
+                "field": "api_key",
+            }, status_code=500)
+        env_updates["ELEVENLABS_API_KEY"] = new_key
 
     if new_voice is not None:
         if new_voice == "":
-            updates["ELEVENLABS_VOICE_ID"] = ""
+            config_updates["ELEVENLABS_VOICE_ID"] = ""
+            env_updates["ELEVENLABS_VOICE_ID"] = ""
         else:
             if not effective_key:
                 return JSONResponse({
@@ -1217,23 +1447,25 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
             ok, err, meta = await asyncio.to_thread(_validate_voice_id, effective_key, new_voice)
             if not ok:
                 return JSONResponse({"error": err, "field": "voice_id"}, status_code=400)
-            updates["ELEVENLABS_VOICE_ID"] = new_voice
+            config_updates["ELEVENLABS_VOICE_ID"] = new_voice
+            env_updates["ELEVENLABS_VOICE_ID"] = new_voice
             voice_meta = meta
 
-    try:
-        await asyncio.to_thread(_save_config_json, updates)
-    except OSError as e:
-        return JSONResponse({"error": f"Could not save config: {e}"}, status_code=500)
+    if config_updates:
+        try:
+            await asyncio.to_thread(_save_config_json, config_updates)
+        except OSError as e:
+            return JSONResponse({"error": f"Could not save config: {e}"}, status_code=500)
 
     # Hot-reload: mutate os.environ so live requests pick up the new values
-    for k, v in updates.items():
+    for k, v in env_updates.items():
         if v:
             os.environ[k] = v
         else:
             os.environ.pop(k, None)
 
     # Invalidate cached API voice lookups (keyed off the old API key)
-    if "ELEVENLABS_API_KEY" in updates:
+    if "ELEVENLABS_API_KEY" in env_updates:
         _api_voices_cache = None
 
     return JSONResponse({
@@ -1243,6 +1475,10 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
         "voice_id": os.environ.get("ELEVENLABS_VOICE_ID", ""),
         "voice_meta": voice_meta,
     })
+
+
+async def handle_usage(request: StarletteRequest) -> JSONResponse:
+    return JSONResponse(QUOTA.status())
 
 
 async def handle_voices(request: StarletteRequest) -> JSONResponse:
@@ -1309,6 +1545,7 @@ async def main():
         Route("/voices", handle_voices, methods=["GET"]),
         Route("/settings", handle_settings_get, methods=["GET"]),
         Route("/settings", handle_settings_post, methods=["POST"]),
+        Route("/usage", handle_usage, methods=["GET"]),
         Route("/health", handle_health, methods=["GET"]),
         Route("/", handle_index, methods=["GET"]),
         Route("/portraits/{name:path}", handle_portrait, methods=["GET"]),

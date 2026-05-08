@@ -166,15 +166,14 @@ To stop and remove:
 
 ## Configuration sources
 
-Three sources, in order of precedence (highest first):
-
-| Source | Where | Use when |
+| Key | Primary store | Fallbacks (in priority order) |
 |---|---|---|
-| Real env vars | shell / launchd | CI, sysadmin overrides |
-| `config.json` | repo root, gitignored | UI-managed via dashboard Settings |
-| `.env` | repo root, gitignored | Dev-time defaults via terminal |
+| `ELEVENLABS_API_KEY` | macOS Keychain (`caldwell-speak` / `elevenlabs-api-key`) | real env var > `.env` |
+| `ELEVENLABS_VOICE_ID` | `config.json` (gitignored) | real env var > `.env` |
+| `SPEAK_RATE_LIMIT_PER_MIN` | env var | default `20` |
+| `SPEAK_DAILY_CHAR_CAP` | env var | default `2000` |
 
-Two recognised keys: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`.
+The dashboard Settings panel writes to the primary store automatically — Keychain for the API key, `config.json` for the voice ID. The daemon migrates any `ELEVENLABS_API_KEY` it finds in `config.json` to the Keychain on startup, then clears it from the file.
 
 ### `voices.json`
 
@@ -221,13 +220,43 @@ The `--voice` and `--channel` flags exist in the daemon but are intentionally un
 
 ElevenLabs charges per character of text-to-speech. Strategies:
 
-1. **The shipped `SKILL.md` already enforces credit-conscious rules** — Caldwell speaks only on substantive completions / blockers / high-stakes status, capped at one short sentence. Adjust the rules in `SKILL.md` if you want him quieter or chattier.
-2. **Mute by voice command** — "quiet" / "mute" / "stop speaking" stops the skill from calling `say.sh`. Resume with "voice on" / "unmute". Zero credits spent while muted.
-3. **Skip audio tags** unless they materially improve delivery (humour, tonal flips). Tags like `[dry]`, `[deadpan]` count against your character allowance.
-4. **History replay is free** — replaying a cached entry from the history panel pulls from local cache, no API call.
-5. **Watch your usage** at [elevenlabs.io/app/usage](https://elevenlabs.io/app/usage).
+1. **Hard spend cap (built-in).** The daemon refuses requests beyond `SPEAK_RATE_LIMIT_PER_MIN` (default 20) or `SPEAK_DAILY_CHAR_CAP` (default 2000) — without hitting ElevenLabs. Caldwell silently drops the line; the dashboard shows a toast. Tune via env vars or set to `0` to disable.
+2. **The shipped `SKILL.md` enforces credit-conscious rules** — Caldwell speaks only on substantive completions / blockers / high-stakes status, capped at one short sentence. Adjust the rules in `SKILL.md` if you want him quieter or chattier.
+3. **Mute by voice command** — "quiet" / "mute" / "stop speaking" stops the skill from calling `say.sh`. Resume with "voice on" / "unmute". Zero credits spent while muted.
+4. **Skip audio tags** unless they materially improve delivery (humour, tonal flips). Tags like `[dry]`, `[deadpan]` count against your character allowance.
+5. **History replay is free** — replaying a cached entry from the history panel pulls from local cache, no API call.
+6. **Watch your usage** at [elevenlabs.io/app/usage](https://elevenlabs.io/app/usage). Daemon-side usage available at `GET /usage`.
 
-> **Caveat on dashboard pause:** the daemon fetches TTS audio from ElevenLabs *the moment a message is enqueued*, before playback. Dashboard pause halts playback, not the API fetch — so pausing doesn't save credits on items already queued. The "mute" instruction (which prevents enqueue at all) does.
+> **Caveat on dashboard pause:** the daemon fetches TTS audio from ElevenLabs *the moment a message is enqueued*, before playback. Dashboard pause halts playback, not the API fetch — so pausing doesn't save credits on items already queued. The "mute" instruction (which prevents enqueue at all) and the spend cap (which refuses pre-fetch) do.
+
+---
+
+## Security and hardening
+
+What this setup ships with by default:
+
+- **API key in macOS Keychain** — never in plaintext on disk. Migration from `config.json` happens automatically on first daemon startup if you upgraded from an earlier version.
+- **Daemon binds to `127.0.0.1` only** — no network exposure.
+- **`LocalhostGuardMiddleware`** — POST requests with non-localhost `Origin` headers get 403'd.
+- **Spend caps** — per-minute rate limit and per-day character cap refuse runaway calls *before* hitting ElevenLabs.
+- **Pre-commit hook** — scans staged files for `sk_<30+ chars>` and `xi-api-key:<30+ chars>` patterns. Refuses commit if a real-looking key would be added.
+
+To enable the pre-commit hook (one-time per clone):
+
+```
+./scripts/install-githooks.sh
+```
+
+The hook lives in `.githooks/pre-commit` (version-controlled). Bypass for genuine false positives with `git commit --no-verify`.
+
+### Future hardening — not shipped, worth knowing
+
+| Item | Status | Why not yet |
+|---|---|---|
+| Notarised app | No | Not needed for personal use; ad-hoc sign + remove quarantine works |
+| Daemon log rotation | No | Logs grow slowly; manual rotation if it becomes an issue |
+| Cache size cap (within 24h window) | No | Auto-cleanup at 24h is sufficient in practice |
+| Pre-flight secret-redaction in `say.sh` | No | SKILL.md "never speak secrets" rule is the primary defence |
 
 ---
 
@@ -267,7 +296,8 @@ caldwell-speak/
 | `POST` | `/history/replay` | Replay cached audio |
 | `GET` | `/voices` | Voice configuration |
 | `GET` | `/settings` | Current API key (masked) + voice ID |
-| `POST` | `/settings` | Update API key / voice ID (validates against ElevenLabs) |
+| `POST` | `/settings` | Update API key (writes to Keychain) / voice ID (validates against ElevenLabs) |
+| `GET` | `/usage` | Current minute call count + daily char count + caps |
 | `GET` | `/events` | SSE event stream |
 | `GET` | `/health` | Health check |
 | `GET` | `/` | Dashboard |

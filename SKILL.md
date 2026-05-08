@@ -31,6 +31,8 @@ This skill costs ElevenLabs credits per character spoken. Sir is on the free tie
 - Sir says "quiet" / "mute" / "stop speaking" — stays muted until Sir says "voice on" / "unmute".
 - Sir indicates focus mode ("I'm in a meeting", "head down", "no audio").
 
+**If `say.sh` exits non-zero or the daemon returns 429:** the spend cap is active. Don't retry, don't escalate, don't apologise out loud — Sir set the cap deliberately to protect his free tier. The text reply still carries the substance; just continue silently.
+
 ## How to Speak
 
 ```bash

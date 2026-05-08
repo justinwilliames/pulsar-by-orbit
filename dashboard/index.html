@@ -2807,6 +2807,15 @@ function connect() {
     History.addEntry(data);
   });
 
+  es.addEventListener('quota_blocked', function(e) {
+    try {
+      var data = JSON.parse(e.data);
+      showToast(data.reason || 'Spend cap reached', 'error');
+    } catch (err) {
+      showToast('Spend cap reached', 'error');
+    }
+  });
+
   es.onopen = function() {
     Transport.setConnected();
   };

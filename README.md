@@ -35,9 +35,11 @@ Install Caldwell on this macOS machine end-to-end.
 7. If `sw_vers -productVersion` returns 26 or later, run `./scripts/install-caldwell-app.sh` to build and install `/Applications/Caldwell.app`.
 8. Install LaunchAgents so daemon and app auto-start at every login:
    - `./scripts/install-launchd.sh` (daemon)
-   - `./scripts/install-caldwell-app-launchd.sh` (menu-bar app — only if step 7 ran)
+   - `./scripts/install-caldwell-app-launchd.sh` (menu-bar app — only if step 7 ran; the script kills any duplicate instance before loading the plist)
 9. Print `launchctl list | grep yourorbit` so I can see both are registered.
-10. Remind me to restart Claude Code so it discovers the skill.
+10. Tell me to open the menu-bar Caldwell → Settings tab and pick the persona mode (default is Potty Mouth; flip to Polite if I'd rather no swearing).
+11. Optional but recommended for Caldwell to actually fire on every turn: tell me to add a "Voice — fire `say.sh` at every turn-end" section to my `~/.claude/CLAUDE.md` mirroring the one in this repo's [`SKILL.md`](SKILL.md). The skill description alone is descriptive, not enforcing — the CLAUDE.md instruction is what makes it load-bearing.
+12. Remind me to restart Claude Code so it discovers the skill and re-reads CLAUDE.md.
 
 Pause and confirm before anything that overwrites existing state (re-cloning over a working repo, overwriting `/Applications/Caldwell.app`, replacing existing LaunchAgents).
 ```

@@ -10,12 +10,16 @@ final class FloatingPanelController: NSPanel {
             defer: true
         )
 
-        level = .floating
+        // .statusBar is above .floating — needed on macOS 26 to surface above
+        // other transient windows (notification banners, mission-control overlays)
+        level = .statusBar
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
         isMovableByWindowBackground = true
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // .stationary keeps the panel pinned across Spaces transitions even when
+        // the user navigates between desktops mid-utterance.
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         hidesOnDeactivate = false
 
         let hostingView = NSHostingView(rootView: FloatingHeadsView(viewModel: viewModel))

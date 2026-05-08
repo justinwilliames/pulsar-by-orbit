@@ -2,7 +2,7 @@
 
 [![Build CaldwellDashboard](https://github.com/justinwilliames/caldwell-speak/actions/workflows/build.yml/badge.svg)](https://github.com/justinwilliames/caldwell-speak/actions/workflows/build.yml)
 
-A voice for Claude Code. Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives, "Sir" by default. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, and a launchd config that keeps Caldwell ready whenever Claude Code calls. Caldwell speaks for everything: completions, blockers, sub-agent results — the lot.
+A voice for Claude Code. Alfred Pennyworth as the base, with two registers — **Polite** (butler-formal RP, no swearing) or **Potty Mouth** (RP precision plus unflinching expletives where the moment earns them) — switchable from the menu-bar Settings panel. "Sir" in both modes. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, a phrase cache that makes repeated lines free, and a launchd config that keeps Caldwell ready whenever Claude Code calls. Caldwell speaks for everything: completions, blockers, sub-agent results — the lot.
 
 Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is theirs, the persona is mine.
 
@@ -10,11 +10,12 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 
 ## What it does
 
-- **Speaks aloud** via ElevenLabs at the end of substantive Claude Code turns — voice is the completion alert.
-- **Free-tier conscious** — `SKILL.md` ships with tight rules so Caldwell speaks selectively, not on every turn.
+- **Speaks aloud** via ElevenLabs at the end of every Claude Code turn by default — `SKILL.md` ships bias-flipped, so the voice acts as a turn-end ping. Suppression rules cover mute, repetition, and code-heavy replies; the rest of the time he speaks.
+- **Free-tier survivable via the phrase cache** — repeated lines ("Pushed.", "Sorted Sir.") are stored locally as MP3s and replay for **zero credits**. Caldwell-the-skill is told to query the popular-cached list at session start and prefer cached lines over inventing new ones. Spend caps and a daily char budget gate everything that does miss the cache.
+- **Polite / Potty Mouth toggle** — single segmented picker at the top of the menu-bar Settings panel. Persisted to `config.json` as `CALDWELL_EXPLETIVES`, surfaced via `GET /settings`, read by Caldwell-the-skill at session start.
 - **Single shared queue** — sub-agents and chief-of-staff routines never overlap their spoken output, all rendered in Caldwell's voice.
-- **Dashboard at `http://127.0.0.1:7865`** — Caldwell's portrait ping-pongs through 4 panels while he speaks; transport, queue, history, and a Settings panel for API key + voice ID.
-- **Always-on** — optional `launchctl` config keeps the daemon running across reboots and login sessions.
+- **Two surfaces, one daemon** — a web dashboard at `http://127.0.0.1:7865` (Caldwell's portrait ping-pongs through 4 panels while he speaks; transport, queue, history, settings) and a native macOS 26 menu-bar app (`Caldwell.app`) with the same plus a Cache panel showing every cached phrase, its play count, and a free-replay button.
+- **Always-on** — optional `launchctl` configs keep both the daemon and the menu-bar app running across reboots and login sessions.
 
 ---
 
@@ -119,7 +120,9 @@ ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak
 
 Then **restart Claude Code** (close and reopen) so it discovers the new skill.
 
-The shipped [`SKILL.md`](SKILL.md) defines when Caldwell speaks: only on substantive completions, blockers, or high-stakes status — not after every short reply. One short sentence per spoken line. Hard-mute on "quiet" / "mute" / "stop speaking". This is deliberately conservative to keep ElevenLabs free-tier credit usage low.
+The shipped [`SKILL.md`](SKILL.md) is **bias-flipped**: Caldwell speaks at the end of every turn by default, picks a tier (presence / substantive / detailed alert), and stays silent only on explicit suppression — mute, repeating yourself, code-heavy reply, spend cap rejected, or trivial bookkeeping. At session start he runs two `curl` calls — one against `GET /settings` to learn the active register (Polite vs Potty Mouth), one against `GET /cache/phrases?sort=popular` to load the canon of free-to-replay lines — and prefers cached canon over inventing new lines.
+
+The credit envelope is preserved by the cache, the daily char cap, and the per-minute rate limit, not by silence. Adjust the suppression list in `SKILL.md` if you want him quieter; toggle Polite mode in the menu-bar app if you want the swearing dial off without losing the cadence.
 
 ---
 
@@ -127,9 +130,11 @@ The shipped [`SKILL.md`](SKILL.md) defines when Caldwell speaks: only on substan
 
 The repo ships a SwiftUI menu-bar app (`macos/CaldwellDashboard/`) that gives you:
 
-- A **menu-bar icon** (butler-bust glyph) — click for popover with queue/history/transport.
-- A **floating panel** that auto-appears in the top-left corner whenever Caldwell speaks. Animated portrait with aurora halo, breathing glow rings, ripple effect on loud bursts, queued voices orbiting around him as small bubbles. Draggable, joins all macOS Spaces, doesn't steal focus.
-- **Hides automatically** when audio stops and the queue is empty.
+- A **menu-bar icon** (butler-bust glyph) — click for the popover.
+- A **floating panel** that auto-appears in the top-left corner whenever Caldwell speaks. Animated portrait with aurora halo, breathing glow rings, ripple effect on loud bursts, queued voices orbiting around him as small bubbles. Draggable, joins all macOS Spaces, doesn't steal focus, hides automatically when the queue empties.
+- **Five-tab popover** — Now Playing, Queue, History, **Cache**, Settings.
+  - **Cache** lists every cached phrase with text, play count, last-played-at, and on-disk size; row-level free-replay button; sort by Recent or Popular; footer shows total bytes used.
+  - **Settings** has a Polite / Potty Mouth segmented picker at the top (saves on toggle, persists to `config.json`), then the API key + voice ID fields and the daily usage bars.
 
 ### Requirements
 
@@ -197,14 +202,35 @@ To stop and remove:
 
 ## Configuration sources
 
-| Key | Primary store | Fallbacks (in priority order) |
-|---|---|---|
-| `ELEVENLABS_API_KEY` | macOS Keychain (`caldwell-speak` / `elevenlabs-api-key`) | real env var > `.env` |
-| `ELEVENLABS_VOICE_ID` | `config.json` (gitignored) | real env var > `.env` |
-| `SPEAK_RATE_LIMIT_PER_MIN` | env var | default `20` |
-| `SPEAK_DAILY_CHAR_CAP` | env var | default `2000` |
+| Key | Primary store | Fallbacks (in priority order) | Notes |
+|---|---|---|---|
+| `ELEVENLABS_API_KEY` | macOS Keychain (`caldwell-speak` / `elevenlabs-api-key`) | real env var > `.env` | |
+| `ELEVENLABS_VOICE_ID` | `config.json` (gitignored) | real env var > `.env` | |
+| `CALDWELL_EXPLETIVES` | `config.json` (gitignored) | real env var > default `"1"` | `"1"` = Potty Mouth, `"0"` = Polite |
+| `SPEAK_RATE_LIMIT_PER_MIN` | env var | default `20` | Per-minute call cap |
+| `SPEAK_DAILY_CHAR_CAP` | env var | default `2000` | Per-day character cap |
+| `SPEAK_PHRASE_CACHE_MAX_BYTES` | env var | default `104857600` (100 MB) | Phrase cache size budget |
 
-The dashboard Settings panel writes to the primary store automatically — Keychain for the API key, `config.json` for the voice ID. The daemon migrates any `ELEVENLABS_API_KEY` it finds in `config.json` to the Keychain on startup, then clears it from the file.
+The dashboard Settings panel writes to the primary store automatically — Keychain for the API key, `config.json` for the voice ID and the persona mode. The daemon migrates any `ELEVENLABS_API_KEY` it finds in `config.json` to the Keychain on startup, then clears it from the file.
+
+### Persona modes — Polite vs Potty Mouth
+
+Caldwell ships with two registers, switchable from the **Settings** tab of the menu-bar app (segmented picker at the top, saves on toggle).
+
+| Mode | `CALDWELL_EXPLETIVES` | Register |
+|---|---|---|
+| **Potty Mouth** (default) | `"1"` | Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, unflinching expletives where the moment earns them. The contrast does the comedy. |
+| **Polite** | `"0"` | Alfred Pennyworth straight — same RP precision, same butler composure, same dry asides, same willingness to call out a bad idea. Just no swearing. |
+
+The toggle is a contract Caldwell-the-skill respects, not a daemon-side filter. At session start the skill runs `curl -s http://127.0.0.1:7865/settings`, reads `expletives_enabled`, and composes accordingly for the rest of the session. See [`SKILL.md`](SKILL.md) for the per-tier examples in both modes.
+
+### Phrase cache — the credit lever
+
+`POST /speak` content-addresses every TTS request as `sha256(text + voice_id + voice_settings)` and stashes the resulting MP3 at `cache/phrases/{hash}.mp3` with a sidecar `{hash}.json` holding the original text, voice label, first-cached timestamp, last-played timestamp, and play count.
+
+Repeated requests for the same line **never hit ElevenLabs** — the daemon plays from local disk, instant, free, no rate-limit impact. The cache is LRU-pruned hourly to stay under `SPEAK_PHRASE_CACHE_MAX_BYTES` (100 MB default).
+
+The `Cache` tab in the menu-bar popover renders this list with sort, search-by-popular-first, and a per-row replay button. `GET /cache/phrases` exposes the same data over HTTP, which `SKILL.md` instructs Caldwell to query at session start so he can prefer cached canon over inventing every line.
 
 ### `voices.json`
 
@@ -249,20 +275,47 @@ The `--voice` and `--channel` flags exist in the daemon but are intentionally un
 
 ## Minimising ElevenLabs free-tier credit use
 
-ElevenLabs charges per character of text-to-speech.
+ElevenLabs charges per character of text-to-speech. The bias-flipped `SKILL.md` says Caldwell speaks at the end of every turn — without a credit story behind that default, the free tier evaporates in a day. Three layers keep it survivable:
 
-The biggest lever is the **phrase cache** — repeated phrases (e.g. "On it Sir.", "Pushed.", "Tests passing.") are stored locally as MP3s, keyed by exact text + voice + voice_settings. The second-and-onwards instance replays from cache: **zero credits, zero rate-limit impact, instant playback**. Lean into a small canonical Tier 1 phrase set (defined in `SKILL.md`) to maximise reuse. Cache at `cache/phrases/{hash}.mp3`, capped at 100 MB by default (`SPEAK_PHRASE_CACHE_MAX_BYTES`), LRU-pruned hourly.
+### 1. Phrase cache — the primary credit-saver
 
-Other strategies:
+The daemon caches every generated MP3 at `cache/phrases/{hash}.mp3` keyed by `sha256(text + voice_id + voice_settings)`. Sibling `{hash}.json` sidecars hold text, voice label, first/last played timestamps, and a play count.
 
-1. **Hard spend cap (built-in).** The daemon refuses requests beyond `SPEAK_RATE_LIMIT_PER_MIN` (default 20) or `SPEAK_DAILY_CHAR_CAP` (default 2000) — without hitting ElevenLabs. Caldwell silently drops the line; the dashboard shows a toast. Tune via env vars or set to `0` to disable.
-2. **The shipped `SKILL.md` enforces credit-conscious rules** — Caldwell speaks only on substantive completions / blockers / high-stakes status, capped at one short sentence. Adjust the rules in `SKILL.md` if you want him quieter or chattier.
-3. **Mute by voice command** — "quiet" / "mute" / "stop speaking" stops the skill from calling `say.sh`. Resume with "voice on" / "unmute". Zero credits spent while muted.
-4. **Skip audio tags** unless they materially improve delivery (humour, tonal flips). Tags like `[dry]`, `[deadpan]` count against your character allowance.
-5. **History replay is free** — replaying a cached entry from the history panel pulls from local cache, no API call.
-6. **Watch your usage** at [elevenlabs.io/app/usage](https://elevenlabs.io/app/usage). Daemon-side usage available at `GET /usage`.
+A repeated line is **free, instant, and rate-limit-free**: the daemon never touches ElevenLabs on a cache hit, and the spend cap is bypassed. Within a couple of days of typical use the popular-phrases list saturates the most common turn-ends ("Pushed.", "Sorted Sir.", "Tests passing."), and the marginal new-line cost drops sharply.
 
-> **Caveat on dashboard pause:** the daemon fetches TTS audio from ElevenLabs *the moment a message is enqueued*, before playback. Dashboard pause halts playback, not the API fetch — so pausing doesn't save credits on items already queued. The "mute" instruction (which prevents enqueue at all) and the spend cap (which refuses pre-fetch) do.
+`SKILL.md` makes Caldwell-the-skill cache-aware — at session start he runs:
+
+```bash
+curl -s 'http://127.0.0.1:7865/cache/phrases?sort=popular&limit=30'
+```
+
+…and is instructed to prefer the cached canon over composing fresh lines whenever the moment fits. The popular list is sorted descending by play count, so the highest-leverage reuses surface first.
+
+The same data renders in the **Cache tab** of the menu-bar popover with per-row replay buttons (replays via `POST /cache/play` — same zero-credit path).
+
+Cache is LRU-pruned hourly to stay under `SPEAK_PHRASE_CACHE_MAX_BYTES` (100 MB default — typically 1000+ short phrases at ~80 KB each).
+
+### 2. Persona mode reduces inventiveness drift
+
+Polite mode tends to compress the working vocabulary (no expletive flourishes, fewer one-off variations), which means more cache hits over time. If you're aggressively credit-bound, Polite mode + a saturated cache approaches near-zero ongoing cost.
+
+### 3. Spend caps refuse before fetching
+
+Per-minute rate limit (`SPEAK_RATE_LIMIT_PER_MIN`, default 20) and per-day char cap (`SPEAK_DAILY_CHAR_CAP`, default 2000) are checked **before** the daemon hits ElevenLabs on a cache miss. When either is exceeded, the daemon returns 429 and the line is silently dropped — credits stay safe even if the skill tries to be chatty. Both can be tuned via env vars or set to `0` to disable.
+
+Cache hits **bypass** the spend cap entirely — repeated phrases are always free regardless of the day's char count.
+
+### Other levers
+
+- **Mute by voice command** — say "quiet" / "mute" / "head down" / "I'm in a meeting" and `SKILL.md` stops the skill from calling `say.sh` at all. Zero credits while muted; resume with "voice on" / "unmute".
+- **Skip audio tags** — tags like `[dry]`, `[deadpan]` consume characters. Use them only when delivery genuinely needs the direction.
+- **History replay is free** — the History panel's replay button pulls from the same cache, no API call.
+- **Daemon-side usage at `GET /usage`** — current minute call count, daily char count, and the active caps. Settings panel shows the live bars. ElevenLabs-side usage at [elevenlabs.io/app/usage](https://elevenlabs.io/app/usage).
+
+### Caveats
+
+- **Dashboard pause halts playback, not the API fetch.** The daemon fetches TTS audio from ElevenLabs the moment a message is enqueued — pausing the dashboard doesn't refund credits on items already queued. Mute (prevents enqueue) and the spend cap (refuses fetch) do.
+- **Persona mode is a contract, not a filter.** When Polite mode is on, Caldwell-the-skill is told to stay clean, but the daemon doesn't sanitize the text. If a session ignores the instruction the audio's already paid for. Hard daemon-side regex enforcement isn't shipped — Claude-side compliance is the contract.
 
 ---
 
@@ -292,6 +345,7 @@ The hook lives in `.githooks/pre-commit` (version-controlled). Bypass for genuin
 | Daemon log rotation | No | Logs grow slowly; manual rotation if it becomes an issue |
 | Cache size cap (within 24h window) | No | Auto-cleanup at 24h is sufficient in practice |
 | Pre-flight secret-redaction in `say.sh` | No | SKILL.md "never speak secrets" rule is the primary defence |
+| Daemon-side expletive regex when Polite mode is on | No | Persona mode is a contract Caldwell-the-skill respects; add daemon enforcement only if slippage is observed |
 
 ---
 
@@ -299,28 +353,37 @@ The hook lives in `.githooks/pre-commit` (version-controlled). Bypass for genuin
 
 ```
 caldwell-speak/
-  daemon/server.py             Starlette HTTP server — TTS, queue, SSE, settings, dashboard
-  scripts/say.sh               CLI wrapper — talks to daemon, falls back to speak.py
-  scripts/speak.py             Standalone TTS (no daemon needed)
-  scripts/install-launchd.sh   Register the daemon with launchd for always-on
-  scripts/uninstall-launchd.sh Reverse the above
-  dashboard/index.html         Single-file web dashboard (incl. settings panel)
-  dashboard/portraits/         Voice portraits — Caldwell ships with 4 panels for ping-pong cycle
-  voices.json                  Voice name/ID/color mapping (Caldwell only)
-  cache/                       Cached audio for history replay (24h TTL)
-  config.json                  UI-managed config (API key + voice ID), gitignored
-  .env                         Dev-time config (gitignored)
-  logs/                        launchd daemon stdout/stderr (gitignored)
-  SKILL.md                     Claude Code skill prompt — credit-conscious by default
-  macos/CaldwellDashboard/     Native menu-bar app (Swift, requires macOS 26)
+  daemon/server.py                   Starlette HTTP server — TTS, queue, cache, SSE, settings, dashboard
+  scripts/say.sh                     CLI wrapper — talks to daemon, falls back to speak.py
+  scripts/speak.py                   Standalone TTS (no daemon needed)
+  scripts/install-launchd.sh         Register the daemon with launchd for always-on
+  scripts/uninstall-launchd.sh       Reverse the above
+  scripts/install-caldwell-app.sh    Build + install the macOS menu-bar app
+  scripts/install-caldwell-app-launchd.sh  Auto-launch the app at login (kills duplicate first)
+  dashboard/index.html               Single-file web dashboard (incl. settings panel)
+  dashboard/portraits/               Voice portraits — Caldwell ships with 4 panels for ping-pong cycle
+  voices.json                        Voice name/ID/color mapping (Caldwell only)
+  cache/phrases/{hash}.mp3           Phrase cache — free replays, content-addressed by text+voice
+  cache/phrases/{hash}.json          Sidecar metadata (text, voice, timestamps, play count)
+  cache/{history_id}.mp3             Per-history-entry audio (24h TTL) for /history/replay
+  config.json                        UI-managed config (voice ID, persona mode), gitignored
+  .env                               Dev-time config (gitignored)
+  logs/                              launchd daemon stdout/stderr (gitignored)
+  SKILL.md                           Claude Code skill prompt — bias-flipped, dual-mode, cache-aware
+  macos/CaldwellDashboard/Sources/   Native menu-bar app (Swift 6.1, requires macOS 26)
+    Models/                            Codable structs (CachedPhrase, HistoryEntry, ...)
+    Networking/DaemonAPI.swift         REST client for daemon endpoints
+    ViewModels/DashboardViewModel.swift  @Observable state container
+    Views/Popover/                     Five tabs: NowPlaying, Queue, History, Cache, Settings
+    Views/Floating/                    Aurora-haloed floating portrait
 ```
 
 ### API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/speak` | Single-voice TTS |
-| `POST` | `/speak/dialogue` | Multi-voice dialogue |
+| `POST` | `/speak` | Single-voice TTS — cache-checked first, ElevenLabs only on miss |
+| `POST` | `/speak/dialogue` | Multi-voice dialogue (no cache) |
 | `GET` | `/queue` | Queue status |
 | `POST` | `/queue/skip` | Skip current |
 | `POST` | `/queue/pause` | Pause playback |
@@ -328,10 +391,12 @@ caldwell-speak/
 | `POST` | `/queue/seek` | Seek within track |
 | `POST` | `/queue/clear` | Clear queue |
 | `GET` | `/history` | Playback history |
-| `POST` | `/history/replay` | Replay cached audio |
+| `POST` | `/history/replay` | Replay cached audio by history id |
+| `GET` | `/cache/phrases` | List cached phrases with metadata; `?sort=recent\|popular`, `?limit=` |
+| `POST` | `/cache/play` | Replay cached phrase by hash key — free, never hits ElevenLabs |
 | `GET` | `/voices` | Voice configuration |
-| `GET` | `/settings` | Current API key (masked) + voice ID |
-| `POST` | `/settings` | Update API key (writes to Keychain) / voice ID (validates against ElevenLabs) |
+| `GET` | `/settings` | API key (masked), voice ID, `expletives_enabled` |
+| `POST` | `/settings` | Update API key (Keychain) / voice ID (validated) / `expletives_enabled` (persona mode) |
 | `GET` | `/usage` | Current minute call count + daily char count + caps |
 | `GET` | `/events` | SSE event stream |
 | `GET` | `/health` | Health check |

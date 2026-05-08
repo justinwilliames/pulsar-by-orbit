@@ -1,6 +1,6 @@
 # Caldwell
 
-A voice for Claude Code. Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives, "Sir" by default. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, a multi-voice cast, and a launchd config that keeps Caldwell ready whenever Claude Code calls.
+A voice for Claude Code. Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives, "Sir" by default. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, and a launchd config that keeps Caldwell ready whenever Claude Code calls. Caldwell speaks for everything: completions, blockers, sub-agent results — the lot.
 
 Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is theirs, the persona is mine.
 
@@ -10,7 +10,7 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 
 - **Speaks aloud** via ElevenLabs at the end of substantive Claude Code turns — voice is the completion alert.
 - **Free-tier conscious** — `SKILL.md` ships with tight rules so Caldwell speaks selectively, not on every turn.
-- **Queues across agents** — single shared queue means multiple agents (or chief-of-staff routines) never overlap.
+- **Single shared queue** — sub-agents and chief-of-staff routines never overlap their spoken output, all rendered in Caldwell's voice.
 - **Dashboard at `http://127.0.0.1:7865`** — Caldwell's portrait ping-pongs through 4 panels while he speaks; transport, queue, history, and a Settings panel for API key + voice ID.
 - **Always-on** — optional `launchctl` config keeps the daemon running across reboots and login sessions.
 
@@ -178,20 +178,11 @@ Two recognised keys: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`.
 
 ### `voices.json`
 
-Ships **Caldwell-only**. The dashboard shows just him; no supporting cast. Add your own voices if you need them:
-
-```json
-{
-  "name": "MyVoice",
-  "id": "your-elevenlabs-voice-id",
-  "color": "#ff6600",
-  "style": "Brief description"
-}
-```
-
-The daemon also falls back to the ElevenLabs API for voice names not in `voices.json` — so multi-agent setups can call `--voice Adam` even without an explicit entry. Names without a `voices.json` entry won't have a portrait or dashboard tile but will play through the queue.
+Ships **Caldwell-only** — he is the voice for everything. No supporting cast, no team, no per-sub-agent voice differentiation.
 
 > **Note:** The shipped Caldwell entry uses ElevenLabs' "George" voice ID as a placeholder — British, RP, mature. Right register; not necessarily the final pick. Replace via the dashboard Settings panel once you've chosen your Caldwell voice from the [Voice Library](https://elevenlabs.io/app/voice-library) — look for older British male, butler-leaning, RP or Estuary, capable of carrying expletives without breaking composure.
+
+The underlying daemon retains support for multiple voices and the `/speak/dialogue` endpoint, so if you ever change your mind, add entries to `voices.json` and they'll appear in the dashboard. The persona spec and SKILL.md are intentionally Caldwell-only — sub-agents and orchestrated workflows route their spoken output through him.
 
 ---
 
@@ -201,18 +192,7 @@ Basic:
 
 ```
 ./scripts/say.sh "Right then Sir."
-```
-
-Pick a voice:
-
-```
-./scripts/say.sh "Frankly Sir, that's fucking elegant work" --voice Caldwell
-```
-
-Channel tagging (multi-agent filtering):
-
-```
-./scripts/say.sh "Status update" --voice Adam --channel researcher
+./scripts/say.sh "Frankly Sir, that's fucking elegant work."
 ```
 
 Priority (jumps the queue):
@@ -232,6 +212,8 @@ Queue and history control:
 ./scripts/say.sh --history --limit 10
 ./scripts/say.sh --replay <id>
 ```
+
+The `--voice` and `--channel` flags exist in the daemon but are intentionally unused in this Caldwell-only setup — Caldwell speaks for everything.
 
 ---
 
@@ -260,7 +242,7 @@ caldwell-speak/
   scripts/uninstall-launchd.sh Reverse the above
   dashboard/index.html         Single-file web dashboard (incl. settings panel)
   dashboard/portraits/         Voice portraits — Caldwell ships with 4 panels for ping-pong cycle
-  voices.json                  Voice name/ID/color mappings (Caldwell + supporting cast)
+  voices.json                  Voice name/ID/color mapping (Caldwell only)
   cache/                       Cached audio for history replay (24h TTL)
   config.json                  UI-managed config (API key + voice ID), gitignored
   .env                         Dev-time config (gitignored)

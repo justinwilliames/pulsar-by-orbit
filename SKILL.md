@@ -37,15 +37,10 @@ This skill costs ElevenLabs credits per character spoken. Sir is on the free tie
 {base}/scripts/say.sh "Right then Sir, all done."
 {base}/scripts/say.sh "I'm afraid the build's failed."
 {base}/scripts/say.sh "Frankly Sir, that's fucking elegant."
+{base}/scripts/say.sh "Urgent matter, Sir." --priority
 ```
 
-Default voice is **Caldwell**. No `--voice` flag needed for him. Add `--priority` for blockers that should jump the queue.
-
-Multi-agent teammates use other voices:
-
-```bash
-{base}/scripts/say.sh "Status update" --voice Adam --channel agent-1
-```
+Caldwell is the only voice. **Don't use `--voice` flags** — Caldwell speaks for everything: completions, blockers, status, multi-step task outcomes, sub-agent results. Add `--priority` for items that should jump the queue.
 
 Queue operations:
 
@@ -110,15 +105,9 @@ Tags direct voice *acting*, not audio *production*. Think stage directions.
 - Multiple speak calls queue and play in order; safe to fire-and-forget.
 - All agents share one audio queue — no overlapping speech.
 
-## Voice Roster
+## Voice
 
-**Caldwell only.** No supporting cast in this setup.
-
-| Voice | Style |
-|-------|-------|
-| **Caldwell** | Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives |
-
-If you need other voices (e.g. for multi-agent setups), pass `--voice <Name>` and the daemon will resolve the name against your ElevenLabs VoiceLab via API. Voices not in `voices.json` won't have a portrait or dashboard tile, but they'll still play through the queue.
+**Caldwell, full stop.** Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives. He speaks for everything in this setup; there is no team.
 
 Dashboard: `http://127.0.0.1:7865`
 
@@ -131,13 +120,8 @@ The dashboard at `http://127.0.0.1:7865` shows:
 - **Queue panel** — upcoming items, per-channel pause toggles.
 - **History panel** — past entries with replay (free, comes from cache).
 
-## Team Voice Assignment (multi-agent setups)
+## Sub-agents and orchestration
 
-This setup is Caldwell-only on the dashboard. If you spawn a team and need teammates with distinguishable voices, pass `--voice <Name>` to `say.sh` — the daemon falls back to ElevenLabs API resolution for any voice name not in `voices.json`. Teammate voices won't have portraits or dashboard tiles but will play through the shared queue.
+If you spawn sub-agents to do work in parallel (research, parallel tool calls, etc.), **the spoken output is still Caldwell's**. Sub-agents don't get their own voices in this setup — the lead returns one consolidated spoken summary in Caldwell's register at the end of the substantive task, following the rules above.
 
-```
-Your voice is <Name>. When speaking, use: {base}/scripts/say.sh "message" --voice <Name>
-Speak only at end of substantive work — see the credit-conscious rules above.
-```
-
-Use `--channel <agent-name>` per teammate so the dashboard can filter their queue/history items even without a tile.
+Don't pass `--voice` on `say.sh`. Caldwell is the voice.

@@ -11,7 +11,6 @@ let package = Package(
         .executableTarget(
             name: "CaldwellDashboard",
             path: "Sources",
-            resources: [.process("Resources")],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-sectcreate",
                               "-Xlinker", "__TEXT",

@@ -97,7 +97,14 @@ FFMPEG = (
 CONFIG_PATH = REPO_ROOT / "config.json"
 # config.json now holds non-secret config only (voice_id). The API key
 # lives in macOS Keychain.
-CONFIG_KEYS = ("ELEVENLABS_VOICE_ID",)
+CONFIG_KEYS = ("ELEVENLABS_VOICE_ID", "CALDWELL_EXPLETIVES")
+
+
+def _expletives_enabled() -> bool:
+    """Persona-mode toggle. Default True (Potty Mouth). Set false to put
+    Caldwell in Polite mode — butler-formal RP, no expletives, no rough
+    language. Persisted in config.json as '1' or '0'."""
+    return os.environ.get("CALDWELL_EXPLETIVES", "1").strip().lower() not in ("0", "false", "no", "off", "")
 
 KEYCHAIN_SERVICE = "caldwell-speak"
 KEYCHAIN_ACCOUNT_API_KEY = "elevenlabs-api-key"
@@ -1670,6 +1677,7 @@ async def handle_settings_get(request: StarletteRequest) -> JSONResponse:
         "api_key_preview": _mask_api_key(api_key),
         "voice_id": voice_id,
         "voice_label": voice_label(voice_id) if voice_id else "",
+        "expletives_enabled": _expletives_enabled(),
     })
 
 
@@ -1684,16 +1692,20 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
 
     raw_key = body.get("api_key")
     raw_voice = body.get("voice_id")
+    raw_expl = body.get("expletives_enabled")
 
     if raw_key is not None and not isinstance(raw_key, str):
         return JSONResponse({"error": "api_key must be a string"}, status_code=400)
     if raw_voice is not None and not isinstance(raw_voice, str):
         return JSONResponse({"error": "voice_id must be a string"}, status_code=400)
+    if raw_expl is not None and not isinstance(raw_expl, bool):
+        return JSONResponse({"error": "expletives_enabled must be a boolean"}, status_code=400)
 
     new_key = raw_key.strip() if isinstance(raw_key, str) else None
     new_voice = raw_voice.strip() if isinstance(raw_voice, str) else None
+    new_expl: bool | None = raw_expl if isinstance(raw_expl, bool) else None
 
-    if new_key is None and new_voice is None:
+    if new_key is None and new_voice is None and new_expl is None:
         return JSONResponse({"error": "No fields to update"}, status_code=400)
 
     # Determine the key to use for validating voice_id
@@ -1735,6 +1747,11 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
             env_updates["ELEVENLABS_VOICE_ID"] = new_voice
             voice_meta = meta
 
+    if new_expl is not None:
+        flag = "1" if new_expl else "0"
+        config_updates["CALDWELL_EXPLETIVES"] = flag
+        env_updates["CALDWELL_EXPLETIVES"] = flag
+
     if config_updates:
         try:
             await asyncio.to_thread(_save_config_json, config_updates)
@@ -1758,6 +1775,7 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
         "api_key_preview": _mask_api_key(os.environ.get("ELEVENLABS_API_KEY", "")),
         "voice_id": os.environ.get("ELEVENLABS_VOICE_ID", ""),
         "voice_meta": voice_meta,
+        "expletives_enabled": _expletives_enabled(),
     })
 
 

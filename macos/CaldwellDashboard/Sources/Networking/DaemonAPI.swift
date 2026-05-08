@@ -92,10 +92,11 @@ struct DaemonAPI: Sendable {
         return try JSONDecoder().decode(DaemonUsage.self, from: data)
     }
 
-    func saveSettings(apiKey: String?, voiceId: String?) async throws -> SettingsSaveResponse {
+    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil) async throws -> SettingsSaveResponse {
         var body: [String: Any] = [:]
         if let apiKey { body["api_key"] = apiKey }
         if let voiceId { body["voice_id"] = voiceId }
+        if let expletivesEnabled { body["expletives_enabled"] = expletivesEnabled }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("settings"))
         request.httpMethod = "POST"

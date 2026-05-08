@@ -272,9 +272,9 @@ final class DashboardViewModel {
         usage = try? await api.fetchUsage()
     }
 
-    func saveSettings(apiKey: String?, voiceId: String?) async -> SaveResult {
+    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId)
+            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled)
             if let error = response.error {
                 return .failure(error)
             }

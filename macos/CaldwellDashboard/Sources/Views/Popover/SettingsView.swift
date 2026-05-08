@@ -11,12 +11,15 @@ struct SettingsView: View {
     @State private var statusMessage: String?
     @State private var statusKind: StatusKind = .info
     @State private var showingApiKey: Bool = false
+    @State private var personaSaving: Bool = false
 
     enum StatusKind { case ok, error, info }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                personaSection
+                Divider()
                 apiKeySection
                 voiceIdSection
                 saveButton
@@ -33,6 +36,62 @@ struct SettingsView: View {
             if !voiceIdTouched, let id = viewModel.settings?.voiceId {
                 voiceId = id
             }
+        }
+    }
+
+    // MARK: - Persona Mode
+
+    @ViewBuilder
+    private var personaSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("CALDWELL'S MODE")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            let mode = personaModeBinding
+            Picker("Mode", selection: mode) {
+                Text("Polite").tag(false)
+                Text("Potty Mouth").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .disabled(personaSaving)
+
+            HStack(spacing: 6) {
+                if personaSaving {
+                    ProgressView().scaleEffect(0.5)
+                }
+                Text(personaModeHint)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var personaModeBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.expletivesEnabled ?? true },
+            set: { newValue in
+                Task { await savePersona(expletivesEnabled: newValue) }
+            }
+        )
+    }
+
+    private var personaModeHint: String {
+        if viewModel.settings?.expletivesEnabled == false {
+            return "Polite — butler-formal RP, no expletives, no rough language."
+        }
+        return "Potty Mouth — RP precision with unflinching expletives where the moment earns it."
+    }
+
+    private func savePersona(expletivesEnabled: Bool) async {
+        personaSaving = true
+        defer { personaSaving = false }
+        let result = await viewModel.saveSettings(apiKey: nil, voiceId: nil, expletivesEnabled: expletivesEnabled)
+        if case .failure(let error) = result {
+            statusMessage = "Mode change failed: \(error)"
+            statusKind = .error
         }
     }
 

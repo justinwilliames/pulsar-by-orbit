@@ -11,7 +11,7 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 ## What it does
 
 - **Speaks aloud** via ElevenLabs at the end of every Claude Code turn by default — `SKILL.md` ships bias-flipped, so the voice acts as a turn-end ping. Suppression rules cover mute, repetition, and code-heavy replies; the rest of the time he speaks.
-- **Free-tier survivable via the phrase cache** — repeated lines ("Pushed.", "Sorted Sir.") are stored locally as MP3s and replay for **zero credits**. Caldwell-the-skill is told to query the popular-cached list at session start and prefer cached lines over inventing new ones. Spend caps and a daily char budget gate everything that does miss the cache.
+- **Free-tier survivable via the phrase cache** — canonical lines ("Pushed.", "Sorted Sir.") get cached locally as MP3s and replay for **zero credits**. Cache writes are **opt-in**: Caldwell-the-skill passes `--cacheable` only for known generic phrases, never for context-specific one-shots, with a daemon-side 40-char hard cap as a safety net. Spend caps and a daily char budget gate everything that misses the cache.
 - **Polite / Potty Mouth toggle** — single segmented picker at the top of the menu-bar Settings panel. Persisted to `config.json` as `CALDWELL_EXPLETIVES`, surfaced via `GET /settings`, read by Caldwell-the-skill at session start.
 - **Single shared queue** — sub-agents and chief-of-staff routines never overlap their spoken output, all rendered in Caldwell's voice.
 - **Two surfaces, one daemon** — a web dashboard at `http://127.0.0.1:7865` (Caldwell's portrait ping-pongs through 4 panels while he speaks; transport, queue, history, settings) and a native macOS 26 menu-bar app (`Caldwell.app`) with the same plus a Cache panel showing every cached phrase, its play count, and a free-replay button.
@@ -210,6 +210,7 @@ To stop and remove:
 | `SPEAK_RATE_LIMIT_PER_MIN` | env var | default `20` | Per-minute call cap |
 | `SPEAK_DAILY_CHAR_CAP` | env var | default `2000` | Per-day character cap |
 | `SPEAK_PHRASE_CACHE_MAX_BYTES` | env var | default `104857600` (100 MB) | Phrase cache size budget |
+| `SPEAK_PHRASE_CACHE_MAX_TEXT_LEN` | env var | default `40` | Hard cap on cacheable text length — long lines are refused even if `--cacheable` is set |
 
 The dashboard Settings panel writes to the primary store automatically — Keychain for the API key, `config.json` for the voice ID and the persona mode. The daemon migrates any `ELEVENLABS_API_KEY` it finds in `config.json` to the Keychain on startup, then clears it from the file.
 
@@ -226,11 +227,22 @@ The toggle is a contract Caldwell-the-skill respects, not a daemon-side filter. 
 
 ### Phrase cache — the credit lever
 
-`POST /speak` content-addresses every TTS request as `sha256(text + voice_id + voice_settings)` and stashes the resulting MP3 at `cache/phrases/{hash}.mp3` with a sidecar `{hash}.json` holding the original text, voice label, first-cached timestamp, last-played timestamp, and play count.
+The daemon content-addresses every cache-eligible TTS request as `sha256(text + voice_id + voice_settings)` and stashes the resulting MP3 at `cache/phrases/{hash}.mp3` with a sidecar `{hash}.json` holding the original text, voice label, first-cached timestamp, last-played timestamp, and play count. The cache is LRU-pruned hourly to stay under `SPEAK_PHRASE_CACHE_MAX_BYTES` (100 MB default).
 
-Repeated requests for the same line **never hit ElevenLabs** — the daemon plays from local disk, instant, free, no rate-limit impact. The cache is LRU-pruned hourly to stay under `SPEAK_PHRASE_CACHE_MAX_BYTES` (100 MB default).
+**Cache writes are opt-in.** `POST /speak` accepts `cacheable: bool` (default `false`); `say.sh` accepts `--cacheable`. The daemon enforces a hard `SPEAK_PHRASE_CACHE_MAX_TEXT_LEN` cap (default 40 chars) — long lines are refused even when flagged, on the assumption that anything over a short generic phrase is context-specific.
 
-The `Cache` tab in the menu-bar popover renders this list with sort, search-by-popular-first, and a per-row replay button. `GET /cache/phrases` exposes the same data over HTTP, which `SKILL.md` instructs Caldwell to query at session start so he can prefer cached canon over inventing every line.
+**Cache reads always check, regardless of the flag.** A previously-cached canonical phrase still plays free from disk on subsequent requests. The flag only governs writes.
+
+`SKILL.md` is the contract: Caldwell-the-skill marks only known canonical phrases (`"Pushed."`, `"Sorted Sir."`, `"Tests passing."`, etc.) with `--cacheable` and lets context-specific lines run as one-shots. The full canon is in [`SKILL.md`](SKILL.md#repeat-phrases-liberally--theyre-free-but-only-the-canon-gets-cached).
+
+Admin endpoints for cleanup:
+
+| Method | Path | Description |
+|---|---|---|
+| `DELETE` | `/cache/phrases/{key}` | Purge a single cached phrase by hash |
+| `POST` | `/cache/clear` | Wipe every cached phrase (destructive) |
+
+The `Cache` tab in the menu-bar popover renders the live list with sort, popular-first ordering, and per-row replay buttons.
 
 ### `voices.json`
 
@@ -250,6 +262,15 @@ Basic:
 ./scripts/say.sh "Right then Sir."
 ./scripts/say.sh "Frankly Sir, that's fucking elegant work."
 ```
+
+Cacheable canonical phrase (writes to phrase cache; default is no-cache):
+
+```
+./scripts/say.sh "Pushed, Sir." --cacheable
+./scripts/say.sh "Tests passing." --cacheable
+```
+
+Pass `--cacheable` only for known generic phrases. Context-specific lines (deploy results, file names, feature mentions) should run without the flag so they don't pollute the popular-phrases list. The daemon also refuses cache writes on text longer than 40 chars regardless of the flag.
 
 Priority (jumps the queue):
 
@@ -279,21 +300,21 @@ ElevenLabs charges per character of text-to-speech. The bias-flipped `SKILL.md` 
 
 ### 1. Phrase cache — the primary credit-saver
 
-The daemon caches every generated MP3 at `cache/phrases/{hash}.mp3` keyed by `sha256(text + voice_id + voice_settings)`. Sibling `{hash}.json` sidecars hold text, voice label, first/last played timestamps, and a play count.
+Canonical generic phrases get cached at `cache/phrases/{hash}.mp3` (with `{hash}.json` sidecars for text + play counts) and replay for **zero credits, zero rate-limit impact, instant playback**. Cache reads always check; a previously-cached line never re-bills.
 
-A repeated line is **free, instant, and rate-limit-free**: the daemon never touches ElevenLabs on a cache hit, and the spend cap is bypassed. Within a couple of days of typical use the popular-phrases list saturates the most common turn-ends ("Pushed.", "Sorted Sir.", "Tests passing."), and the marginal new-line cost drops sharply.
+**Cache writes are opt-in to keep the canon clean.** `POST /speak` requires `cacheable: true` (and `say.sh` requires `--cacheable`) before the daemon writes a new entry. Without the flag, the audio plays once and is discarded — no cache pollution from one-shot context-specific lines like "Cache panel's wired in, Sir." A hard 40-char text-length cap (`SPEAK_PHRASE_CACHE_MAX_TEXT_LEN`) refuses cache writes regardless of the flag, on the assumption that anything longer is context-specific.
 
-`SKILL.md` makes Caldwell-the-skill cache-aware — at session start he runs:
+`SKILL.md` is the contract: Caldwell-the-skill knows the canon (`"Pushed."`, `"Sorted Sir."`, `"Tests passing."`, etc.), passes `--cacheable` only for those, and lets everything else run as one-shots. At session start he also runs:
 
 ```bash
 curl -s 'http://127.0.0.1:7865/cache/phrases?sort=popular&limit=30'
 ```
 
-…and is instructed to prefer the cached canon over composing fresh lines whenever the moment fits. The popular list is sorted descending by play count, so the highest-leverage reuses surface first.
+…to load the live cached canon and prefer those over composing fresh lines. The popular list is sorted descending by play count, so the highest-leverage reuses surface first.
 
-The same data renders in the **Cache tab** of the menu-bar popover with per-row replay buttons (replays via `POST /cache/play` — same zero-credit path).
+The same data renders in the **Cache tab** of the menu-bar popover with per-row replay buttons (replays via `POST /cache/play` — same zero-credit path). Per-row purge is available via `DELETE /cache/phrases/{key}`.
 
-Cache is LRU-pruned hourly to stay under `SPEAK_PHRASE_CACHE_MAX_BYTES` (100 MB default — typically 1000+ short phrases at ~80 KB each).
+Cache is LRU-pruned hourly to stay under `SPEAK_PHRASE_CACHE_MAX_BYTES` (100 MB default — typically 1000+ short phrases at ~30 KB each).
 
 ### 2. Persona mode reduces inventiveness drift
 
@@ -382,7 +403,7 @@ caldwell-speak/
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/speak` | Single-voice TTS — cache-checked first, ElevenLabs only on miss |
+| `POST` | `/speak` | Single-voice TTS — cache-checked first; opt-in `cacheable` controls whether a miss writes to cache |
 | `POST` | `/speak/dialogue` | Multi-voice dialogue (no cache) |
 | `GET` | `/queue` | Queue status |
 | `POST` | `/queue/skip` | Skip current |
@@ -393,6 +414,8 @@ caldwell-speak/
 | `GET` | `/history` | Playback history |
 | `POST` | `/history/replay` | Replay cached audio by history id |
 | `GET` | `/cache/phrases` | List cached phrases with metadata; `?sort=recent\|popular`, `?limit=` |
+| `DELETE` | `/cache/phrases/{key}` | Purge a single cached phrase by hash |
+| `POST` | `/cache/clear` | Wipe every cached phrase (destructive) |
 | `POST` | `/cache/play` | Replay cached phrase by hash key — free, never hits ElevenLabs |
 | `GET` | `/voices` | Voice configuration |
 | `GET` | `/settings` | API key (masked), voice ID, `expletives_enabled` |

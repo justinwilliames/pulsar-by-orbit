@@ -1,6 +1,6 @@
 # Caldwell
 
-A voice for Claude Code. Cockney butler, expletives where natural, "Sir" by default — wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, and a multi-voice cast.
+A voice for Claude Code. Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives, "Sir" by default. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, and a multi-voice cast.
 
 Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is theirs, the persona is mine.
 
@@ -34,7 +34,7 @@ uv run daemon/server.py
 open http://127.0.0.1:7865
 
 # 4. Test from another terminal
-./scripts/say.sh "Right then Sir, the daemon's up. Best we crack on."
+./scripts/say.sh "Right then Sir, the daemon's up. Shall we proceed?"
 ```
 
 The dashboard's **Settings panel** (gear icon, transport-bar right) validates your inputs against ElevenLabs before saving and stores them in `config.json` (gitignored).
@@ -70,7 +70,7 @@ Ships with Caldwell as default + 8 supporting voices. Add your own:
 
 The daemon also falls back to the ElevenLabs API for voice names not in `voices.json`.
 
-> **Note:** The shipped Caldwell entry uses ElevenLabs' "George" voice ID as a placeholder — British, RP, mature. It's the wrong accent (RP not Cockney) but it'll get you speaking immediately. Replace via the dashboard Settings panel once you've picked a real Caldwell voice from the [Voice Library](https://elevenlabs.io/app/voice-library) — search for *Cockney*, *London*, or *Bob Hoskins*.
+> **Note:** The shipped Caldwell entry uses ElevenLabs' "George" voice ID as a placeholder — British, RP, mature. Right register; not necessarily the final pick. Replace via the dashboard Settings panel once you've chosen your Caldwell voice from the [Voice Library](https://elevenlabs.io/app/voice-library) — look for older British male, butler-leaning, RP or Estuary, capable of carrying expletives without breaking composure.
 
 ---
 
@@ -81,13 +81,13 @@ The daemon also falls back to the ElevenLabs API for voice names not in `voices.
 ./scripts/say.sh "Hello Sir"
 
 # Choose a voice
-./scripts/say.sh "Tidy bit of work, that" --voice Caldwell
+./scripts/say.sh "Frankly Sir, that's fucking elegant work" --voice Caldwell
 
 # Channel tagging (for multi-agent filtering)
 ./scripts/say.sh "Status update" --voice Adam --channel researcher
 
 # Priority (jumps queue)
-./scripts/say.sh "Fucking 'ell, that's broken!" --priority
+./scripts/say.sh "I'm afraid we have a problem, Sir." --priority
 
 # Queue + history control
 ./scripts/say.sh --status

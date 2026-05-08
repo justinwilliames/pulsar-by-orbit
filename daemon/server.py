@@ -295,6 +295,29 @@ def _phrase_cache_key(text: str, voice_id: str) -> str:
     return hashlib.sha256(payload).hexdigest()[:32]
 
 
+def _phrase_cache_meta_path(key: str) -> Path:
+    return PHRASE_CACHE_DIR / f"{key}.json"
+
+
+def _phrase_cache_load_meta(key: str) -> dict | None:
+    path = _phrase_cache_meta_path(key)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _phrase_cache_save_meta(key: str, meta: dict):
+    path = _phrase_cache_meta_path(key)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(meta))
+    except OSError as e:
+        log.warning(f"Phrase cache meta save failed: {e}")
+
+
 def _phrase_cache_get(text: str, voice_id: str) -> str | None:
     key = _phrase_cache_key(text, voice_id)
     path = PHRASE_CACHE_DIR / f"{key}.mp3"
@@ -303,6 +326,25 @@ def _phrase_cache_get(text: str, voice_id: str) -> str | None:
             os.utime(path, None)  # touch atime for LRU
         except OSError:
             pass
+        # Bump play_count + last_played_at on the sidecar (best-effort)
+        meta = _phrase_cache_load_meta(key) or {
+            "key": key,
+            "text": "",
+            "voice_id": voice_id,
+            "voice_label": "",
+            "first_cached_at": time.time(),
+            "play_count": 0,
+            "char_count": len(text),
+        }
+        meta["play_count"] = int(meta.get("play_count", 0)) + 1
+        meta["last_played_at"] = time.time()
+        # Backfill text on hit if it was missing (legacy entry)
+        if not meta.get("text"):
+            meta["text"] = text
+            meta["char_count"] = len(text)
+        if not meta.get("voice_label"):
+            meta["voice_label"] = voice_label(voice_id)
+        _phrase_cache_save_meta(key, meta)
         return str(path)
     return None
 
@@ -315,6 +357,51 @@ def _phrase_cache_put(text: str, voice_id: str, source_path: str):
         shutil.copy2(source_path, str(path))
     except OSError as e:
         log.warning(f"Phrase cache put failed: {e}")
+        return
+    now = time.time()
+    meta = {
+        "key": key,
+        "text": text,
+        "voice_id": voice_id,
+        "voice_label": voice_label(voice_id),
+        "first_cached_at": now,
+        "last_played_at": now,
+        "play_count": 1,
+        "char_count": len(text),
+    }
+    _phrase_cache_save_meta(key, meta)
+
+
+def _phrase_cache_list() -> list[dict]:
+    """Return all cached phrases with metadata. Legacy entries (mp3
+    without sidecar) get a stub record so they remain visible/playable."""
+    if not PHRASE_CACHE_DIR.exists():
+        return []
+    items: list[dict] = []
+    for p in PHRASE_CACHE_DIR.iterdir():
+        if not p.is_file() or p.suffix != ".mp3":
+            continue
+        key = p.stem
+        try:
+            stat = p.stat()
+        except OSError:
+            continue
+        meta = _phrase_cache_load_meta(key)
+        if meta is None:
+            meta = {
+                "key": key,
+                "text": "",
+                "voice_id": "",
+                "voice_label": "",
+                "first_cached_at": stat.st_mtime,
+                "last_played_at": stat.st_atime,
+                "play_count": 0,
+                "char_count": 0,
+            }
+        meta["size_bytes"] = stat.st_size
+        items.append(meta)
+    items.sort(key=lambda m: m.get("last_played_at") or 0, reverse=True)
+    return items
 
 
 def _prune_phrase_cache():
@@ -323,7 +410,7 @@ def _prune_phrase_cache():
     files: list = []
     total = 0
     for p2 in PHRASE_CACHE_DIR.iterdir():
-        if p2.is_file():
+        if p2.is_file() and p2.suffix == ".mp3":
             try:
                 stat = p2.stat()
                 files.append((stat.st_atime, stat.st_size, p2))
@@ -338,6 +425,10 @@ def _prune_phrase_cache():
         try:
             p2.unlink()
             total -= size
+            # Also remove the sidecar
+            sidecar = _phrase_cache_meta_path(p2.stem)
+            if sidecar.exists():
+                sidecar.unlink()
         except OSError:
             pass
 
@@ -1406,6 +1497,78 @@ async def handle_history_replay(request: StarletteRequest) -> JSONResponse:
     return JSONResponse({"id": replay_id, "position": pos, "replaying": history_id})
 
 
+async def handle_cache_list(request: StarletteRequest) -> JSONResponse:
+    items = await asyncio.to_thread(_phrase_cache_list)
+    total_size = sum(int(it.get("size_bytes") or 0) for it in items)
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", "200")), 1000))
+    except (ValueError, TypeError):
+        limit = 200
+    sort = request.query_params.get("sort", "recent")
+    if sort == "popular":
+        items.sort(key=lambda m: int(m.get("play_count") or 0), reverse=True)
+    return JSONResponse({
+        "phrases": items[:limit],
+        "total": len(items),
+        "total_size_bytes": total_size,
+        "max_bytes": PHRASE_CACHE_MAX_BYTES,
+    })
+
+
+async def handle_cache_play(request: StarletteRequest) -> JSONResponse:
+    queue: AudioQueue = request.app.state.queue
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "Expected JSON object"}, status_code=400)
+
+    key = body.get("key", "")
+    if not isinstance(key, str) or not key:
+        return JSONResponse({"error": "No key provided"}, status_code=400)
+
+    cache_path = PHRASE_CACHE_DIR / f"{key}.mp3"
+    if not cache_path.exists():
+        return JSONResponse({"error": "Cached phrase not found"}, status_code=404)
+
+    meta = _phrase_cache_load_meta(key) or {}
+
+    # Bump play_count + last_played_at on replay
+    meta_text = str(meta.get("text") or "")
+    meta_voice_label = str(meta.get("voice_label") or "")
+    meta["key"] = key
+    meta["play_count"] = int(meta.get("play_count", 0)) + 1
+    meta["last_played_at"] = time.time()
+    _phrase_cache_save_meta(key, meta)
+    try:
+        os.utime(cache_path, None)
+    except OSError:
+        pass
+
+    # Copy cached MP3 to a temp file so the worker's cleanup doesn't delete the cache entry
+    fd, tmp_path = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=".mp3")
+    with os.fdopen(fd, "wb") as f:
+        f.write(cache_path.read_bytes())
+
+    entry_id = uuid.uuid4().hex[:8]
+    entry = QueueEntry(
+        id=entry_id,
+        audio_path=tmp_path,
+        text_preview=(meta_text or "(cached phrase)")[:100],
+        voice_label=meta_voice_label or "Caldwell",
+        created_at=time.time(),
+        full_text=meta_text,
+    )
+    pos = queue.enqueue(entry)
+    return JSONResponse({
+        "id": entry_id,
+        "position": pos,
+        "key": key,
+        "play_count": meta.get("play_count"),
+    })
+
+
 async def handle_events(request: StarletteRequest) -> StreamingResponse:
     broadcaster: SSEBroadcaster = request.app.state.broadcaster
     queue: AudioQueue = request.app.state.queue
@@ -1663,6 +1826,8 @@ async def main():
         Route("/queue/resume", handle_queue_resume, methods=["POST"]),
         Route("/history", handle_history, methods=["GET"]),
         Route("/history/replay", handle_history_replay, methods=["POST"]),
+        Route("/cache/phrases", handle_cache_list, methods=["GET"]),
+        Route("/cache/play", handle_cache_play, methods=["POST"]),
         Route("/events", handle_events, methods=["GET"]),
         Route("/voices", handle_voices, methods=["GET"]),
         Route("/settings", handle_settings_get, methods=["GET"]),

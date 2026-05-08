@@ -18,7 +18,36 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 
 ---
 
-## Install — five steps
+## Install — Claude Code one-shot
+
+Want Claude Code to drive the whole install? Open a fresh session in any directory and paste this prompt. It walks system deps, clone, daemon, API key, playback test, skill symlink, optional menu-bar app, and persistent LaunchAgents — pausing before anything destructive.
+
+```text
+Install Caldwell on this macOS machine end-to-end.
+
+1. Check for `ffmpeg` and `uv`. If either's missing, install with `brew install ffmpeg` and the official `uv` shell installer (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
+2. Clone https://github.com/justinwilliames/caldwell-speak to `~/code/caldwell-speak` if it doesn't exist; otherwise `git pull` to update.
+3. Start the daemon in the background (`uv run daemon/server.py` from the repo) and confirm `curl -sf http://127.0.0.1:7865/health` returns OK.
+4. Open http://127.0.0.1:7865 in the browser and tell me to paste my ElevenLabs API key and voice ID into the gear-icon Settings panel. Wait until I confirm I've saved them — do NOT ask me for the key in chat (it'd end up in this session's transcript on disk).
+5. Run `./scripts/say.sh "Right then Sir, the daemon is up."` to verify playback.
+6. Install the Claude Code skill: `mkdir -p ~/.claude/skills && ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak` (skip if the symlink already exists).
+7. If `sw_vers -productVersion` returns 26 or later, run `./scripts/install-caldwell-app.sh` to build and install `/Applications/Caldwell.app`.
+8. Install LaunchAgents so daemon and app auto-start at every login:
+   - `./scripts/install-launchd.sh` (daemon)
+   - `./scripts/install-caldwell-app-launchd.sh` (menu-bar app — only if step 7 ran)
+9. Print `launchctl list | grep yourorbit` so I can see both are registered.
+10. Remind me to restart Claude Code so it discovers the skill.
+
+Pause and confirm before anything that overwrites existing state (re-cloning over a working repo, overwriting `/Applications/Caldwell.app`, replacing existing LaunchAgents).
+```
+
+If a step fails, paste the error back into the same Claude Code session — it'll diagnose and recover from where it stopped.
+
+Prefer to drive each step yourself? The manual path is below.
+
+---
+
+## Install — manual five steps
 
 **macOS only** (uses `afplay` for playback). Detailed Mac setup notes: [docs/SETUP_MAC.md](docs/SETUP_MAC.md).
 

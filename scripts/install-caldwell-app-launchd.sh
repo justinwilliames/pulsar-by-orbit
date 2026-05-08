@@ -45,6 +45,12 @@ cat > "$PLIST_PATH" <<EOF
 </plist>
 EOF
 
+if pgrep -f "$EXECUTABLE" >/dev/null 2>&1; then
+  echo "Stopping existing Caldwell.app instance(s) so launchd can manage a single process..."
+  pkill -f "$EXECUTABLE" 2>/dev/null || true
+  sleep 1
+fi
+
 launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 

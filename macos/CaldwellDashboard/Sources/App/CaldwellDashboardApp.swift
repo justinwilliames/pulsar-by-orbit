@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct SpeakDashboardApp: App {
+struct CaldwellDashboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Speak", systemImage: "waveform") {
+        MenuBarExtra("Caldwell", systemImage: "person.bust.fill") {
             PopoverRootView(viewModel: appDelegate.viewModel)
         }
         .menuBarExtraStyle(.window)

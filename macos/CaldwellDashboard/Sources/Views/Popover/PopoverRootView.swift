@@ -68,7 +68,7 @@ struct PopoverRootView: View {
 
     private var header: some View {
         HStack {
-            Text("Speak")
+            Text("Caldwell")
                 .font(.headline)
 
             Spacer()

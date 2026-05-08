@@ -92,6 +92,53 @@ The shipped [`SKILL.md`](SKILL.md) defines when Caldwell speaks: only on substan
 
 ---
 
+## Optional — native menu-bar app with floating Caldwell
+
+The repo ships a SwiftUI menu-bar app (`macos/CaldwellDashboard/`) that gives you:
+
+- A **menu-bar icon** (butler-bust glyph) — click for popover with queue/history/transport.
+- A **floating panel** that auto-appears in the top-left corner whenever Caldwell speaks. Animated portrait with aurora halo, breathing glow rings, ripple effect on loud bursts, queued voices orbiting around him as small bubbles. Draggable, joins all macOS Spaces, doesn't steal focus.
+- **Hides automatically** when audio stops and the queue is empty.
+
+### Requirements
+
+**macOS 26 (Tahoe) or later** — the app uses Apple's Liquid Glass APIs (`GlassEffectContainer`, `glassEffect()`) introduced in macOS 26. It will not build on Sequoia or earlier.
+
+Swift 6.1+ — bundled with macOS 26. If you don't have it: `xcode-select --install`.
+
+### Build and install
+
+```
+cd ~/code/caldwell-speak
+./scripts/install-caldwell-app.sh
+```
+
+This compiles the binary, assembles `Caldwell.app`, ad-hoc-signs it, and copies it to `/Applications/Caldwell.app`. Then:
+
+```
+open -a Caldwell
+```
+
+The menu-bar icon appears. Click it for the popover. Caldwell's floating portrait shows up automatically when audio is playing (which won't happen until you've configured the daemon and an API key — see Steps 3 and 4 above).
+
+### Auto-launch at login
+
+```
+./scripts/install-caldwell-app-launchd.sh
+```
+
+Registers `Caldwell.app` with `launchd` so it starts at every login. Removes itself cleanly via the printed `launchctl unload` command if you want to disable it later.
+
+### Just rebuild after pulling updates
+
+```
+./scripts/install-caldwell-app.sh
+```
+
+Same script handles re-builds — it overwrites the existing `/Applications/Caldwell.app`.
+
+---
+
 ## Optional — keep the daemon always running (launchd)
 
 After Step 3 confirms the daemon works, register it with `launchd` so macOS keeps it alive across reboots and logins:
@@ -219,7 +266,7 @@ caldwell-speak/
   .env                         Dev-time config (gitignored)
   logs/                        launchd daemon stdout/stderr (gitignored)
   SKILL.md                     Claude Code skill prompt — credit-conscious by default
-  macos/SpeakDashboard/        Native menu-bar app (Swift, optional)
+  macos/CaldwellDashboard/     Native menu-bar app (Swift, requires macOS 26)
 ```
 
 ### API Endpoints

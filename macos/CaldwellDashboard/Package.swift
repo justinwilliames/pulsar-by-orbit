@@ -5,11 +5,11 @@ import Foundation
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
 let package = Package(
-    name: "SpeakDashboard",
+    name: "CaldwellDashboard",
     platforms: [.macOS("26.0")],
     targets: [
         .executableTarget(
-            name: "SpeakDashboard",
+            name: "CaldwellDashboard",
             path: "Sources",
             resources: [.process("Resources")],
             linkerSettings: [

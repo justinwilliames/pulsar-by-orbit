@@ -1,6 +1,6 @@
 ---
 name: caldwell-speak
-description: Speak text aloud via ElevenLabs TTS in Caldwell's voice — Alfred-Pennyworth-with-a-trucker's-mouth butler. Used to alert Sir to substantive task completions, blockers, or high-stakes status. Defaults to silent — only speak when the spoken output adds clear value beyond the text reply, to conserve ElevenLabs credits on the free tier.
+description: Speak text aloud via ElevenLabs TTS in Caldwell's voice — Alfred-Pennyworth-with-a-trucker's-mouth butler with RP precision and unflinching expletives. INVOKE AT THE END OF EVERY TURN by default — pick a tier (Tier 1 brief presence ~15-35 chars, Tier 2 substantive milestone ~50-80 chars, Tier 3 detailed alert up to ~200 chars) and fire one short spoken line via {base}/scripts/say.sh. Stay silent ONLY when one of these explicit suppressions applies: (1) Sir said "quiet"/"mute"/"head down"/"in a meeting", (2) spend cap rejected (say.sh exit non-zero or 429), (3) same idea was just spoken in the previous 1-2 turns, (4) literal tool-only bookkeeping turn with no human-facing output, or (5) the text reply is code/diff/architecture the user needs to read carefully. Repeated phrases hit a local audio cache and cost zero credits — lean on the canonical Tier 1 set ("Right then Sir, on it.", "Pushed.", "Sorted Sir.", "Tests passing.", "Found it Sir.") rather than inventing every line.
 allowed-tools: Bash, Read
 ---
 

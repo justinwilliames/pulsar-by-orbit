@@ -6,6 +6,7 @@ struct DaemonSettings: Codable, Sendable {
     let voiceId: String
     let voiceLabel: String
     let expletivesEnabled: Bool?
+    let muted: Bool?
 
     enum CodingKeys: String, CodingKey {
         case apiKeySet = "api_key_set"
@@ -13,6 +14,7 @@ struct DaemonSettings: Codable, Sendable {
         case voiceId = "voice_id"
         case voiceLabel = "voice_label"
         case expletivesEnabled = "expletives_enabled"
+        case muted
     }
 }
 
@@ -86,6 +88,7 @@ struct SettingsSaveResponse: Codable, Sendable {
     let voiceId: String?
     let voiceMeta: VoiceMetadata?
     let expletivesEnabled: Bool?
+    let muted: Bool?
     let error: String?
     let field: String?
 
@@ -96,6 +99,7 @@ struct SettingsSaveResponse: Codable, Sendable {
         case voiceId = "voice_id"
         case voiceMeta = "voice_meta"
         case expletivesEnabled = "expletives_enabled"
+        case muted
         case error
         case field
     }

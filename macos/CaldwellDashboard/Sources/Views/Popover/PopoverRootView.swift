@@ -69,16 +69,46 @@ struct PopoverRootView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text("Caldwell")
                 .font(.headline)
 
             Spacer()
 
+            muteToggle
+
             ConnectionStatusView(status: viewModel.connectionStatus)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .task {
+            // Pull settings on first popover load so the mute state is accurate
+            if viewModel.settings == nil {
+                await viewModel.loadSettings()
+            }
+        }
+    }
+
+    private var muteToggle: some View {
+        let muted = viewModel.isMuted
+        return Button {
+            Task { await viewModel.toggleMute() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.caption.weight(.semibold))
+                Text(muted ? "Muted" : "Live")
+                    .font(.caption2.weight(.semibold))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .glassEffect(
+                muted ? .regular.tint(.red).interactive() : .regular.tint(.green).interactive(),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+        .help(muted ? "Caldwell is muted — click to unmute. No ElevenLabs calls while muted." : "Click to mute Caldwell — stops all ElevenLabs calls until unmuted.")
     }
 
     private var tabPicker: some View {

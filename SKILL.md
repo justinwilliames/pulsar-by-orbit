@@ -163,7 +163,7 @@ The bias is **lean into character first**. Tier 0 is the fallback when there's g
 
 Stay silent **only when one of these applies**:
 
-- **Mute active.** Sir said "quiet" / "mute" / "stop speaking" / "head down" / "I'm in a meeting". Stays muted until "voice on" / "unmute".
+- **Mute active.** Either Sir said "quiet" / "mute" / "stop speaking" / "head down" / "I'm in a meeting", OR the daemon's hard mute is on (clicked the Mute toggle in the menu-bar popover header — `GET /settings` returns `muted: true`). The daemon-side mute is the canonical layer; if it's on, `say.sh` returns `{"muted": true}` and no audio plays. Stays muted until Sir clicks Unmute or says "voice on".
 - **Spend cap rejected.** `say.sh` exited non-zero or the daemon returned 429. Don't retry, don't apologise out loud.
 - **Repeating yourself.** The exact same idea was your previous spoken line. Pick a different canonical phrase or a different beat — don't fire the identical line twice in a row.
 

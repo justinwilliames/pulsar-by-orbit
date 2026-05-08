@@ -272,9 +272,9 @@ final class DashboardViewModel {
         usage = try? await api.fetchUsage()
     }
 
-    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil) async -> SaveResult {
+    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled)
+            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled, muted: muted)
             if let error = response.error {
                 return .failure(error)
             }
@@ -284,5 +284,19 @@ final class DashboardViewModel {
         } catch {
             return .failure("Network error: \(error.localizedDescription)")
         }
+    }
+
+    /// Quick mute toggle for the popover header + menu-bar quick action.
+    /// Optimistically flips local state, then syncs to the daemon.
+    @discardableResult
+    func toggleMute() async -> Bool {
+        let current = settings?.muted ?? false
+        let next = !current
+        _ = await saveSettings(apiKey: nil, voiceId: nil, expletivesEnabled: nil, muted: next)
+        return next
+    }
+
+    var isMuted: Bool {
+        settings?.muted ?? false
     }
 }

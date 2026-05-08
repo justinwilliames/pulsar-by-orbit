@@ -7,9 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let viewModel = DashboardViewModel()
 
     // Minimum time the panel stays visible after isActive flips to false.
-    // Short cached phrases ("Pushed.") finish in ~1s — without this, the
-    // panel orders out before the user has time to see it.
-    private static let minVisibleDuration: TimeInterval = 3.0
+    // Short cached phrases ("Pushed.") finish in ~1s — without enough of
+    // a tail, the panel appears and disappears before Sir notices it. 6s
+    // gives proper presence for the cached short canon while still
+    // dismissing automatically.
+    private static let minVisibleDuration: TimeInterval = 6.0
     private var hideWorkItem: DispatchWorkItem?
     private var lastShownAt: Date?
 

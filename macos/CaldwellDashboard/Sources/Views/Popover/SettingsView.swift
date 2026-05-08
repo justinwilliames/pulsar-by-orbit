@@ -285,36 +285,44 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var dailyUsageSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("DAEMON CAPS — TODAY")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.5)
-
-            if let usage = viewModel.usage {
-                if usage.dailyCap > 0 {
-                    UsageBar(label: "Characters",
-                             current: usage.dailyChars,
-                             max: usage.dailyCap)
-                }
-                if usage.minuteLimit > 0 {
-                    UsageBar(label: "Calls/min",
-                             current: usage.minuteCalls,
-                             max: usage.minuteLimit)
-                }
-                if !usage.limitsActive {
-                    Text("Spend caps disabled.")
+        // Local daemon caps — not pulled from ElevenLabs; these are
+        // advisory ceilings the daemon enforces locally before touching
+        // ElevenLabs at all. Collapsed by default; the live ElevenLabs
+        // numbers above are the source of truth for actual usage.
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                if let usage = viewModel.usage {
+                    if usage.dailyCap > 0 {
+                        UsageBar(label: "Characters",
+                                 current: usage.dailyChars,
+                                 max: usage.dailyCap)
+                    }
+                    if usage.minuteLimit > 0 {
+                        UsageBar(label: "Calls/min",
+                                 current: usage.minuteCalls,
+                                 max: usage.minuteLimit)
+                    }
+                    if !usage.limitsActive {
+                        Text("Spend caps disabled.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text("Local advisory caps; reset at local midnight. The live ElevenLabs counter above is the source of truth for real usage.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Loading…")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
-                Text("Daily caps reset at local midnight.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else {
-                Text("Loading…")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
+            .padding(.top, 4)
+        } label: {
+            Text("LOCAL DAEMON CAPS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
         }
     }
 

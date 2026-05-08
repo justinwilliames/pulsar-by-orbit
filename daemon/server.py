@@ -97,7 +97,7 @@ FFMPEG = (
 CONFIG_PATH = REPO_ROOT / "config.json"
 # config.json now holds non-secret config only (voice_id). The API key
 # lives in macOS Keychain.
-CONFIG_KEYS = ("ELEVENLABS_VOICE_ID", "CALDWELL_EXPLETIVES")
+CONFIG_KEYS = ("ELEVENLABS_VOICE_ID", "CALDWELL_EXPLETIVES", "CALDWELL_MUTED")
 
 
 def _expletives_enabled() -> bool:
@@ -105,6 +105,14 @@ def _expletives_enabled() -> bool:
     Caldwell in Polite mode — butler-formal RP, no expletives, no rough
     language. Persisted in config.json as '1' or '0'."""
     return os.environ.get("CALDWELL_EXPLETIVES", "1").strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def _muted() -> bool:
+    """Hard mute — when true, /speak refuses to enqueue and never hits
+    ElevenLabs. Useful when Sir is AFK and doesn't want background TTS
+    burning credits. Persisted in config.json so daemon restart keeps
+    the muted state."""
+    return os.environ.get("CALDWELL_MUTED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 KEYCHAIN_SERVICE = "caldwell-speak"
 KEYCHAIN_ACCOUNT_API_KEY = "elevenlabs-api-key"
@@ -1306,6 +1314,15 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     if len(text) > MAX_TEXT_LENGTH:
         return JSONResponse({"error": f"Text too long (max {MAX_TEXT_LENGTH} chars)"}, status_code=400)
 
+    # Hard mute — refuse before any ElevenLabs work. Returns 200 with a
+    # `muted` flag so callers (say.sh, the skill) can distinguish from
+    # genuine errors but don't retry.
+    if _muted():
+        return JSONResponse({
+            "muted": True,
+            "text_preview": text[:100],
+        })
+
     voice_raw = body.get("voice")
     if voice_raw is not None and not isinstance(voice_raw, str):
         return JSONResponse({"error": "Voice must be a string"}, status_code=400)
@@ -1840,6 +1857,7 @@ async def handle_settings_get(request: StarletteRequest) -> JSONResponse:
         "voice_id": voice_id,
         "voice_label": voice_label(voice_id) if voice_id else "",
         "expletives_enabled": _expletives_enabled(),
+        "muted": _muted(),
     })
 
 
@@ -1855,6 +1873,7 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
     raw_key = body.get("api_key")
     raw_voice = body.get("voice_id")
     raw_expl = body.get("expletives_enabled")
+    raw_mute = body.get("muted")
 
     if raw_key is not None and not isinstance(raw_key, str):
         return JSONResponse({"error": "api_key must be a string"}, status_code=400)
@@ -1862,12 +1881,15 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
         return JSONResponse({"error": "voice_id must be a string"}, status_code=400)
     if raw_expl is not None and not isinstance(raw_expl, bool):
         return JSONResponse({"error": "expletives_enabled must be a boolean"}, status_code=400)
+    if raw_mute is not None and not isinstance(raw_mute, bool):
+        return JSONResponse({"error": "muted must be a boolean"}, status_code=400)
 
     new_key = raw_key.strip() if isinstance(raw_key, str) else None
     new_voice = raw_voice.strip() if isinstance(raw_voice, str) else None
     new_expl: bool | None = raw_expl if isinstance(raw_expl, bool) else None
+    new_mute: bool | None = raw_mute if isinstance(raw_mute, bool) else None
 
-    if new_key is None and new_voice is None and new_expl is None:
+    if new_key is None and new_voice is None and new_expl is None and new_mute is None:
         return JSONResponse({"error": "No fields to update"}, status_code=400)
 
     # Determine the key to use for validating voice_id
@@ -1914,6 +1936,11 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
         config_updates["CALDWELL_EXPLETIVES"] = flag
         env_updates["CALDWELL_EXPLETIVES"] = flag
 
+    if new_mute is not None:
+        flag = "1" if new_mute else "0"
+        config_updates["CALDWELL_MUTED"] = flag
+        env_updates["CALDWELL_MUTED"] = flag
+
     if config_updates:
         try:
             await asyncio.to_thread(_save_config_json, config_updates)
@@ -1938,6 +1965,7 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
         "voice_id": os.environ.get("ELEVENLABS_VOICE_ID", ""),
         "voice_meta": voice_meta,
         "expletives_enabled": _expletives_enabled(),
+        "muted": _muted(),
     })
 
 

@@ -290,6 +290,9 @@ def _voice_settings() -> dict:
 # Repeated phrases like "On it Sir." replay from local disk — zero ElevenLabs credits.
 PHRASE_CACHE_DIR = CACHE_DIR / "phrases"
 PHRASE_CACHE_MAX_BYTES = int(os.environ.get("SPEAK_PHRASE_CACHE_MAX_BYTES", str(100 * 1024 * 1024)))
+# Cache writes are restricted to short canonical phrases. Anything longer is
+# almost always context-specific and would pollute the popular-phrases list.
+PHRASE_CACHE_MAX_TEXT_LEN = int(os.environ.get("SPEAK_PHRASE_CACHE_MAX_TEXT_LEN", "40"))
 
 
 def _phrase_cache_key(text: str, voice_id: str) -> str:
@@ -1201,6 +1204,13 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     if channel is not None and not isinstance(channel, str):
         return JSONResponse({"error": "Channel must be a string"}, status_code=400)
 
+    # Cache discipline: only canonical, generic, re-usable phrases get cached.
+    # Default false — caller (Caldwell-the-skill) must explicitly opt in for
+    # known-canonical phrases. Length cap is a safety net: phrases > 40 chars
+    # are almost always context-specific and never get cached even if flagged.
+    cacheable = bool(body.get("cacheable", False))
+    cacheable_effective = cacheable and len(text) <= PHRASE_CACHE_MAX_TEXT_LEN
+
     vid = await resolve_voice_async(voice_raw)
     if not _api_key():
         return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
@@ -1250,8 +1260,14 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
             try:
                 path = await asyncio.to_thread(_fetch_tts, text, vid)
                 entry.audio_path = path
-                # Save to phrase cache for next time
-                await asyncio.to_thread(_phrase_cache_put, text, vid, path)
+                if cacheable_effective:
+                    await asyncio.to_thread(_phrase_cache_put, text, vid, path)
+                elif cacheable and not cacheable_effective:
+                    log.info(
+                        f"Cache write refused for {entry_id}: text length "
+                        f"{len(text)} > SPEAK_PHRASE_CACHE_MAX_TEXT_LEN "
+                        f"({PHRASE_CACHE_MAX_TEXT_LEN}). Likely context-specific."
+                    )
             except Exception as exc:
                 log.error(f"Background TTS fetch failed for {entry_id}: {exc}")
                 entry.fetch_failed = True
@@ -1520,6 +1536,50 @@ async def handle_cache_list(request: StarletteRequest) -> JSONResponse:
         "total_size_bytes": total_size,
         "max_bytes": PHRASE_CACHE_MAX_BYTES,
     })
+
+
+async def handle_cache_delete(request: StarletteRequest) -> JSONResponse:
+    key = request.path_params.get("key", "")
+    if not isinstance(key, str) or not key:
+        return JSONResponse({"error": "No key provided"}, status_code=400)
+    # Defend against path traversal — keys are SHA256 hex prefixes
+    if not all(c in "0123456789abcdef" for c in key) or len(key) > 64:
+        return JSONResponse({"error": "Invalid key format"}, status_code=400)
+
+    cache_path = PHRASE_CACHE_DIR / f"{key}.mp3"
+    sidecar_path = _phrase_cache_meta_path(key)
+    deleted = False
+    if cache_path.exists():
+        try:
+            cache_path.unlink()
+            deleted = True
+        except OSError as e:
+            return JSONResponse({"error": f"Could not delete: {e}"}, status_code=500)
+    if sidecar_path.exists():
+        try:
+            sidecar_path.unlink()
+        except OSError:
+            pass
+
+    if not deleted:
+        return JSONResponse({"error": "Cached phrase not found"}, status_code=404)
+    return JSONResponse({"deleted": True, "key": key})
+
+
+async def handle_cache_clear(request: StarletteRequest) -> JSONResponse:
+    """Wipe every cached phrase. Destructive — used to reset the canon."""
+    if not PHRASE_CACHE_DIR.exists():
+        return JSONResponse({"deleted": 0})
+    count = 0
+    for p in list(PHRASE_CACHE_DIR.iterdir()):
+        if p.is_file() and p.suffix in (".mp3", ".json"):
+            try:
+                p.unlink()
+                if p.suffix == ".mp3":
+                    count += 1
+            except OSError:
+                pass
+    return JSONResponse({"deleted": count})
 
 
 async def handle_cache_play(request: StarletteRequest) -> JSONResponse:
@@ -1845,6 +1905,8 @@ async def main():
         Route("/history", handle_history, methods=["GET"]),
         Route("/history/replay", handle_history_replay, methods=["POST"]),
         Route("/cache/phrases", handle_cache_list, methods=["GET"]),
+        Route("/cache/phrases/{key}", handle_cache_delete, methods=["DELETE"]),
+        Route("/cache/clear", handle_cache_clear, methods=["POST"]),
         Route("/cache/play", handle_cache_play, methods=["POST"]),
         Route("/events", handle_events, methods=["GET"]),
         Route("/voices", handle_voices, methods=["GET"]),

@@ -31,25 +31,27 @@ TEXT=""
 VOICE=""
 CHANNEL=""
 PRIORITY=false
+CACHEABLE=false
 ACTION=""
 LIMIT=50
 REPLAY_ID=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --voice)    VOICE="$2"; shift 2 ;;
-    --channel)  CHANNEL="$2"; shift 2 ;;
-    --priority) PRIORITY=true; shift ;;
-    --status)   ACTION="status"; shift ;;
-    --skip)     ACTION="skip"; shift ;;
-    --clear)    ACTION="clear"; shift ;;
-    --pause)    ACTION="pause"; shift ;;
-    --resume)   ACTION="resume"; shift ;;
-    --history)  ACTION="history"; shift ;;
-    --limit)    LIMIT="$2"; shift 2 ;;
-    --replay)   ACTION="replay"; REPLAY_ID="$2"; shift 2 ;;
-    -*)         echo "Unknown option: $1" >&2; exit 1 ;;
-    *)          TEXT="$1"; shift ;;
+    --voice)     VOICE="$2"; shift 2 ;;
+    --channel)   CHANNEL="$2"; shift 2 ;;
+    --priority)  PRIORITY=true; shift ;;
+    --cacheable) CACHEABLE=true; shift ;;
+    --status)    ACTION="status"; shift ;;
+    --skip)      ACTION="skip"; shift ;;
+    --clear)     ACTION="clear"; shift ;;
+    --pause)     ACTION="pause"; shift ;;
+    --resume)    ACTION="resume"; shift ;;
+    --history)   ACTION="history"; shift ;;
+    --limit)     LIMIT="$2"; shift 2 ;;
+    --replay)    ACTION="replay"; REPLAY_ID="$2"; shift 2 ;;
+    -*)          echo "Unknown option: $1" >&2; exit 1 ;;
+    *)           TEXT="$1"; shift ;;
   esac
 done
 
@@ -95,9 +97,13 @@ case "${ACTION:-speak}" in
     ;;
   speak)
     [[ -z "$TEXT" ]] && {
-      echo "Usage: say.sh \"text\" [--voice NAME] [--channel CH] [--priority]" >&2
+      echo "Usage: say.sh \"text\" [--voice NAME] [--channel CH] [--priority] [--cacheable]" >&2
       echo "       say.sh --status | --skip | --clear | --pause | --resume" >&2
       echo "       say.sh --history [--limit N] | --replay ID" >&2
+      echo "" >&2
+      echo "Add --cacheable ONLY for canonical generic phrases" >&2
+      echo "(\"Pushed.\", \"Sorted Sir.\", \"Tests passing.\")." >&2
+      echo "Context-specific lines should never be cached." >&2
       exit 1
     }
 
@@ -117,8 +123,9 @@ d = {'text': sys.argv[1]}
 if sys.argv[2]: d['voice'] = sys.argv[2]
 if sys.argv[3]: d['channel'] = sys.argv[3]
 if sys.argv[4] == 'true': d['priority'] = True
+if sys.argv[5] == 'true': d['cacheable'] = True
 print(json.dumps(d))
-" "$TEXT" "$VOICE" "$CHANNEL" "$PRIORITY")
+" "$TEXT" "$VOICE" "$CHANNEL" "$PRIORITY" "$CACHEABLE")
 
     curl -sf -X POST -H "Content-Type: application/json" -d "$BODY" "$DAEMON/speak"
     ;;

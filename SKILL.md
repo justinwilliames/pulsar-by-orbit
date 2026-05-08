@@ -112,25 +112,20 @@ Tags direct voice *acting*, not audio *production*. Think stage directions.
 
 ## Voice Roster
 
-Default voice is **Caldwell**. Dashboard: `http://127.0.0.1:7865`
+**Caldwell only.** No supporting cast in this setup.
 
 | Voice | Style |
 |-------|-------|
 | **Caldwell** | Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives |
-| Rachel | Calm, clear, professional female |
-| Adam | Deep, warm, authoritative male |
-| Antoni | Friendly, conversational male |
-| Josh | Deep, resonant, confident male |
-| Bella | Soft, warm, approachable female |
-| Charlotte | Warm, slightly accented female |
-| Elli | Young, energetic female |
-| Dorothy | Clear, pleasant, steady female |
+
+If you need other voices (e.g. for multi-agent setups), pass `--voice <Name>` and the daemon will resolve the name against your ElevenLabs VoiceLab via API. Voices not in `voices.json` won't have a portrait or dashboard tile, but they'll still play through the queue.
+
+Dashboard: `http://127.0.0.1:7865`
 
 ## Dashboard
 
 The dashboard at `http://127.0.0.1:7865` shows:
 - **Caldwell's portrait** ping-ponging through 4 panels while he speaks (1→2→3→4→3→2→...).
-- **Other voices** with envelope-driven mouth animation during playback.
 - **Transport bar** — pause/resume (Space), skip (Right arrow), settings (gear icon).
 - **Audio scrubber** — progress bar, drag to seek.
 - **Queue panel** — upcoming items, per-channel pause toggles.
@@ -138,13 +133,11 @@ The dashboard at `http://127.0.0.1:7865` shows:
 
 ## Team Voice Assignment (multi-agent setups)
 
-When spawning a team, lead is Caldwell, teammates get other voices:
+This setup is Caldwell-only on the dashboard. If you spawn a team and need teammates with distinguishable voices, pass `--voice <Name>` to `say.sh` — the daemon falls back to ElevenLabs API resolution for any voice name not in `voices.json`. Teammate voices won't have portraits or dashboard tiles but will play through the shared queue.
 
 ```
 Your voice is <Name>. When speaking, use: {base}/scripts/say.sh "message" --voice <Name>
-Speak only at end of substantive work — see the credit-conscious rules in the parent SKILL.md.
+Speak only at end of substantive work — see the credit-conscious rules above.
 ```
 
-- **Lead** uses Caldwell (default).
-- Match voice to role when it fits (Adam for serious infra, Elli for exploration).
-- Use `--channel <agent-name>` per teammate for dashboard filtering.
+Use `--channel <agent-name>` per teammate so the dashboard can filter their queue/history items even without a tile.

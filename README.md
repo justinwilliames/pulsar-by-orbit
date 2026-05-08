@@ -178,7 +178,7 @@ Two recognised keys: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`.
 
 ### `voices.json`
 
-Ships with Caldwell as default + 8 supporting voices. Add your own:
+Ships **Caldwell-only**. The dashboard shows just him; no supporting cast. Add your own voices if you need them:
 
 ```json
 {
@@ -189,7 +189,7 @@ Ships with Caldwell as default + 8 supporting voices. Add your own:
 }
 ```
 
-The daemon also falls back to the ElevenLabs API for voice names not in `voices.json`.
+The daemon also falls back to the ElevenLabs API for voice names not in `voices.json` — so multi-agent setups can call `--voice Adam` even without an explicit entry. Names without a `voices.json` entry won't have a portrait or dashboard tile but will play through the queue.
 
 > **Note:** The shipped Caldwell entry uses ElevenLabs' "George" voice ID as a placeholder — British, RP, mature. Right register; not necessarily the final pick. Replace via the dashboard Settings panel once you've chosen your Caldwell voice from the [Voice Library](https://elevenlabs.io/app/voice-library) — look for older British male, butler-leaning, RP or Estuary, capable of carrying expletives without breaking composure.
 

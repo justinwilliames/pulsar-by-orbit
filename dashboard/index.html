@@ -1477,6 +1477,14 @@ function buildGrid(voices) {
 
   VOICES = teamVoices;
 
+  // Hide TEAM section entirely when there are no team voices (Caldwell-only setup)
+  var divider = document.querySelector('.divider');
+  var teamLabel = document.querySelector('.team-label');
+  var hide = teamVoices.length === 0;
+  if (divider) divider.style.display = hide ? 'none' : '';
+  if (teamLabel) teamLabel.style.display = hide ? 'none' : '';
+  if (grid) grid.style.display = hide ? 'none' : '';
+
   teamVoices.forEach(function(v) {
     var tile = document.createElement('div');
     tile.className = 'tile';

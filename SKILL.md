@@ -8,21 +8,36 @@ allowed-tools: Bash, Read
 
 > Paths below use `{base}` as shorthand for this skill's base directory, provided automatically when the skill loads. Build full paths from `{base}`; do NOT rely on environment variables.
 
-## Session setup — two HTTP calls, once per session
+## Session setup — three HTTP calls, once per session
 
-Before the first spoken line of a session, run these two `curl` calls and remember the answers:
+Before the first spoken line of a session, run these three `curl` calls and remember the answers:
 
 ```bash
 # 1. Check the persona mode (Polite vs Potty Mouth)
 curl -s http://127.0.0.1:7865/settings | python3 -c 'import sys,json;d=json.load(sys.stdin);print("expletives_enabled:", d.get("expletives_enabled"))'
 
-# 2. Pull the popular cached phrases — you can recycle these for free
+# 2. Pull the popular cached phrases — recycle these for free
 curl -s 'http://127.0.0.1:7865/cache/phrases?sort=popular&limit=30' | python3 -c 'import sys,json;d=json.load(sys.stdin);
 for p in d["phrases"][:20]:
   if p["text"]: print(f"  ×{p[\"play_count\"]:>3} [{p[\"key\"][:8]}] {p[\"text\"]}")'
+
+# 3. Check ElevenLabs monthly run rate
+curl -s http://127.0.0.1:7865/usage | python3 -c 'import sys,json;d=json.load(sys.stdin).get("elevenlabs") or {};
+print(f"  tier: {d.get(\"tier\")}, used: {d.get(\"character_count\")}/{d.get(\"character_limit\")} ({d.get(\"percent_used\")}%), status: {d.get(\"run_rate_status\")}")'
 ```
 
-Use the persona flag to pick register (see "Persona modes" below). Use the popular-phrases list as your first port of call when composing — if a cached phrase fits the moment, recycle it verbatim. If you hit /settings or /cache/phrases failures, default to Potty Mouth and proceed without the canon — don't block on the lookup.
+Use the persona flag to pick register (see "Persona modes" below). Use the popular-phrases list as your first port of call when composing — if a cached phrase fits the moment, recycle it verbatim.
+
+**On the run-rate check (call 3): if `run_rate_status` is `warning` or worse, fire a Tier 3 line at the start of the session flagging it.** Examples:
+
+- watch (early signal): no spoken warning needed; just be cache-disciplined for the session.
+- warning: "Sir, ElevenLabs allowance is at X% with Y days to reset — bit of a fuckin' overspend. Worth tightening the daily cap or leaning on cached canon for the rest of the month."
+- critical: "Sir, you're at X% of the monthly ElevenLabs allowance, Y days to go. We're properly on track to blow the budget. Recommend either bumping to Starter at five quid a month or me staying mostly cached."
+- exhausted: "Sir, the monthly ElevenLabs allowance is gone. Anything I say now will fail unless it hits cache. Until reset on [date], you'll only hear cached canon."
+
+Don't fire this warning more than once per session. If `run_rate_status` is `ok` or `watch`, no announcement — just compose normally.
+
+If any of the three setup calls fail (network, daemon down, etc.), default to Potty Mouth, proceed without the canon, and skip the run-rate warning. Don't block on the lookup.
 
 ## Persona modes — Polite vs Potty Mouth
 

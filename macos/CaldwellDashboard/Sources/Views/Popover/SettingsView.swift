@@ -224,8 +224,69 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var usageSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            elevenLabsSection
+            dailyUsageSection
+        }
+    }
+
+    @ViewBuilder
+    private var elevenLabsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("USAGE TODAY")
+            Text("ELEVENLABS — MONTHLY")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            if let eleven = viewModel.usage?.elevenlabs {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(eleven.tierDisplay)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .glassEffect(.regular.tint(.accentColor), in: Capsule())
+                    Spacer()
+                    runRateBadge(eleven)
+                }
+
+                MonthlyUsageBar(
+                    used: eleven.characterCount,
+                    limit: eleven.characterLimit,
+                    expectedPct: eleven.expectedUsagePct,
+                    status: eleven.status
+                )
+
+                HStack {
+                    Text(monthlySummary(eleven))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(resetCountdown(eleven))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+
+                if let advice = runRateAdvice(eleven) {
+                    Text(advice)
+                        .font(.caption2)
+                        .foregroundStyle(adviceColour(for: eleven.status))
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(adviceColour(for: eleven.status).opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            } else {
+                Text("Loading subscription…")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dailyUsageSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DAEMON CAPS — TODAY")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .tracking(0.5)
@@ -246,7 +307,7 @@ struct SettingsView: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
-                Text("Resets daily at midnight local time.")
+                Text("Daily caps reset at local midnight.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else {
@@ -254,6 +315,68 @@ struct SettingsView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    private func runRateBadge(_ eleven: ElevenLabsUsage) -> some View {
+        let (label, colour) = runRateLabel(for: eleven.status)
+        return Text(label)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .glassEffect(.regular.tint(colour), in: Capsule())
+    }
+
+    private func runRateLabel(for status: ElevenLabsUsage.Status) -> (String, Color) {
+        switch status {
+        case .ok:        return ("On pace", .green)
+        case .watch:     return ("Watch", .yellow)
+        case .warning:   return ("Warning", .orange)
+        case .critical:  return ("Critical", .red)
+        case .exhausted: return ("Exhausted", .red)
+        case .unknown:   return ("—", .gray)
+        }
+    }
+
+    private func adviceColour(for status: ElevenLabsUsage.Status) -> Color {
+        switch status {
+        case .ok:        return .green
+        case .watch:     return .yellow
+        case .warning:   return .orange
+        case .critical:  return .red
+        case .exhausted: return .red
+        case .unknown:   return .gray
+        }
+    }
+
+    private func monthlySummary(_ eleven: ElevenLabsUsage) -> String {
+        let used = eleven.characterCount.formatted()
+        let limit = eleven.characterLimit.formatted()
+        return "\(used) / \(limit) chars · \(String(format: "%.0f", eleven.percentUsed))%"
+    }
+
+    private func resetCountdown(_ eleven: ElevenLabsUsage) -> String {
+        let days = eleven.daysUntilReset
+        if days < 1 {
+            return "resets <1 day"
+        }
+        return "resets in \(Int(days)) day\(Int(days) == 1 ? "" : "s")"
+    }
+
+    private func runRateAdvice(_ eleven: ElevenLabsUsage) -> String? {
+        switch eleven.status {
+        case .ok:
+            return nil
+        case .watch:
+            return String(format: "On track — currently using %.1f× expected pace. Worth keeping an eye on.", eleven.runRateRatio)
+        case .warning:
+            return String(format: "Trending high — %.1f× expected pace. At this rate the monthly tier exhausts before reset.", eleven.runRateRatio)
+        case .critical:
+            return String(format: "Heavy usage — %.1f× expected pace. Consider tightening the daemon's daily cap, leaning harder on cached canon, or upgrading the ElevenLabs tier.", eleven.runRateRatio)
+        case .exhausted:
+            return "Monthly allowance exhausted. New compositions will fail until reset; cached phrases still play free."
+        case .unknown:
+            return nil
         }
     }
 
@@ -296,6 +419,50 @@ struct SettingsView: View {
             statusMessage = error
             statusKind = .error
         }
+    }
+}
+
+// MARK: - Monthly Usage Bar (with expected-pace marker)
+
+private struct MonthlyUsageBar: View {
+    let used: Int
+    let limit: Int
+    let expectedPct: Double
+    let status: ElevenLabsUsage.Status
+
+    private var fraction: Double {
+        limit > 0 ? min(Double(used) / Double(limit), 1.0) : 0
+    }
+
+    private var tint: Color {
+        switch status {
+        case .ok:        return .green
+        case .watch:     return .yellow
+        case .warning:   return .orange
+        case .critical:  return .red
+        case .exhausted: return .red
+        case .unknown:   return .accentColor
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.gray.opacity(0.18))
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(tint.gradient)
+                    .frame(width: geo.size.width * CGFloat(fraction))
+                // Expected-pace marker — vertical bar where Sir SHOULD be at this point
+                if expectedPct > 0 && expectedPct < 100 {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.45))
+                        .frame(width: 1.5, height: 12)
+                        .offset(x: geo.size.width * CGFloat(min(expectedPct / 100.0, 1.0)) - 0.75)
+                }
+            }
+        }
+        .frame(height: 8)
     }
 }
 

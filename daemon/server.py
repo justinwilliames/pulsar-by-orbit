@@ -561,6 +561,114 @@ QUOTA = QuotaTracker()
 
 _api_voices_cache: dict[str, str] | None = None
 
+# ElevenLabs subscription cache — pulled from /v1/user, TTL 5 min.
+# Source of truth for tier name + monthly character allowance + actual
+# usage counter (ElevenLabs tracks it server-side; we just read it).
+_eleven_subscription_cache: dict | None = None
+_eleven_subscription_cache_at: float = 0.0
+ELEVEN_SUBSCRIPTION_CACHE_TTL = 300  # seconds
+
+
+def _fetch_elevenlabs_subscription() -> dict | None:
+    """Blocking — must be run via asyncio.to_thread. Returns dict with
+    tier, character_count, character_limit, next_reset_unix, fetched_at,
+    or None on failure (network, no API key, parse error)."""
+    global _eleven_subscription_cache, _eleven_subscription_cache_at
+
+    now = time.time()
+    if _eleven_subscription_cache and (now - _eleven_subscription_cache_at) < ELEVEN_SUBSCRIPTION_CACHE_TTL:
+        return _eleven_subscription_cache
+
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    if not api_key:
+        return None
+
+    try:
+        req = Request(f"{API_BASE}/user", headers={"xi-api-key": api_key})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except (HTTPError, URLError, json.JSONDecodeError, OSError) as e:
+        log.warning(f"Could not fetch ElevenLabs subscription: {e}")
+        return None
+
+    subscription = data.get("subscription", {}) if isinstance(data, dict) else {}
+    if not isinstance(subscription, dict):
+        return None
+
+    result = {
+        "tier": str(subscription.get("tier", "unknown")),
+        "character_count": int(subscription.get("character_count", 0) or 0),
+        "character_limit": int(subscription.get("character_limit", 0) or 0),
+        "next_reset_unix": int(subscription.get("next_character_count_reset_unix", 0) or 0),
+        "fetched_at": now,
+    }
+    _eleven_subscription_cache = result
+    _eleven_subscription_cache_at = now
+    return result
+
+
+def _compute_run_rate(subscription: dict) -> dict:
+    """Add derived run-rate fields to a subscription dict.
+
+    Status thresholds (vs expected linear pace through billing period):
+      ok       — under 1.0× expected (on or below pace)
+      watch    — 1.0-1.2× expected
+      warning  — 1.2-1.5× expected
+      critical — 1.5×+ expected
+      exhausted — at or over 100% of monthly limit
+    """
+    limit = subscription.get("character_limit", 0) or 0
+    used = subscription.get("character_count", 0) or 0
+    next_reset = subscription.get("next_reset_unix", 0) or 0
+
+    percent_used = (used / limit * 100.0) if limit > 0 else 0.0
+
+    now = time.time()
+    seconds_left = max(0.0, next_reset - now) if next_reset > 0 else 0.0
+    days_until_reset = seconds_left / 86400.0
+
+    # Approximate billing period as 30 days for the run-rate calculation.
+    BILLING_PERIOD_DAYS = 30.0
+    days_elapsed = max(0.0, BILLING_PERIOD_DAYS - days_until_reset)
+    expected_pct = (days_elapsed / BILLING_PERIOD_DAYS * 100.0) if BILLING_PERIOD_DAYS > 0 else 0.0
+    run_rate_ratio = (percent_used / expected_pct) if expected_pct > 0 else 0.0
+
+    # Status logic depends on where in the billing period we are.
+    # In the first 3 days, days_elapsed is too small for the ratio to be
+    # meaningful (any usage produces a misleadingly high number). Fall
+    # back to absolute-percent thresholds during this window.
+    if percent_used >= 100.0:
+        status = "exhausted"
+    elif days_elapsed < 3.0:
+        # Early-period: judge by absolute usage, not run-rate
+        if percent_used >= 50.0:
+            status = "critical"
+        elif percent_used >= 25.0:
+            status = "warning"
+        elif percent_used >= 15.0:
+            status = "watch"
+        else:
+            status = "ok"
+    else:
+        # Normal run-rate-based status
+        if run_rate_ratio >= 1.5:
+            status = "critical"
+        elif run_rate_ratio >= 1.2:
+            status = "warning"
+        elif run_rate_ratio >= 1.0:
+            status = "watch"
+        else:
+            status = "ok"
+
+    return {
+        **subscription,
+        "percent_used": round(percent_used, 1),
+        "days_until_reset": round(days_until_reset, 1),
+        "expected_usage_pct": round(expected_pct, 1),
+        "run_rate_ratio": round(run_rate_ratio, 2),
+        "run_rate_status": status,
+    }
+
 
 def _fetch_voices_from_api() -> dict[str, str]:
     """Blocking call — must be run via asyncio.to_thread from async context."""
@@ -1834,7 +1942,11 @@ async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
 
 
 async def handle_usage(request: StarletteRequest) -> JSONResponse:
-    return JSONResponse(QUOTA.status())
+    base = QUOTA.status()
+    subscription = await asyncio.to_thread(_fetch_elevenlabs_subscription)
+    if subscription:
+        base["elevenlabs"] = _compute_run_rate(subscription)
+    return JSONResponse(base)
 
 
 async def handle_voices(request: StarletteRequest) -> JSONResponse:

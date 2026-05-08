@@ -23,6 +23,7 @@ struct DaemonUsage: Codable, Sendable {
     let dailyCap: Int
     let dailyDate: String
     let limitsActive: Bool
+    let elevenlabs: ElevenLabsUsage?
 
     enum CodingKeys: String, CodingKey {
         case minuteCalls = "minute_calls"
@@ -31,6 +32,45 @@ struct DaemonUsage: Codable, Sendable {
         case dailyCap = "daily_cap"
         case dailyDate = "daily_date"
         case limitsActive = "limits_active"
+        case elevenlabs
+    }
+}
+
+struct ElevenLabsUsage: Codable, Sendable {
+    let tier: String
+    let characterCount: Int
+    let characterLimit: Int
+    let nextResetUnix: Int
+    let fetchedAt: Double
+    let percentUsed: Double
+    let daysUntilReset: Double
+    let expectedUsagePct: Double
+    let runRateRatio: Double
+    let runRateStatus: String
+
+    enum CodingKeys: String, CodingKey {
+        case tier
+        case characterCount = "character_count"
+        case characterLimit = "character_limit"
+        case nextResetUnix = "next_reset_unix"
+        case fetchedAt = "fetched_at"
+        case percentUsed = "percent_used"
+        case daysUntilReset = "days_until_reset"
+        case expectedUsagePct = "expected_usage_pct"
+        case runRateRatio = "run_rate_ratio"
+        case runRateStatus = "run_rate_status"
+    }
+
+    enum Status: String {
+        case ok, watch, warning, critical, exhausted, unknown
+    }
+
+    var status: Status {
+        Status(rawValue: runRateStatus) ?? .unknown
+    }
+
+    var tierDisplay: String {
+        tier.prefix(1).uppercased() + tier.dropFirst().lowercased()
     }
 }
 

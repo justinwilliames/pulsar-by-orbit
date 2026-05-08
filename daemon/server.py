@@ -32,6 +32,7 @@ Endpoints:
 
 import asyncio
 import collections
+import hashlib
 import json
 import logging
 import os
@@ -275,6 +276,70 @@ def _voice_settings() -> dict:
         "style": VOICE_STYLE,
         "use_speaker_boost": VOICE_SPEAKER_BOOST,
     }
+
+
+# --- Phrase cache ---
+# Content-addressed cache of generated MP3s keyed by (text, voice_id, voice_settings).
+# Repeated phrases like "On it Sir." replay from local disk — zero ElevenLabs credits.
+PHRASE_CACHE_DIR = CACHE_DIR / "phrases"
+PHRASE_CACHE_MAX_BYTES = int(os.environ.get("SPEAK_PHRASE_CACHE_MAX_BYTES", str(100 * 1024 * 1024)))
+
+
+def _phrase_cache_key(text: str, voice_id: str) -> str:
+    payload = json.dumps({
+        "text": text,
+        "voice_id": voice_id,
+        "voice_settings": _voice_settings(),
+        "model": DEFAULT_MODEL,
+    }, sort_keys=True).encode()
+    return hashlib.sha256(payload).hexdigest()[:32]
+
+
+def _phrase_cache_get(text: str, voice_id: str) -> str | None:
+    key = _phrase_cache_key(text, voice_id)
+    path = PHRASE_CACHE_DIR / f"{key}.mp3"
+    if path.exists():
+        try:
+            os.utime(path, None)  # touch atime for LRU
+        except OSError:
+            pass
+        return str(path)
+    return None
+
+
+def _phrase_cache_put(text: str, voice_id: str, source_path: str):
+    key = _phrase_cache_key(text, voice_id)
+    path = PHRASE_CACHE_DIR / f"{key}.mp3"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, str(path))
+    except OSError as e:
+        log.warning(f"Phrase cache put failed: {e}")
+
+
+def _prune_phrase_cache():
+    if not PHRASE_CACHE_DIR.exists():
+        return
+    files: list = []
+    total = 0
+    for p2 in PHRASE_CACHE_DIR.iterdir():
+        if p2.is_file():
+            try:
+                stat = p2.stat()
+                files.append((stat.st_atime, stat.st_size, p2))
+                total += stat.st_size
+            except OSError:
+                pass
+    if total <= PHRASE_CACHE_MAX_BYTES:
+        return
+    files.sort()
+    while total > PHRASE_CACHE_MAX_BYTES and files:
+        _, size, p2 = files.pop(0)
+        try:
+            p2.unlink()
+            total -= size
+        except OSError:
+            pass
 
 
 def _load_voices() -> tuple[dict[str, str], dict[str, str]]:
@@ -1044,21 +1109,35 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     if not vid:
         return JSONResponse({"error": "No voice specified and ELEVENLABS_VOICE_ID not set"}, status_code=400)
 
-    # Spend cap check — refuses BEFORE hitting ElevenLabs (no credits spent)
-    ok, err = QUOTA.check(len(text))
-    if not ok:
-        log.warning(f"Quota refused: {err}")
-        await request.app.state.broadcaster.send("quota_blocked", {
-            "reason": err,
-            **QUOTA.status(),
-        })
-        return JSONResponse({"error": err, "quota": QUOTA.status()}, status_code=429)
-    QUOTA.increment(len(text))
+    # Phrase cache check — repeated phrases replay free (no API call, no quota cost)
+    cache_hit_path = await asyncio.to_thread(_phrase_cache_get, text, vid)
+
+    # Spend cap check — only enforced on cache miss (cache hits don't hit ElevenLabs)
+    if cache_hit_path is None:
+        ok, err = QUOTA.check(len(text))
+        if not ok:
+            log.warning(f"Quota refused: {err}")
+            await request.app.state.broadcaster.send("quota_blocked", {
+                "reason": err,
+                **QUOTA.status(),
+            })
+            return JSONResponse({"error": err, "quota": QUOTA.status()}, status_code=429)
+        QUOTA.increment(len(text))
 
     entry_id = uuid.uuid4().hex[:8]
+
+    # Cache hit: copy MP3 to a temp file so worker cleanup doesn't delete the cache entry
+    audio_path = ""
+    if cache_hit_path:
+        fd_c, tmp_c = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=".mp3")
+        with os.fdopen(fd_c, "wb") as fc:
+            fc.write(Path(cache_hit_path).read_bytes())
+        audio_path = tmp_c
+        log.info(f"Phrase cache HIT for {entry_id}")
+
     entry = QueueEntry(
         id=entry_id,
-        audio_path="",
+        audio_path=audio_path,
         text_preview=text[:100],
         voice_label=voice_label(vid),
         created_at=time.time(),
@@ -1068,17 +1147,20 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     )
     pos = queue.enqueue(entry)
 
-    async def _fetch_bg():
-        try:
-            path = await asyncio.to_thread(_fetch_tts, text, vid)
-            entry.audio_path = path
-        except Exception as exc:
-            log.error(f"Background TTS fetch failed for {entry_id}: {exc}")
-            entry.fetch_failed = True
-        finally:
-            entry.ready.set()
+    if cache_hit_path is None:
+        async def _fetch_bg():
+            try:
+                path = await asyncio.to_thread(_fetch_tts, text, vid)
+                entry.audio_path = path
+                # Save to phrase cache for next time
+                await asyncio.to_thread(_phrase_cache_put, text, vid, path)
+            except Exception as exc:
+                log.error(f"Background TTS fetch failed for {entry_id}: {exc}")
+                entry.fetch_failed = True
+            finally:
+                entry.ready.set()
 
-    asyncio.create_task(_fetch_bg())
+        asyncio.create_task(_fetch_bg())
 
     return JSONResponse({
         "id": entry.id,
@@ -1561,6 +1643,7 @@ async def main():
             await asyncio.sleep(3600)
             try:
                 await asyncio.to_thread(_clean_old_cache, CACHE_DIR)
+                await asyncio.to_thread(_prune_phrase_cache)
             except Exception as e:
                 log.warning(f"Cache cleanup error: {e}")
 

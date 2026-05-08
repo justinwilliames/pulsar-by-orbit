@@ -220,7 +220,11 @@ The `--voice` and `--channel` flags exist in the daemon but are intentionally un
 
 ## Minimising ElevenLabs free-tier credit use
 
-ElevenLabs charges per character of text-to-speech. Strategies:
+ElevenLabs charges per character of text-to-speech.
+
+The biggest lever is the **phrase cache** — repeated phrases (e.g. "On it Sir.", "Pushed.", "Tests passing.") are stored locally as MP3s, keyed by exact text + voice + voice_settings. The second-and-onwards instance replays from cache: **zero credits, zero rate-limit impact, instant playback**. Lean into a small canonical Tier 1 phrase set (defined in `SKILL.md`) to maximise reuse. Cache at `cache/phrases/{hash}.mp3`, capped at 100 MB by default (`SPEAK_PHRASE_CACHE_MAX_BYTES`), LRU-pruned hourly.
+
+Other strategies:
 
 1. **Hard spend cap (built-in).** The daemon refuses requests beyond `SPEAK_RATE_LIMIT_PER_MIN` (default 20) or `SPEAK_DAILY_CHAR_CAP` (default 2000) — without hitting ElevenLabs. Caldwell silently drops the line; the dashboard shows a toast. Tune via env vars or set to `0` to disable.
 2. **The shipped `SKILL.md` enforces credit-conscious rules** — Caldwell speaks only on substantive completions / blockers / high-stakes status, capped at one short sentence. Adjust the rules in `SKILL.md` if you want him quieter or chattier.

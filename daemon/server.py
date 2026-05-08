@@ -257,6 +257,25 @@ RATE_LIMIT_PER_MIN = int(os.environ.get("SPEAK_RATE_LIMIT_PER_MIN", "20"))
 DAILY_CHAR_CAP = int(os.environ.get("SPEAK_DAILY_CHAR_CAP", "2000"))
 USAGE_LOG_PATH = REPO_ROOT / "logs" / "usage.json"
 
+# Voice generation settings — applied to every TTS request.
+# Tuned for Caldwell (Alfred-with-trucker-mouth): low-medium stability for
+# expressive variation across formal/blunt/dry registers; medium-high
+# similarity to lock to the source voice; medium style to lean into the
+# character; speaker boost on for clarity.
+VOICE_STABILITY = float(os.environ.get("SPEAK_VOICE_STABILITY", "0.35"))
+VOICE_SIMILARITY_BOOST = float(os.environ.get("SPEAK_VOICE_SIMILARITY_BOOST", "0.75"))
+VOICE_STYLE = float(os.environ.get("SPEAK_VOICE_STYLE", "0.50"))
+VOICE_SPEAKER_BOOST = os.environ.get("SPEAK_VOICE_SPEAKER_BOOST", "1").lower() not in ("0", "false", "no", "")
+
+
+def _voice_settings() -> dict:
+    return {
+        "stability": VOICE_STABILITY,
+        "similarity_boost": VOICE_SIMILARITY_BOOST,
+        "style": VOICE_STYLE,
+        "use_speaker_boost": VOICE_SPEAKER_BOOST,
+    }
+
 
 def _load_voices() -> tuple[dict[str, str], dict[str, str]]:
     voices_path = REPO_ROOT / "voices.json"
@@ -524,7 +543,11 @@ def _validate_mp3(data: bytes) -> bool:
 
 def _fetch_tts(text: str, voice_id: str, retries: int = 2) -> str:
     url = f"{API_BASE}/text-to-speech/{voice_id}?output_format={DEFAULT_FORMAT}"
-    payload = json.dumps({"text": text, "model_id": DEFAULT_MODEL}).encode()
+    payload = json.dumps({
+        "text": text,
+        "model_id": DEFAULT_MODEL,
+        "voice_settings": _voice_settings(),
+    }).encode()
     for attempt in range(1 + retries):
         req = Request(url, data=payload, headers={
             "xi-api-key": _api_key(),

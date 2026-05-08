@@ -59,6 +59,32 @@ struct DaemonAPI: Sendable {
         return try JSONDecoder().decode([Voice].self, from: data)
     }
 
+    // MARK: - Settings & Usage
+
+    func fetchSettings() async throws -> DaemonSettings {
+        let (data, _) = try await URLSession.shared.data(from: baseURL.appendingPathComponent("settings"))
+        return try JSONDecoder().decode(DaemonSettings.self, from: data)
+    }
+
+    func fetchUsage() async throws -> DaemonUsage {
+        let (data, _) = try await URLSession.shared.data(from: baseURL.appendingPathComponent("usage"))
+        return try JSONDecoder().decode(DaemonUsage.self, from: data)
+    }
+
+    func saveSettings(apiKey: String?, voiceId: String?) async throws -> SettingsSaveResponse {
+        var body: [String: Any] = [:]
+        if let apiKey { body["api_key"] = apiKey }
+        if let voiceId { body["voice_id"] = voiceId }
+
+        var request = URLRequest(url: baseURL.appendingPathComponent("settings"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return try JSONDecoder().decode(SettingsSaveResponse.self, from: data)
+    }
+
     // MARK: - Queue Status
 
     func fetchQueueStatus(channel: String? = nil) async throws -> QueueStatusResponse {

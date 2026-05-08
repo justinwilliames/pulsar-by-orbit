@@ -12,6 +12,8 @@ final class DashboardViewModel {
     var voices: [Voice] = []
     var queueItems: [QueueItem] = []
     var historyEntries: [HistoryEntry] = []
+    var settings: DaemonSettings?
+    var usage: DaemonUsage?
 
     var onPlaybackChanged: ((Bool) -> Void)?
 
@@ -229,6 +231,35 @@ final class DashboardViewModel {
         guard voices.isEmpty else { return }
         if let fetched = try? await api.fetchVoices() {
             voices = fetched
+        }
+    }
+
+    // MARK: - Settings + Usage
+
+    enum SaveResult {
+        case success(VoiceMetadata?)
+        case failure(String)
+    }
+
+    func loadSettings() async {
+        settings = try? await api.fetchSettings()
+    }
+
+    func loadUsage() async {
+        usage = try? await api.fetchUsage()
+    }
+
+    func saveSettings(apiKey: String?, voiceId: String?) async -> SaveResult {
+        do {
+            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId)
+            if let error = response.error {
+                return .failure(error)
+            }
+            await loadSettings()
+            await loadUsage()
+            return .success(response.voiceMeta)
+        } catch {
+            return .failure("Network error: \(error.localizedDescription)")
         }
     }
 }

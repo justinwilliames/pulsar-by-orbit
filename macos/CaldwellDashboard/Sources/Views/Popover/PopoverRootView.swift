@@ -5,6 +5,7 @@ enum DashboardTab: String, CaseIterable {
     case queue = "Queue"
     case history = "History"
     case voices = "Voices"
+    case settings = "Settings"
 
     var icon: String {
         switch self {
@@ -12,6 +13,7 @@ enum DashboardTab: String, CaseIterable {
         case .queue: "list.bullet"
         case .history: "clock"
         case .voices: "person.2"
+        case .settings: "gear"
         }
     }
 
@@ -136,6 +138,8 @@ struct PopoverRootView: View {
             HistoryPanelView(viewModel: viewModel)
         case .voices:
             VoiceRosterView(viewModel: viewModel)
+        case .settings:
+            SettingsView(viewModel: viewModel)
         }
     }
 }

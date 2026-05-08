@@ -14,6 +14,10 @@ final class DashboardViewModel {
     var historyEntries: [HistoryEntry] = []
     var settings: DaemonSettings?
     var usage: DaemonUsage?
+    var cachedPhrases: [CachedPhrase] = []
+    var cacheTotalBytes: Int = 0
+    var cacheMaxBytes: Int = 0
+    var cacheSort: DaemonAPI.CacheSort = .recent
 
     var onPlaybackChanged: ((Bool) -> Void)?
 
@@ -225,6 +229,25 @@ final class DashboardViewModel {
         let offset = historyEntries.count
         guard let response = try? await api.fetchHistory(limit: 50, offset: offset) else { return }
         historyEntries.append(contentsOf: response.entries)
+    }
+
+    // MARK: - Phrase Cache
+
+    func loadCachedPhrases() async {
+        guard let response = try? await api.fetchCachedPhrases(sort: cacheSort) else { return }
+        cachedPhrases = response.phrases
+        cacheTotalBytes = response.totalSizeBytes
+        cacheMaxBytes = response.maxBytes
+    }
+
+    func setCacheSort(_ sort: DaemonAPI.CacheSort) async {
+        cacheSort = sort
+        await loadCachedPhrases()
+    }
+
+    func playCachedPhrase(key: String) async {
+        try? await api.playCachedPhrase(key: key)
+        await loadCachedPhrases()
     }
 
     private func loadVoices() async {

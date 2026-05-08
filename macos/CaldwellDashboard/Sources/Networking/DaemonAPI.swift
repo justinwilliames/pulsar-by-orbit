@@ -52,6 +52,27 @@ struct DaemonAPI: Sendable {
         return try JSONDecoder().decode(HistoryResponse.self, from: data)
     }
 
+    // MARK: - Phrase Cache
+
+    enum CacheSort: String {
+        case recent
+        case popular
+    }
+
+    func fetchCachedPhrases(sort: CacheSort = .recent, limit: Int = 200) async throws -> CachedPhrasesResponse {
+        var components = URLComponents(url: baseURL.appendingPathComponent("cache/phrases"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "sort", value: sort.rawValue),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+        ]
+        let (data, _) = try await URLSession.shared.data(from: components.url!)
+        return try JSONDecoder().decode(CachedPhrasesResponse.self, from: data)
+    }
+
+    func playCachedPhrase(key: String) async throws {
+        try await post("cache/play", body: ["key": key])
+    }
+
     // MARK: - Voices
 
     func fetchVoices() async throws -> [Voice] {

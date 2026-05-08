@@ -90,6 +90,46 @@ FFMPEG = (
 )
 
 
+CONFIG_PATH = REPO_ROOT / "config.json"
+CONFIG_KEYS = ("ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID")
+
+
+def _load_config_json():
+    """UI-managed config. Loaded before .env so it overrides dev defaults,
+    but real env vars still override config.json (setdefault semantics)."""
+    if not CONFIG_PATH.exists():
+        return
+    try:
+        data = json.loads(CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning(f"Failed to load config.json: {e}")
+        return
+    if not isinstance(data, dict):
+        return
+    for key in CONFIG_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            os.environ.setdefault(key, value)
+
+
+def _save_config_json(updates: dict[str, str]):
+    """Atomic write. Merges with existing config; only persists CONFIG_KEYS."""
+    existing: dict = {}
+    if CONFIG_PATH.exists():
+        try:
+            loaded = json.loads(CONFIG_PATH.read_text())
+            if isinstance(loaded, dict):
+                existing = loaded
+        except (json.JSONDecodeError, OSError):
+            pass
+    for key in CONFIG_KEYS:
+        if key in updates:
+            existing[key] = updates[key]
+    tmp = CONFIG_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(existing, indent=2) + "\n")
+    tmp.replace(CONFIG_PATH)
+
+
 def _load_dotenv():
     env_path = REPO_ROOT / ".env"
     if not env_path.exists():
@@ -104,7 +144,8 @@ def _load_dotenv():
         os.environ.setdefault(key, value)
 
 
-_load_dotenv()
+_load_config_json()  # UI-managed config wins over .env
+_load_dotenv()       # .env fills any gaps
 
 DASHBOARD_PORT = int(os.environ.get("SPEAK_PORT", "7865"))
 CACHE_DIR = Path(os.environ.get("SPEAK_CACHE_DIR", str(REPO_ROOT / "cache")))
@@ -1070,6 +1111,140 @@ async def handle_index(request: StarletteRequest) -> HTMLResponse:
     return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
 
 
+def _mask_api_key(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "•" * len(key)
+    return key[:4] + "•" * 8 + key[-4:]
+
+
+def _validate_api_key(key: str) -> tuple[bool, str]:
+    """Hit ElevenLabs /v1/user. Returns (ok, error_message)."""
+    try:
+        req = Request(f"{API_BASE}/user", headers={"xi-api-key": key})
+        with urlopen(req, timeout=10) as resp:
+            resp.read()
+        return True, ""
+    except HTTPError as e:
+        if e.code == 401:
+            return False, "API key rejected by ElevenLabs (401)"
+        return False, f"ElevenLabs returned HTTP {e.code}"
+    except URLError as e:
+        return False, f"Could not reach ElevenLabs: {e.reason}"
+    except Exception as e:
+        return False, f"Validation error: {e}"
+
+
+def _validate_voice_id(key: str, voice_id: str) -> tuple[bool, str, dict]:
+    """Hit /v1/voices/{voice_id}. Returns (ok, error_message, voice_metadata)."""
+    try:
+        req = Request(f"{API_BASE}/voices/{voice_id}", headers={"xi-api-key": key})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        return True, "", {
+            "name": data.get("name", ""),
+            "category": data.get("category", ""),
+            "labels": data.get("labels", {}),
+        }
+    except HTTPError as e:
+        if e.code == 404:
+            return False, "Voice not found in your ElevenLabs account", {}
+        if e.code == 401:
+            return False, "API key rejected when checking voice", {}
+        return False, f"ElevenLabs returned HTTP {e.code}", {}
+    except URLError as e:
+        return False, f"Could not reach ElevenLabs: {e.reason}", {}
+    except Exception as e:
+        return False, f"Validation error: {e}", {}
+
+
+async def handle_settings_get(request: StarletteRequest) -> JSONResponse:
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
+    return JSONResponse({
+        "api_key_set": bool(api_key),
+        "api_key_preview": _mask_api_key(api_key),
+        "voice_id": voice_id,
+        "voice_label": voice_label(voice_id) if voice_id else "",
+    })
+
+
+async def handle_settings_post(request: StarletteRequest) -> JSONResponse:
+    global _api_voices_cache
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "Expected JSON object"}, status_code=400)
+
+    raw_key = body.get("api_key")
+    raw_voice = body.get("voice_id")
+
+    if raw_key is not None and not isinstance(raw_key, str):
+        return JSONResponse({"error": "api_key must be a string"}, status_code=400)
+    if raw_voice is not None and not isinstance(raw_voice, str):
+        return JSONResponse({"error": "voice_id must be a string"}, status_code=400)
+
+    new_key = raw_key.strip() if isinstance(raw_key, str) else None
+    new_voice = raw_voice.strip() if isinstance(raw_voice, str) else None
+
+    if new_key is None and new_voice is None:
+        return JSONResponse({"error": "No fields to update"}, status_code=400)
+
+    # Determine the key to use for validating voice_id
+    effective_key = new_key if new_key else os.environ.get("ELEVENLABS_API_KEY", "")
+
+    updates: dict[str, str] = {}
+    voice_meta: dict = {}
+
+    if new_key:
+        ok, err = await asyncio.to_thread(_validate_api_key, new_key)
+        if not ok:
+            return JSONResponse({"error": err, "field": "api_key"}, status_code=400)
+        updates["ELEVENLABS_API_KEY"] = new_key
+
+    if new_voice is not None:
+        if new_voice == "":
+            updates["ELEVENLABS_VOICE_ID"] = ""
+        else:
+            if not effective_key:
+                return JSONResponse({
+                    "error": "Cannot validate voice ID without an API key",
+                    "field": "voice_id",
+                }, status_code=400)
+            ok, err, meta = await asyncio.to_thread(_validate_voice_id, effective_key, new_voice)
+            if not ok:
+                return JSONResponse({"error": err, "field": "voice_id"}, status_code=400)
+            updates["ELEVENLABS_VOICE_ID"] = new_voice
+            voice_meta = meta
+
+    try:
+        await asyncio.to_thread(_save_config_json, updates)
+    except OSError as e:
+        return JSONResponse({"error": f"Could not save config: {e}"}, status_code=500)
+
+    # Hot-reload: mutate os.environ so live requests pick up the new values
+    for k, v in updates.items():
+        if v:
+            os.environ[k] = v
+        else:
+            os.environ.pop(k, None)
+
+    # Invalidate cached API voice lookups (keyed off the old API key)
+    if "ELEVENLABS_API_KEY" in updates:
+        _api_voices_cache = None
+
+    return JSONResponse({
+        "saved": True,
+        "api_key_set": bool(os.environ.get("ELEVENLABS_API_KEY", "")),
+        "api_key_preview": _mask_api_key(os.environ.get("ELEVENLABS_API_KEY", "")),
+        "voice_id": os.environ.get("ELEVENLABS_VOICE_ID", ""),
+        "voice_meta": voice_meta,
+    })
+
+
 async def handle_voices(request: StarletteRequest) -> JSONResponse:
     voices_path = REPO_ROOT / "voices.json"
     if voices_path.exists():
@@ -1132,6 +1307,8 @@ async def main():
         Route("/history/replay", handle_history_replay, methods=["POST"]),
         Route("/events", handle_events, methods=["GET"]),
         Route("/voices", handle_voices, methods=["GET"]),
+        Route("/settings", handle_settings_get, methods=["GET"]),
+        Route("/settings", handle_settings_post, methods=["POST"]),
         Route("/health", handle_health, methods=["GET"]),
         Route("/", handle_index, methods=["GET"]),
         Route("/portraits/{name:path}", handle_portrait, methods=["GET"]),

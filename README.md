@@ -1,75 +1,63 @@
-# Speak — ElevenLabs TTS Skill for Claude Code
+# Caldwell
 
-Text-to-speech skill that gives Claude Code a voice. Includes a multi-voice audio daemon with queuing, a web dashboard with animated portraits, and a simple CLI.
+A voice for Claude Code. Cockney butler, expletives where natural, "Sir" by default — wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, and a multi-voice cast.
 
-## 🚀 5-Minute Quickstart
+Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is theirs, the persona is mine.
 
-**macOS users:** See **[docs/SETUP_MAC.md](docs/SETUP_MAC.md)** for detailed setup.
+---
+
+## What it does
+
+- **Speaks aloud** via the ElevenLabs API at the end of every Claude Code turn — voice is the primary completion alert.
+- **Queues across agents** — a single shared audio queue means multiple agents (or a chief-of-staff routine) never talk over each other.
+- **Dashboard at `http://127.0.0.1:7865`** — animated portrait with lip-sync, transport controls, queue + history panels, **settings panel for API key + voice ID**.
+- **CLI**: `./scripts/say.sh "Right then Sir"` from any terminal.
+
+---
+
+## 5-Minute Quickstart
+
+**macOS only** (uses `afplay` for playback). Detailed Mac setup: [docs/SETUP_MAC.md](docs/SETUP_MAC.md).
 
 ```bash
-# 1. Install dependencies
+# 1. Dependencies
 brew install ffmpeg
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Configure API key
-cp .env.example .env
-# Edit .env and add: ELEVENLABS_API_KEY=sk_your_key
-
-# 3. Start daemon
-unset SPEAK_PORT  # Prevent crash from empty env vars
+# 2. Clone + start daemon (no .env needed first time)
+git clone https://github.com/justinwilliames/caldwell-speak.git ~/code/caldwell-speak
+cd ~/code/caldwell-speak
 uv run daemon/server.py
 
-# 4. Test (in new terminal)
-./scripts/say.sh "Hello, world!"
-open http://127.0.0.1:7865  # Dashboard
+# 3. Open the dashboard, click the gear icon, paste your ElevenLabs API key
+#    and your voice ID. Save. That's it.
+open http://127.0.0.1:7865
+
+# 4. Test from another terminal
+./scripts/say.sh "Right then Sir, the daemon's up. Best we crack on."
 ```
 
-Dashboard at **http://127.0.0.1:7865**
+The dashboard's **Settings panel** (gear icon, transport-bar right) validates your inputs against ElevenLabs before saving and stores them in `config.json` (gitignored).
 
-## Quick Start
+If you'd rather configure via terminal, `cp .env.example .env` and edit it — same effect.
 
-```bash
-# Clone
-git clone <your-repo-url> speak
-cd speak
-
-# Configure
-cp .env.example .env
-# Edit .env — add your ELEVENLABS_API_KEY
-
-# Start the daemon
-uv run daemon/server.py
-
-# Speak from any terminal
-./scripts/say.sh "Hello, world!"
-```
-
-Dashboard at **http://127.0.0.1:7865**
-
-## Requirements
-
-- **macOS** (uses `afplay` for audio playback)
-- **Python >= 3.12**
-- **[uv](https://docs.astral.sh/uv/)** (runs the daemon with inline deps — no venv needed)
-- **ffmpeg** (`brew install ffmpeg`) — for audio envelope extraction and seeking
-- **ElevenLabs API key** — [get one here](https://elevenlabs.io)
+---
 
 ## Configuration
 
-### `.env`
+Three config sources, in order of precedence (highest first):
 
-```bash
-ELEVENLABS_API_KEY=your_key_here   # Required
-ELEVENLABS_VOICE_ID=               # Default voice (optional, defaults to Claude)
-SPEAK_CACHE_DIR=                   # Cache dir (default: ./cache)
-SPEAK_PORT=                        # HTTP port (default: 7865)
-```
+| Source | Where | Use when |
+|---|---|---|
+| Real env vars | shell / launchd | CI, sysadmin overrides |
+| `config.json` | repo root, gitignored | UI-managed via dashboard Settings |
+| `.env` | repo root, gitignored | Dev-time defaults via terminal |
 
-Real environment variables always override `.env` values.
+Two recognised keys: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`.
 
 ### `voices.json`
 
-Ships with 9 voices. Add your own ElevenLabs voices:
+Ships with Caldwell as default + 8 supporting voices. Add your own:
 
 ```json
 {
@@ -82,24 +70,26 @@ Ships with 9 voices. Add your own ElevenLabs voices:
 
 The daemon also falls back to the ElevenLabs API for voice names not in `voices.json`.
 
-## Usage
+> **Note:** The shipped Caldwell entry uses ElevenLabs' "George" voice ID as a placeholder — British, RP, mature. It's the wrong accent (RP not Cockney) but it'll get you speaking immediately. Replace via the dashboard Settings panel once you've picked a real Caldwell voice from the [Voice Library](https://elevenlabs.io/app/voice-library) — search for *Cockney*, *London*, or *Bob Hoskins*.
 
-### CLI
+---
+
+## CLI
 
 ```bash
 # Basic
-./scripts/say.sh "Hello"
+./scripts/say.sh "Hello Sir"
 
-# Choose voice
-./scripts/say.sh "Deep thoughts" --voice Adam
+# Choose a voice
+./scripts/say.sh "Tidy bit of work, that" --voice Caldwell
 
 # Channel tagging (for multi-agent filtering)
-./scripts/say.sh "Status update" --voice Elli --channel researcher
+./scripts/say.sh "Status update" --voice Adam --channel researcher
 
 # Priority (jumps queue)
-./scripts/say.sh "Alert!" --priority
+./scripts/say.sh "Fucking 'ell, that's broken!" --priority
 
-# Queue control
+# Queue + history control
 ./scripts/say.sh --status
 ./scripts/say.sh --skip
 ./scripts/say.sh --pause
@@ -109,57 +99,35 @@ The daemon also falls back to the ElevenLabs API for voice names not in `voices.
 ./scripts/say.sh --replay <id>
 ```
 
-### As a Claude Code Skill
+---
 
-Install as a skill in `~/.claude/skills/speak/` (or wherever you like), then reference `$SPEAK_DIR/scripts/say.sh` in your `SKILL.md`. See the included `SKILL.md` for the full prompt.
+## As a Claude Code Skill
 
-### Dashboard
+Symlink or copy to `~/.claude/skills/caldwell-speak/`, then reference `$SPEAK_DIR/scripts/say.sh` in your `SKILL.md`. The shipped `SKILL.md` is the default prompt.
 
-The web dashboard shows:
-- Animated portraits with lip-sync during playback
-- Transport controls (pause/resume, skip, seek)
-- Queue panel with per-channel pause toggles
-- History panel with replay and voice filtering
-
-### Multi-Agent Teams
-
-Assign each agent a unique voice for audio differentiation:
-
-```bash
-# Agent 1
-./scripts/say.sh "Research complete" --voice Rachel --channel researcher
-
-# Agent 2
-./scripts/say.sh "Tests passing" --voice Adam --channel tester
-```
+---
 
 ## Architecture
 
 ```
-speak/
-  daemon/server.py       Starlette HTTP server — TTS, queue, SSE, dashboard
+caldwell-speak/
+  daemon/server.py       Starlette HTTP server — TTS, queue, SSE, settings, dashboard
   scripts/say.sh         CLI wrapper — talks to daemon, falls back to speak.py
   scripts/speak.py       Standalone TTS (no daemon needed)
-  dashboard/index.html   Single-file web dashboard
-  dashboard/portraits/   Voice portrait images (3 frames each for lip-sync)
-  voices.json            Voice name/ID/color mappings
+  dashboard/index.html   Single-file web dashboard (incl. settings panel)
+  dashboard/portraits/   Voice portraits — 3 frames each for lip-sync
+  voices.json            Voice name/ID/color mappings (Caldwell + supporting cast)
   cache/                 Cached audio for history replay
-  .env                   Local configuration (git-ignored)
+  config.json            UI-managed config (API key + voice ID), gitignored
+  .env                   Dev-time config (gitignored)
   SKILL.md               Claude Code skill prompt
+  macos/SpeakDashboard/  Native menu-bar app (Swift, optional)
 ```
-
-### Key Design Decisions
-
-- **No external dependencies in say.sh/speak.py** — only stdlib + `curl`/`afplay`/`python3`. The daemon uses `starlette`+`uvicorn` via `uv run`.
-- **macOS-only playback** — uses `afplay` for playback, `afinfo` for duration, `ffmpeg` for seeking/trimming.
-- **Single shared queue** — all agents enqueue to one `AudioQueue`. Channel-based filtering and per-channel pause allow multi-agent coordination without overlap.
-- **SSE, not WebSocket** — dashboard uses Server-Sent Events for simplicity. Initial state on connect, then incremental `voice_active`, `history_update`, and `pause_state` events.
-- **Envelope extraction** — `ffmpeg` decodes to raw PCM, computes RMS per 50ms chunk, normalizes to 0-1 for lip-sync animation.
 
 ### API Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
+|---|---|---|
 | `POST` | `/speak` | Single-voice TTS |
 | `POST` | `/speak/dialogue` | Multi-voice dialogue |
 | `GET` | `/queue` | Queue status |
@@ -171,10 +139,14 @@ speak/
 | `GET` | `/history` | Playback history |
 | `POST` | `/history/replay` | Replay cached audio |
 | `GET` | `/voices` | Voice configuration |
+| `GET` | `/settings` | Current API key (masked) + voice ID |
+| `POST` | `/settings` | Update API key / voice ID (validates against ElevenLabs) |
 | `GET` | `/events` | SSE event stream |
 | `GET` | `/health` | Health check |
 | `GET` | `/` | Dashboard |
 
+---
+
 ## License
 
-MIT
+MIT — same as upstream [tomc98/speak](https://github.com/tomc98/speak).

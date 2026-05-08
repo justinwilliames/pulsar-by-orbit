@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Voice Dashboard</title>
+<title>Caldwell</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='15' fill='%230d1220' stroke='%2358a6ff' stroke-width='1.5'/><path d='M11 12v8l6-4z' fill='%2358a6ff'/><path d='M20 11a6 6 0 0 1 0 10' fill='none' stroke='%2358a6ff' stroke-width='1.5' stroke-linecap='round'/><path d='M23 8.5a10 10 0 0 1 0 15' fill='none' stroke='%2358a6ff' stroke-width='1.5' stroke-linecap='round' opacity='.5'/></svg>">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -470,6 +470,165 @@
     height: 14px;
     fill: currentColor;
   }
+
+  #settingsToggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+    -webkit-appearance: none;
+    outline: none;
+    padding: 0;
+  }
+
+  #settingsToggle:hover { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5); }
+  #settingsToggle.active { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6); }
+  #settingsToggle.alert { color: #f0883e; }
+  #settingsToggle svg { width: 14px; height: 14px; fill: currentColor; }
+
+  /* === SETTINGS OVERLAY === */
+  #settingsOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 8, 14, 0.65);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+  #settingsOverlay.open { opacity: 1; pointer-events: auto; }
+
+  .settings-panel {
+    width: min(440px, calc(100vw - 32px));
+    background: linear-gradient(180deg, #11161f 0%, #0c1018 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    transform: translateY(8px);
+    transition: transform 0.18s ease;
+  }
+  #settingsOverlay.open .settings-panel { transform: translateY(0); }
+
+  .settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .settings-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  #settingsClose {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  #settingsClose:hover { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.85); }
+
+  .settings-body {
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .settings-field { display: flex; flex-direction: column; gap: 6px; }
+  .settings-field label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+  }
+  .settings-field .row { display: flex; gap: 6px; }
+  .settings-field input {
+    flex: 1;
+    padding: 9px 11px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 7px;
+    background: rgba(0, 0, 0, 0.25);
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 12px;
+    font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+    outline: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .settings-field input:focus {
+    border-color: rgba(88, 166, 255, 0.5);
+    background: rgba(0, 0, 0, 0.4);
+  }
+  .settings-field input::placeholder { color: rgba(255, 255, 255, 0.2); }
+
+  .settings-toggle-show {
+    width: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .settings-toggle-show:hover { background: rgba(255, 255, 255, 0.08); }
+
+  .settings-hint {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.4;
+  }
+  .settings-hint a { color: rgba(88, 166, 255, 0.85); text-decoration: none; }
+  .settings-hint a:hover { text-decoration: underline; }
+
+  .settings-status {
+    font-size: 11.5px;
+    padding: 8px 11px;
+    border-radius: 6px;
+    min-height: 16px;
+    line-height: 1.4;
+    display: none;
+  }
+  .settings-status.ok { display: block; background: rgba(40, 200, 64, 0.1); color: #5fd87a; border: 1px solid rgba(40, 200, 64, 0.25); }
+  .settings-status.err { display: block; background: rgba(240, 80, 80, 0.1); color: #f08080; border: 1px solid rgba(240, 80, 80, 0.25); }
+  .settings-status.info { display: block; background: rgba(88, 166, 255, 0.08); color: rgba(255, 255, 255, 0.6); border: 1px solid rgba(88, 166, 255, 0.18); }
+
+  #settingsSave {
+    padding: 10px 14px;
+    border: none;
+    border-radius: 7px;
+    background: rgba(88, 166, 255, 0.18);
+    color: #cfe5ff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  #settingsSave:hover { background: rgba(88, 166, 255, 0.28); color: #ffffff; }
+  #settingsSave:disabled { opacity: 0.45; cursor: not-allowed; }
 
   /* === QUEUE PANEL === */
   #queuePanel {
@@ -1137,20 +1296,20 @@
 <div class="window">
   <div class="content">
     <!-- Assistant hero tile -->
-    <div class="assistant" id="assistantTile" data-voice="Claude">
+    <div class="assistant" id="assistantTile" data-voice="Caldwell">
       <div class="portrait-wrap">
-        <img class="portrait-img mouth-closed" src="/portraits/claude.png" alt="Claude" draggable="false"
+        <img class="portrait-img mouth-closed" src="/portraits/caldwell.png" alt="Caldwell" draggable="false"
           onerror="this.style.display='none';
             var fb=document.createElement('div');
             fb.className='portrait-fallback';
             fb.textContent='C';
             this.parentNode.appendChild(fb);">
-        <img class="portrait-img mouth-slight" src="/portraits/claude_slight.png" alt="" draggable="false"
+        <img class="portrait-img mouth-slight" src="/portraits/caldwell_slight.png" alt="" draggable="false"
           onerror="this.remove();">
-        <img class="portrait-img mouth-open" src="/portraits/claude_open.png" alt="" draggable="false"
+        <img class="portrait-img mouth-open" src="/portraits/caldwell_open.png" alt="" draggable="false"
           onerror="this.remove();">
       </div>
-      <div class="voice-name">CLAUDE</div>
+      <div class="voice-name">CALDWELL</div>
     </div>
 
     <div class="divider"></div>
@@ -1219,6 +1378,42 @@
       <button id="historyToggle" title="History">
         <svg viewBox="0 0 16 16"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1.2A5.8 5.8 0 1 1 2.2 8 5.8 5.8 0 0 1 8 2.2zm-.4 2.3a.5.5 0 0 0-.5.5V8c0 .17.09.33.24.42l2.5 1.5a.5.5 0 1 0 .52-.86L8.1 7.72V5a.5.5 0 0 0-.5-.5z"/></svg>
       </button>
+      <button id="settingsToggle" title="Settings">
+        <svg viewBox="0 0 16 16"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zm0 1.2a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6zm-1.05-5.5a.7.7 0 0 0-.69.6l-.18 1.27a5.6 5.6 0 0 0-1.16.67l-1.2-.47a.7.7 0 0 0-.86.31L1.78 5.04a.7.7 0 0 0 .17.9l1 .81a5.6 5.6 0 0 0 0 1.34l-1 .81a.7.7 0 0 0-.17.9l1.08 1.86a.7.7 0 0 0 .86.31l1.2-.47c.36.27.75.5 1.16.67l.18 1.27a.7.7 0 0 0 .69.6h2.1a.7.7 0 0 0 .69-.6l.18-1.27c.41-.17.8-.4 1.16-.67l1.2.47a.7.7 0 0 0 .86-.31l1.08-1.86a.7.7 0 0 0-.17-.9l-1-.81a5.6 5.6 0 0 0 0-1.34l1-.81a.7.7 0 0 0 .17-.9l-1.08-1.86a.7.7 0 0 0-.86-.31l-1.2.47a5.6 5.6 0 0 0-1.16-.67l-.18-1.27a.7.7 0 0 0-.69-.6h-2.1z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings overlay -->
+<div id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitleLabel">
+  <div class="settings-panel">
+    <div class="settings-header">
+      <span class="settings-title" id="settingsTitleLabel">Settings</span>
+      <button id="settingsClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-field">
+        <label for="apiKeyInput">ElevenLabs API key</label>
+        <div class="row">
+          <input type="password" id="apiKeyInput" autocomplete="off" spellcheck="false" placeholder="sk_...">
+          <button type="button" id="apiKeyShow" class="settings-toggle-show" title="Show / hide">&#128065;</button>
+        </div>
+        <div class="settings-hint" id="apiKeyHint">
+          Get one at <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener">elevenlabs.io</a>. Stored locally in <code>config.json</code>.
+        </div>
+      </div>
+
+      <div class="settings-field">
+        <label for="voiceIdInput">Default voice ID</label>
+        <input type="text" id="voiceIdInput" autocomplete="off" spellcheck="false" placeholder="20-character voice ID">
+        <div class="settings-hint">
+          Add the voice to your <a href="https://elevenlabs.io/app/voice-lab" target="_blank" rel="noopener">VoiceLab</a> first, then copy its ID. Used when no <code>--voice</code> flag is passed.
+        </div>
+      </div>
+
+      <button type="button" id="settingsSave">Save &amp; validate</button>
+      <div class="settings-status" id="settingsStatus"></div>
     </div>
   </div>
 </div>
@@ -1228,7 +1423,7 @@
 
 <script>
 // ========== CONSTANTS ==========
-var ASSISTANT_VOICE = 'Claude';
+var ASSISTANT_VOICE = 'Caldwell';
 var VOICE_COLORS = {};
 var VOICES = [];
 
@@ -1332,7 +1527,7 @@ function buildGrid(voices) {
   ASSISTANT_TILE.style.cursor = 'pointer';
   ASSISTANT_TILE.addEventListener('click', function() {
     if (window.History) {
-      window.History.filterByVoice('Claude');
+      window.History.filterByVoice('Caldwell');
       window.History.setVisible(true);
       window.Transport.setHistoryToggleActive(true);
     }
@@ -1757,7 +1952,7 @@ function getTile(voiceName) {
           nowPlaying.style.setProperty('--voice-color', color);
           var html = '';
           if (lastPlayState.priority) html += '\u26a1 ';
-          html += '<em>' + esc(lastPlayState.voice || 'Claude') + '</em>';
+          html += '<em>' + esc(lastPlayState.voice || 'Caldwell') + '</em>';
           if (lastPlayState.channel) html += ' <span class="channel-tag">' + esc(lastPlayState.channel) + '</span>';
           html += ' \u00a0' + esc(lastPlayState.text || '');
           nowPlaying.innerHTML = html;
@@ -1779,7 +1974,7 @@ function getTile(voiceName) {
       nowPlaying.style.setProperty('--voice-color', color);
       var html = '';
       if (priority) html += '\u26a1 ';
-      html += '<em>' + esc(voice || 'Claude') + '</em>';
+      html += '<em>' + esc(voice || 'Caldwell') + '</em>';
       if (channel) html += ' <span class="channel-tag">' + esc(channel) + '</span>';
       html += ' \u00a0' + esc(text || '');
       nowPlaying.innerHTML = html;
@@ -2553,6 +2748,144 @@ window.testAll = function(ms) {
     setTimeout(function() { window.testVoice(n, ms - 200); }, i * ms);
   });
 };
+
+// ========== SETTINGS PANEL ==========
+(function() {
+  var overlay = document.getElementById('settingsOverlay');
+  var openBtn = document.getElementById('settingsToggle');
+  var closeBtn = document.getElementById('settingsClose');
+  var apiInput = document.getElementById('apiKeyInput');
+  var voiceInput = document.getElementById('voiceIdInput');
+  var showBtn = document.getElementById('apiKeyShow');
+  var saveBtn = document.getElementById('settingsSave');
+  var status = document.getElementById('settingsStatus');
+  var apiHint = document.getElementById('apiKeyHint');
+
+  if (!overlay || !openBtn) return;
+
+  var existingPreview = '';
+  var apiKeyTouched = false;
+
+  function setStatus(kind, msg) {
+    status.className = 'settings-status' + (kind ? ' ' + kind : '');
+    status.textContent = msg || '';
+  }
+
+  function refreshHint(state) {
+    if (state.api_key_set) {
+      apiHint.innerHTML = 'Current key: <code>' + esc(state.api_key_preview) + '</code>. Leave blank to keep it. ' +
+        'Get a new one at <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener">elevenlabs.io</a>.';
+    } else {
+      apiHint.innerHTML = 'No key set yet. Get one at <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener">elevenlabs.io</a>. Stored locally in <code>config.json</code>.';
+    }
+  }
+
+  function loadSettings() {
+    fetch('/settings').then(function(r) { return r.json(); }).then(function(data) {
+      existingPreview = data.api_key_preview || '';
+      apiKeyTouched = false;
+      apiInput.value = existingPreview;  // Display only — never submitted unless touched
+      apiInput.type = 'password';
+      voiceInput.value = data.voice_id || '';
+      refreshHint(data);
+      setStatus('', '');
+      openBtn.classList.toggle('alert', !data.api_key_set);
+    }).catch(function() {
+      setStatus('err', 'Could not load current settings.');
+    });
+  }
+
+  function openPanel() {
+    overlay.classList.add('open');
+    openBtn.classList.add('active');
+    loadSettings();
+    setTimeout(function() { apiInput.focus(); apiInput.select(); }, 100);
+  }
+
+  function closePanel() {
+    overlay.classList.remove('open');
+    openBtn.classList.remove('active');
+  }
+
+  openBtn.addEventListener('click', function() {
+    if (overlay.classList.contains('open')) { closePanel(); } else { openPanel(); }
+  });
+  closeBtn.addEventListener('click', closePanel);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) closePanel(); });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && overlay.classList.contains('open')) closePanel();
+  });
+
+  apiInput.addEventListener('input', function() { apiKeyTouched = true; });
+  apiInput.addEventListener('focus', function() {
+    // Clear masked preview on focus so user types into a clean field
+    if (!apiKeyTouched && apiInput.value === existingPreview) {
+      apiInput.value = '';
+    }
+  });
+  apiInput.addEventListener('blur', function() {
+    if (!apiKeyTouched && apiInput.value === '') {
+      apiInput.value = existingPreview;
+    }
+  });
+
+  showBtn.addEventListener('click', function() {
+    apiInput.type = apiInput.type === 'password' ? 'text' : 'password';
+  });
+
+  saveBtn.addEventListener('click', function() {
+    var payload = {};
+    if (apiKeyTouched) {
+      var key = apiInput.value.trim();
+      if (!key) {
+        setStatus('err', 'API key cannot be empty. Leave field untouched to keep current key.');
+        return;
+      }
+      payload.api_key = key;
+    }
+    payload.voice_id = voiceInput.value.trim();
+
+    if (Object.keys(payload).length === 0) {
+      setStatus('info', 'Nothing to save.');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    setStatus('info', 'Validating with ElevenLabs…');
+
+    fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(function(r) {
+      return r.json().then(function(data) { return { ok: r.ok, data: data }; });
+    }).then(function(res) {
+      saveBtn.disabled = false;
+      if (!res.ok) {
+        setStatus('err', res.data.error || 'Save failed.');
+        return;
+      }
+      var msg = 'Saved.';
+      if (res.data.voice_meta && res.data.voice_meta.name) {
+        msg += ' Default voice: ' + res.data.voice_meta.name + '.';
+      }
+      setStatus('ok', msg);
+      apiKeyTouched = false;
+      existingPreview = res.data.api_key_preview || '';
+      apiInput.value = existingPreview;
+      apiInput.type = 'password';
+      openBtn.classList.toggle('alert', !res.data.api_key_set);
+    }).catch(function(e) {
+      saveBtn.disabled = false;
+      setStatus('err', 'Network error: ' + e.message);
+    });
+  });
+
+  // Probe once on load so the alert dot shows if no key is set
+  fetch('/settings').then(function(r) { return r.json(); }).then(function(data) {
+    openBtn.classList.toggle('alert', !data.api_key_set);
+  }).catch(function() {});
+})();
 
 connect();
 </script>

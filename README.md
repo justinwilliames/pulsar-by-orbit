@@ -1,6 +1,6 @@
 # Caldwell
 
-A voice for Claude Code. Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives, "Sir" by default. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, and a multi-voice cast.
+A voice for Claude Code. Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives, "Sir" by default. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, a multi-voice cast, and a launchd config that keeps Caldwell ready whenever Claude Code calls.
 
 Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is theirs, the persona is mine.
 
@@ -8,44 +8,118 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 
 ## What it does
 
-- **Speaks aloud** via the ElevenLabs API at the end of every Claude Code turn — voice is the primary completion alert.
-- **Queues across agents** — a single shared audio queue means multiple agents (or a chief-of-staff routine) never talk over each other.
-- **Dashboard at `http://127.0.0.1:7865`** — animated portrait with lip-sync, transport controls, queue + history panels, **settings panel for API key + voice ID**.
-- **CLI**: `./scripts/say.sh "Right then Sir"` from any terminal.
+- **Speaks aloud** via ElevenLabs at the end of substantive Claude Code turns — voice is the completion alert.
+- **Free-tier conscious** — `SKILL.md` ships with tight rules so Caldwell speaks selectively, not on every turn.
+- **Queues across agents** — single shared queue means multiple agents (or chief-of-staff routines) never overlap.
+- **Dashboard at `http://127.0.0.1:7865`** — Caldwell's portrait ping-pongs through 4 panels while he speaks; transport, queue, history, and a Settings panel for API key + voice ID.
+- **Always-on** — optional `launchctl` config keeps the daemon running across reboots and login sessions.
 
 ---
 
-## 5-Minute Quickstart
+## Install — five steps
 
-**macOS only** (uses `afplay` for playback). Detailed Mac setup: [docs/SETUP_MAC.md](docs/SETUP_MAC.md).
+**macOS only** (uses `afplay` for playback). Detailed Mac setup notes: [docs/SETUP_MAC.md](docs/SETUP_MAC.md).
 
-```bash
-# 1. Dependencies
+### Step 1 — System dependencies
+
+```
 brew install ffmpeg
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Clone + start daemon (no .env needed first time)
-git clone https://github.com/justinwilliames/caldwell-speak.git ~/code/caldwell-speak
-cd ~/code/caldwell-speak
-uv run daemon/server.py
-
-# 3. Open the dashboard, click the gear icon, paste your ElevenLabs API key
-#    and your voice ID. Save. That's it.
-open http://127.0.0.1:7865
-
-# 4. Test from another terminal
-./scripts/say.sh "Right then Sir, the daemon's up. Shall we proceed?"
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The dashboard's **Settings panel** (gear icon, transport-bar right) validates your inputs against ElevenLabs before saving and stores them in `config.json` (gitignored).
+If `brew install` fails with a permissions error on `/opt/homebrew`, run `sudo chown -R $(whoami) /opt/homebrew` first, then retry.
 
-If you'd rather configure via terminal, `cp .env.example .env` and edit it — same effect.
+Verify:
+
+```
+which uv
+which ffmpeg
+```
+
+Both should return paths.
+
+### Step 2 — Clone the repo
+
+```
+git clone https://github.com/justinwilliames/caldwell-speak.git ~/code/caldwell-speak
+cd ~/code/caldwell-speak
+```
+
+### Step 3 — Start the daemon (one-off, manual)
+
+```
+uv run daemon/server.py
+```
+
+First run downloads Starlette + Uvicorn into uv's cache (one-time, ~10s), then binds to `127.0.0.1:7865`. Leave the terminal open — that's the daemon. `Ctrl-C` to stop.
+
+For an always-running daemon (recommended after first manual test), see Step 5.
+
+### Step 4 — Configure via the dashboard
+
+In a second terminal:
+
+```
+open http://127.0.0.1:7865
+```
+
+The gear icon in the transport bar shows an orange dot when no API key is set. Click it, paste:
+
+- **ElevenLabs API key** — get one at [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys).
+- **Default voice ID** — add a voice from the [Voice Library](https://elevenlabs.io/app/voice-library) to your VoiceLab first, then copy the 20-character ID.
+
+Save. The panel validates both against ElevenLabs and writes to `config.json` (gitignored).
+
+Test:
+
+```
+./scripts/say.sh "Right then Sir, the daemon is up."
+```
+
+### Step 5 — Install as a Claude Code skill
+
+This is what makes Caldwell speak *automatically* at the end of substantive Claude Code turns, rather than only when you run `say.sh` by hand.
+
+```
+mkdir -p ~/.claude/skills
+ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak
+```
+
+Then **restart Claude Code** (close and reopen) so it discovers the new skill.
+
+The shipped [`SKILL.md`](SKILL.md) defines when Caldwell speaks: only on substantive completions, blockers, or high-stakes status — not after every short reply. One short sentence per spoken line. Hard-mute on "quiet" / "mute" / "stop speaking". This is deliberately conservative to keep ElevenLabs free-tier credit usage low.
 
 ---
 
-## Configuration
+## Optional — keep the daemon always running (launchd)
 
-Three config sources, in order of precedence (highest first):
+After Step 3 confirms the daemon works, register it with `launchd` so macOS keeps it alive across reboots and logins:
+
+```
+./scripts/install-launchd.sh
+```
+
+The script generates a plist using your current `uv` and repo paths, copies it to `~/Library/LaunchAgents/`, and loads it. Logs go to `logs/daemon.{out,err}.log` in the repo.
+
+Check it's running:
+
+```
+launchctl list | grep caldwell-speak
+curl -sf http://127.0.0.1:7865/health
+```
+
+To stop and remove:
+
+```
+./scripts/uninstall-launchd.sh
+```
+
+---
+
+## Configuration sources
+
+Three sources, in order of precedence (highest first):
 
 | Source | Where | Use when |
 |---|---|---|
@@ -76,20 +150,33 @@ The daemon also falls back to the ElevenLabs API for voice names not in `voices.
 
 ## CLI
 
-```bash
-# Basic
-./scripts/say.sh "Hello Sir"
+Basic:
 
-# Choose a voice
+```
+./scripts/say.sh "Right then Sir."
+```
+
+Pick a voice:
+
+```
 ./scripts/say.sh "Frankly Sir, that's fucking elegant work" --voice Caldwell
+```
 
-# Channel tagging (for multi-agent filtering)
+Channel tagging (multi-agent filtering):
+
+```
 ./scripts/say.sh "Status update" --voice Adam --channel researcher
+```
 
-# Priority (jumps queue)
+Priority (jumps the queue):
+
+```
 ./scripts/say.sh "I'm afraid we have a problem, Sir." --priority
+```
 
-# Queue + history control
+Queue and history control:
+
+```
 ./scripts/say.sh --status
 ./scripts/say.sh --skip
 ./scripts/say.sh --pause
@@ -101,9 +188,17 @@ The daemon also falls back to the ElevenLabs API for voice names not in `voices.
 
 ---
 
-## As a Claude Code Skill
+## Minimising ElevenLabs free-tier credit use
 
-Symlink or copy to `~/.claude/skills/caldwell-speak/`, then reference `$SPEAK_DIR/scripts/say.sh` in your `SKILL.md`. The shipped `SKILL.md` is the default prompt.
+ElevenLabs charges per character of text-to-speech. Strategies:
+
+1. **The shipped `SKILL.md` already enforces credit-conscious rules** — Caldwell speaks only on substantive completions / blockers / high-stakes status, capped at one short sentence. Adjust the rules in `SKILL.md` if you want him quieter or chattier.
+2. **Mute by voice command** — "quiet" / "mute" / "stop speaking" stops the skill from calling `say.sh`. Resume with "voice on" / "unmute". Zero credits spent while muted.
+3. **Skip audio tags** unless they materially improve delivery (humour, tonal flips). Tags like `[dry]`, `[deadpan]` count against your character allowance.
+4. **History replay is free** — replaying a cached entry from the history panel pulls from local cache, no API call.
+5. **Watch your usage** at [elevenlabs.io/app/usage](https://elevenlabs.io/app/usage).
+
+> **Caveat on dashboard pause:** the daemon fetches TTS audio from ElevenLabs *the moment a message is enqueued*, before playback. Dashboard pause halts playback, not the API fetch — so pausing doesn't save credits on items already queued. The "mute" instruction (which prevents enqueue at all) does.
 
 ---
 
@@ -111,17 +206,20 @@ Symlink or copy to `~/.claude/skills/caldwell-speak/`, then reference `$SPEAK_DI
 
 ```
 caldwell-speak/
-  daemon/server.py       Starlette HTTP server — TTS, queue, SSE, settings, dashboard
-  scripts/say.sh         CLI wrapper — talks to daemon, falls back to speak.py
-  scripts/speak.py       Standalone TTS (no daemon needed)
-  dashboard/index.html   Single-file web dashboard (incl. settings panel)
-  dashboard/portraits/   Voice portraits — 3 frames each for lip-sync
-  voices.json            Voice name/ID/color mappings (Caldwell + supporting cast)
-  cache/                 Cached audio for history replay
-  config.json            UI-managed config (API key + voice ID), gitignored
-  .env                   Dev-time config (gitignored)
-  SKILL.md               Claude Code skill prompt
-  macos/SpeakDashboard/  Native menu-bar app (Swift, optional)
+  daemon/server.py             Starlette HTTP server — TTS, queue, SSE, settings, dashboard
+  scripts/say.sh               CLI wrapper — talks to daemon, falls back to speak.py
+  scripts/speak.py             Standalone TTS (no daemon needed)
+  scripts/install-launchd.sh   Register the daemon with launchd for always-on
+  scripts/uninstall-launchd.sh Reverse the above
+  dashboard/index.html         Single-file web dashboard (incl. settings panel)
+  dashboard/portraits/         Voice portraits — Caldwell ships with 4 panels for ping-pong cycle
+  voices.json                  Voice name/ID/color mappings (Caldwell + supporting cast)
+  cache/                       Cached audio for history replay (24h TTL)
+  config.json                  UI-managed config (API key + voice ID), gitignored
+  .env                         Dev-time config (gitignored)
+  logs/                        launchd daemon stdout/stderr (gitignored)
+  SKILL.md                     Claude Code skill prompt — credit-conscious by default
+  macos/SpeakDashboard/        Native menu-bar app (Swift, optional)
 ```
 
 ### API Endpoints

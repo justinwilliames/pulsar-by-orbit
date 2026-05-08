@@ -1,16 +1,12 @@
 import SwiftUI
 
 enum DashboardTab: String, CaseIterable {
-    case nowPlaying = "Now Playing"
-    case queue = "Queue"
     case history = "History"
     case cache = "Cache"
     case settings = "Settings"
 
     var icon: String {
         switch self {
-        case .nowPlaying: "waveform"
-        case .queue: "list.bullet"
         case .history: "clock"
         case .cache: "tray.full"
         case .settings: "gear"
@@ -52,7 +48,7 @@ struct CarouselTransition: Transition {
 struct PopoverRootView: View {
     let viewModel: DashboardViewModel
 
-    @State private var selectedTab: DashboardTab = .nowPlaying
+    @State private var selectedTab: DashboardTab = .history
     @State private var navigatingForward = true
     @Namespace private var tabNamespace
 
@@ -160,10 +156,6 @@ struct PopoverRootView: View {
     @ViewBuilder
     private func tabView(for tab: DashboardTab) -> some View {
         switch tab {
-        case .nowPlaying:
-            NowPlayingView(viewModel: viewModel)
-        case .queue:
-            QueuePanelView(viewModel: viewModel)
         case .history:
             HistoryPanelView(viewModel: viewModel)
         case .cache:

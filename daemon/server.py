@@ -603,11 +603,51 @@ def _fetch_elevenlabs_subscription() -> dict | None:
     if not isinstance(subscription, dict):
         return None
 
+    # billing_period maps to a billing cycle length in days. Free tier
+    # returns "monthly_period" which is rolling 30 days from signup.
+    billing_period = str(subscription.get("billing_period", "monthly_period"))
+    nominal_period_days = {
+        "monthly_period": 30.0,
+        "annually_period": 365.0,
+        "yearly_period": 365.0,
+    }.get(billing_period, 30.0)
+
+    next_reset = int(subscription.get("next_character_count_reset_unix", 0) or 0)
+    # User account creation time — character_count starts at 0 at signup,
+    # so first-cycle users must anchor period_start to created_at, not to
+    # a naive (next_reset − 30) calculation that would land 12+ hours
+    # AFTER signup and report bogus 0.0 days_elapsed.
+    created_at = int(data.get("created_at", 0) or 0)
+
+    # First cycle = account is younger than one nominal billing period.
+    # In that case, the chars accumulated since signup; period_start is
+    # created_at and period_days is the actual gap (~30.5 days for free).
+    # Otherwise, rolling-30 anchored to next_reset.
+    account_age_seconds = (now - created_at) if created_at > 0 else float("inf")
+    in_first_cycle = (account_age_seconds < nominal_period_days * 86400) and created_at > 0
+
+    if in_first_cycle:
+        period_start = created_at
+    elif next_reset > 0:
+        period_start = next_reset - int(nominal_period_days * 86400)
+    else:
+        period_start = 0
+
+    period_days = (
+        (next_reset - period_start) / 86400.0
+        if (next_reset > 0 and period_start > 0)
+        else nominal_period_days
+    )
+
     result = {
         "tier": str(subscription.get("tier", "unknown")),
         "character_count": int(subscription.get("character_count", 0) or 0),
         "character_limit": int(subscription.get("character_limit", 0) or 0),
-        "next_reset_unix": int(subscription.get("next_character_count_reset_unix", 0) or 0),
+        "next_reset_unix": next_reset,
+        "period_start_unix": period_start,
+        "created_at_unix": created_at,
+        "billing_period": billing_period,
+        "period_days": round(period_days, 2),
         "fetched_at": now,
     }
     _eleven_subscription_cache = result
@@ -617,6 +657,11 @@ def _fetch_elevenlabs_subscription() -> dict | None:
 
 def _compute_run_rate(subscription: dict) -> dict:
     """Add derived run-rate fields to a subscription dict.
+
+    Period bounds come from the subscription itself (period_start_unix +
+    next_reset_unix), not a hardcoded constant — so the math aligns with
+    the user's actual ElevenLabs billing cycle anchored at their signup
+    date, not "30 days from now".
 
     Status thresholds (vs expected linear pace through billing period):
       ok       — under 1.0× expected (on or below pace)
@@ -628,6 +673,8 @@ def _compute_run_rate(subscription: dict) -> dict:
     limit = subscription.get("character_limit", 0) or 0
     used = subscription.get("character_count", 0) or 0
     next_reset = subscription.get("next_reset_unix", 0) or 0
+    period_start = subscription.get("period_start_unix", 0) or 0
+    period_days = subscription.get("period_days", 30.0) or 30.0
 
     percent_used = (used / limit * 100.0) if limit > 0 else 0.0
 
@@ -635,10 +682,14 @@ def _compute_run_rate(subscription: dict) -> dict:
     seconds_left = max(0.0, next_reset - now) if next_reset > 0 else 0.0
     days_until_reset = seconds_left / 86400.0
 
-    # Approximate billing period as 30 days for the run-rate calculation.
-    BILLING_PERIOD_DAYS = 30.0
-    days_elapsed = max(0.0, BILLING_PERIOD_DAYS - days_until_reset)
-    expected_pct = (days_elapsed / BILLING_PERIOD_DAYS * 100.0) if BILLING_PERIOD_DAYS > 0 else 0.0
+    # Real days elapsed in the current billing cycle, anchored to the
+    # actual period_start from ElevenLabs.
+    if period_start > 0:
+        days_elapsed = max(0.0, (now - period_start) / 86400.0)
+    else:
+        days_elapsed = max(0.0, period_days - days_until_reset)
+
+    expected_pct = (days_elapsed / period_days * 100.0) if period_days > 0 else 0.0
     run_rate_ratio = (percent_used / expected_pct) if expected_pct > 0 else 0.0
 
     # Status logic depends on where in the billing period we are.
@@ -672,6 +723,7 @@ def _compute_run_rate(subscription: dict) -> dict:
         **subscription,
         "percent_used": round(percent_used, 1),
         "days_until_reset": round(days_until_reset, 1),
+        "days_elapsed": round(days_elapsed, 1),
         "expected_usage_pct": round(expected_pct, 1),
         "run_rate_ratio": round(run_rate_ratio, 2),
         "run_rate_status": status,

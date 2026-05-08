@@ -266,6 +266,10 @@ struct SettingsView: View {
                         .foregroundStyle(.tertiary)
                 }
 
+                Text(cycleRange(eleven))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+
                 if let advice = runRateAdvice(eleven) {
                     Text(advice)
                         .font(.caption2)
@@ -369,6 +373,19 @@ struct SettingsView: View {
             return "resets <1 day"
         }
         return "resets in \(Int(days)) day\(Int(days) == 1 ? "" : "s")"
+    }
+
+    private func cycleRange(_ eleven: ElevenLabsUsage) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        let end = formatter.string(from: eleven.nextResetDate)
+        if let start = eleven.periodStartDate {
+            let startStr = formatter.string(from: start)
+            let elapsed = eleven.daysElapsed.map { String(format: "%.1f", $0) } ?? "?"
+            let total = eleven.periodDays.map { String(format: "%.1f", $0) } ?? "30"
+            return "Cycle: \(startStr) → \(end) · day \(elapsed) of \(total)"
+        }
+        return "Resets \(end)"
     }
 
     private func runRateAdvice(_ eleven: ElevenLabsUsage) -> String? {

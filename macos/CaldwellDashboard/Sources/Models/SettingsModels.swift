@@ -43,9 +43,14 @@ struct ElevenLabsUsage: Codable, Sendable {
     let characterCount: Int
     let characterLimit: Int
     let nextResetUnix: Int
+    let periodStartUnix: Int?
+    let createdAtUnix: Int?
+    let billingPeriod: String?
+    let periodDays: Double?
     let fetchedAt: Double
     let percentUsed: Double
     let daysUntilReset: Double
+    let daysElapsed: Double?
     let expectedUsagePct: Double
     let runRateRatio: Double
     let runRateStatus: String
@@ -55,9 +60,14 @@ struct ElevenLabsUsage: Codable, Sendable {
         case characterCount = "character_count"
         case characterLimit = "character_limit"
         case nextResetUnix = "next_reset_unix"
+        case periodStartUnix = "period_start_unix"
+        case createdAtUnix = "created_at_unix"
+        case billingPeriod = "billing_period"
+        case periodDays = "period_days"
         case fetchedAt = "fetched_at"
         case percentUsed = "percent_used"
         case daysUntilReset = "days_until_reset"
+        case daysElapsed = "days_elapsed"
         case expectedUsagePct = "expected_usage_pct"
         case runRateRatio = "run_rate_ratio"
         case runRateStatus = "run_rate_status"
@@ -73,6 +83,15 @@ struct ElevenLabsUsage: Codable, Sendable {
 
     var tierDisplay: String {
         tier.prefix(1).uppercased() + tier.dropFirst().lowercased()
+    }
+
+    var periodStartDate: Date? {
+        guard let unix = periodStartUnix, unix > 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(unix))
+    }
+
+    var nextResetDate: Date {
+        Date(timeIntervalSince1970: TimeInterval(nextResetUnix))
     }
 }
 

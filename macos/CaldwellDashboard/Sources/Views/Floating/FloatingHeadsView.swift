@@ -13,22 +13,13 @@ struct FloatingHeadsView: View {
         GlassEffectContainer(spacing: 20) {
             ZStack {
                 if let voice = viewModel.playback.currentVoice {
-                    // Active speaker with all effects
-                    VStack(spacing: 2) {
-                        FloatingPortraitView(
-                            voiceName: voice,
-                            amplitude: viewModel.lipSync.amplitude,
-                            voiceColor: viewModel.voiceColor(for: voice),
-                            portraitManager: viewModel.portraitManager
-                        )
-
-                        Text(voice)
-                            .font(.caption.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .glassEffect(.clear.tint(viewModel.voiceColor(for: voice)), in: Capsule())
-                    }
+                    // Active speaker — Caldwell is the only voice, no label needed
+                    FloatingPortraitView(
+                        voiceName: voice,
+                        amplitude: viewModel.lipSync.amplitude,
+                        voiceColor: viewModel.voiceColor(for: voice),
+                        portraitManager: viewModel.portraitManager
+                    )
                     .id(voice)
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
                     .offset(y: -16)

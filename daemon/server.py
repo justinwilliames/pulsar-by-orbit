@@ -553,9 +553,25 @@ def _fetch_tts(text: str, voice_id: str, retries: int = 2) -> str:
             "xi-api-key": _api_key(),
             "Content-Type": "application/json",
         })
-        with urlopen(req) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            data = resp.read()
+        try:
+            with urlopen(req) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                data = resp.read()
+        except HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            log.error(
+                f"TTS attempt {attempt+1}: HTTP {e.code} from {url} | "
+                f"key_prefix={_api_key()[:6]} key_suffix={_api_key()[-4:]} | "
+                f"model={DEFAULT_MODEL} payload_len={len(payload)} | "
+                f"response_body={body}"
+            )
+            if attempt < retries and e.code >= 500:
+                continue
+            raise
         if not _validate_mp3(data):
             log.warning(f"TTS attempt {attempt+1}: invalid MP3 (Content-Type={content_type}, {len(data)} bytes)")
             if attempt < retries:

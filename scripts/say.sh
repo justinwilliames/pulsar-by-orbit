@@ -28,7 +28,7 @@ DAEMON="http://127.0.0.1:$SPEAK_PORT"
 
 # Parse arguments
 TEXT=""
-VOICE="Claude"
+VOICE=""
 CHANNEL=""
 PRIORITY=false
 ACTION=""

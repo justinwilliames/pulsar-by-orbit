@@ -1576,14 +1576,17 @@ function getMouthElements(voiceName) {
 }
 
 // ========== CALDWELL CYCLE CONTROLLER ==========
-// Caldwell uses a 4-frame cycle on a fixed timer (panels 1→2→3→4)
-// rather than envelope-driven mouth-state opacity. The four panels are
-// micro-variations of the same composed butler portrait — cycling them
-// at ~4fps reads as natural micro-adjustments rather than mouth-flapping.
+// Caldwell uses a ping-pong cycle through 4 portrait panels (1→2→3→4→3→2)
+// on a fixed timer rather than envelope-driven mouth-state opacity. The
+// four panels are micro-variations of the same composed butler portrait;
+// ping-ponging keeps consecutive transitions small so it reads as natural
+// micro-adjustments rather than a hard wrap-around jump.
 var CaldwellCycle = {
   timer: null,
-  frame: 0,
-  intervalMs: 250,  // 250ms per frame = 4fps, full cycle every 1s
+  step: 0,
+  intervalMs: 250,  // 250ms per step = 4 fps, full ping-pong cycle every 1.5s
+  // Panel index sequence: 1,2,3,4,3,2 then back to 1 (zero-indexed: 0,1,2,3,2,1)
+  sequence: [0, 1, 2, 3, 2, 1],
   imgs: null,
 
   _ensureImgs: function() {
@@ -1604,8 +1607,8 @@ var CaldwellCycle = {
 
   start: function() {
     if (this.timer) return;
-    this.frame = 0;
-    this._show(0);
+    this.step = 0;
+    this._show(this.sequence[0]);
     this.timer = setInterval(this._advance.bind(this), this.intervalMs);
   },
 
@@ -1614,8 +1617,8 @@ var CaldwellCycle = {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.frame = 0;
-    this._show(0);
+    this.step = 0;
+    this._show(this.sequence[0]);
   },
 
   pause: function() {
@@ -1631,8 +1634,8 @@ var CaldwellCycle = {
   },
 
   _advance: function() {
-    this.frame = (this.frame + 1) % 4;
-    this._show(this.frame);
+    this.step = (this.step + 1) % this.sequence.length;
+    this._show(this.sequence[this.step]);
   },
 
   _show: function(idx) {

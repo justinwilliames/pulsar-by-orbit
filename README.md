@@ -11,7 +11,7 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 ## What it does
 
 - **Speaks aloud** via ElevenLabs at the end of every Claude Code turn by default — `SKILL.md` ships bias-flipped, so the voice acts as a turn-end ping. Suppression rules cover mute, repetition, and code-heavy replies; the rest of the time he speaks.
-- **Free-tier survivable via the phrase cache** — canonical lines ("Pushed.", "Sorted Sir.") get cached locally as MP3s and replay for **zero credits**. Cache writes are **opt-in**: Caldwell-the-skill passes `--cacheable` only for known generic phrases, never for context-specific one-shots, with a daemon-side 40-char hard cap as a safety net. Spend caps and a daily char budget gate everything that misses the cache.
+- **Free-tier survivable via the phrase cache** — reusable lines (any tier — "Pushed, Sir." through "I'm afraid the tests are failing — log's in the chat.") get cached locally as MP3s and replay for **zero credits**. Cache writes are **opt-in**: Caldwell-the-skill passes `--cacheable` for any line he'd happily fire again on a different turn, never for context-specific one-shots. Spend caps and a daily char budget gate everything that misses the cache.
 - **Polite / Potty Mouth toggle** — single segmented picker at the top of the menu-bar Settings panel. Persisted to `config.json` as `CALDWELL_EXPLETIVES`, surfaced via `GET /settings`, read by Caldwell-the-skill at session start.
 - **Single shared queue** — sub-agents and chief-of-staff routines never overlap their spoken output, all rendered in Caldwell's voice.
 - **Two surfaces, one daemon** — a web dashboard at `http://127.0.0.1:7865` (Caldwell's portrait ping-pongs through 4 panels while he speaks; transport, queue, history, settings) and a native macOS 26 menu-bar app (`Caldwell.app`) with the same plus a Cache panel showing every cached phrase, its play count, and a free-replay button.
@@ -212,7 +212,6 @@ To stop and remove:
 | `SPEAK_RATE_LIMIT_PER_MIN` | env var | default `20` | Per-minute call cap |
 | `SPEAK_DAILY_CHAR_CAP` | env var | default `2000` | Per-day character cap |
 | `SPEAK_PHRASE_CACHE_MAX_BYTES` | env var | default `104857600` (100 MB) | Phrase cache size budget |
-| `SPEAK_PHRASE_CACHE_MAX_TEXT_LEN` | env var | default `40` | Hard cap on cacheable text length — long lines are refused even if `--cacheable` is set |
 
 The dashboard Settings panel writes to the primary store automatically — Keychain for the API key, `config.json` for the voice ID and the persona mode. The daemon migrates any `ELEVENLABS_API_KEY` it finds in `config.json` to the Keychain on startup, then clears it from the file.
 
@@ -231,11 +230,13 @@ The toggle is a contract Caldwell-the-skill respects, not a daemon-side filter. 
 
 The daemon content-addresses every cache-eligible TTS request as `sha256(text + voice_id + voice_settings)` and stashes the resulting MP3 at `cache/phrases/{hash}.mp3` with a sidecar `{hash}.json` holding the original text, voice label, first-cached timestamp, last-played timestamp, and play count. The cache is LRU-pruned hourly to stay under `SPEAK_PHRASE_CACHE_MAX_BYTES` (100 MB default).
 
-**Cache writes are opt-in.** `POST /speak` accepts `cacheable: bool` (default `false`); `say.sh` accepts `--cacheable`. The daemon enforces a hard `SPEAK_PHRASE_CACHE_MAX_TEXT_LEN` cap (default 40 chars) — long lines are refused even when flagged, on the assumption that anything over a short generic phrase is context-specific.
+**Cache writes are opt-in, judgment-based.** `POST /speak` accepts `cacheable: bool` (default `false`); `say.sh` accepts `--cacheable`. The skill decides reusability per call — there's **no length cap**. The test is one question: *"would this exact line make sense tomorrow on a different turn?"* If yes, cache. If no, don't.
+
+A 60-char Tier 2 line like `"I'm afraid the tests are failing — log's in the chat."` is just as cacheable as `"Pushed, Sir."` — both recur generically. The previous 40-char hard cap was a crude proxy that excluded legitimately reusable longer phrases.
 
 **Cache reads always check, regardless of the flag.** A previously-cached canonical phrase still plays free from disk on subsequent requests. The flag only governs writes.
 
-`SKILL.md` is the contract: Caldwell-the-skill marks only known canonical phrases (`"Pushed."`, `"Sorted Sir."`, `"Tests passing."`, etc.) with `--cacheable` and lets context-specific lines run as one-shots. The full canon is in [`SKILL.md`](SKILL.md#repeat-phrases-liberally--theyre-free-but-only-the-canon-gets-cached).
+`SKILL.md` is the contract: Caldwell-the-skill flags any line he'd happily fire again on a different turn (across all four tiers) with `--cacheable`, and lets context-specific lines (file names, feature mentions, session-specific findings) run as one-shots. The full canon and scenario list is in [`SKILL.md`](SKILL.md#caching--the-test-is-reusability-not-tier-or-length).
 
 Admin endpoints for cleanup:
 
@@ -272,7 +273,7 @@ Cacheable canonical phrase (writes to phrase cache; default is no-cache):
 ./scripts/say.sh "Tests passing." --cacheable
 ```
 
-Pass `--cacheable` only for known generic phrases. Context-specific lines (deploy results, file names, feature mentions) should run without the flag so they don't pollute the popular-phrases list. The daemon also refuses cache writes on text longer than 40 chars regardless of the flag.
+Pass `--cacheable` for any line you'd happily fire again on a different turn — generic states, reusable observations, character beats not tied to a specific moment. Context-specific lines (file names, feature mentions, session-specific findings) should run without the flag. There's no length cap; the test is contextual reusability, not character count.
 
 Priority (jumps the queue):
 
@@ -304,9 +305,11 @@ ElevenLabs charges per character of text-to-speech. The bias-flipped `SKILL.md` 
 
 Canonical generic phrases get cached at `cache/phrases/{hash}.mp3` (with `{hash}.json` sidecars for text + play counts) and replay for **zero credits, zero rate-limit impact, instant playback**. Cache reads always check; a previously-cached line never re-bills.
 
-**Cache writes are opt-in to keep the canon clean.** `POST /speak` requires `cacheable: true` (and `say.sh` requires `--cacheable`) before the daemon writes a new entry. Without the flag, the audio plays once and is discarded — no cache pollution from one-shot context-specific lines like "Cache panel's wired in, Sir." A hard 40-char text-length cap (`SPEAK_PHRASE_CACHE_MAX_TEXT_LEN`) refuses cache writes regardless of the flag, on the assumption that anything longer is context-specific.
+**Cache writes are opt-in to keep the canon clean.** `POST /speak` requires `cacheable: true` (and `say.sh` requires `--cacheable`) before the daemon writes a new entry. Without the flag, the audio plays once and is discarded — no cache pollution from one-shot context-specific lines like "Cache panel's wired in, Sir."
 
-`SKILL.md` is the contract: Caldwell-the-skill knows the canon (`"Pushed."`, `"Sorted Sir."`, `"Tests passing."`, etc.), passes `--cacheable` only for those, and lets everything else run as one-shots. At session start he also runs:
+The test is reusability, not length: any line across any tier gets cached if it'd plausibly fire again on a different turn. A 60-char generic Tier 2 line like `"Right then Sir, deploy's gone through clean."` is just as cacheable as `"Pushed."`. The previous 40-char hard cap was a crude proxy and has been removed.
+
+`SKILL.md` is the contract: Caldwell-the-skill flags reusable lines (across all tiers) with `--cacheable`, and lets context-specific lines (file names, feature mentions, session-specific findings) run as one-shots. At session start he also runs:
 
 ```bash
 curl -s 'http://127.0.0.1:7865/cache/phrases?sort=popular&limit=30'

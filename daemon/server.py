@@ -290,9 +290,10 @@ def _voice_settings() -> dict:
 # Repeated phrases like "On it Sir." replay from local disk — zero ElevenLabs credits.
 PHRASE_CACHE_DIR = CACHE_DIR / "phrases"
 PHRASE_CACHE_MAX_BYTES = int(os.environ.get("SPEAK_PHRASE_CACHE_MAX_BYTES", str(100 * 1024 * 1024)))
-# Cache writes are restricted to short canonical phrases. Anything longer is
-# almost always context-specific and would pollute the popular-phrases list.
-PHRASE_CACHE_MAX_TEXT_LEN = int(os.environ.get("SPEAK_PHRASE_CACHE_MAX_TEXT_LEN", "40"))
+# Cache writes are gated solely by the explicit cacheable flag — caller (the
+# skill) decides reusability based on context, not on length. The previous
+# 40-char hard cap was blocking legitimately reusable longer phrases like
+# "I'm afraid the tests are failing — log's in the chat."
 
 
 def _phrase_cache_key(text: str, voice_id: str) -> str:
@@ -1204,12 +1205,11 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     if channel is not None and not isinstance(channel, str):
         return JSONResponse({"error": "Channel must be a string"}, status_code=400)
 
-    # Cache discipline: only canonical, generic, re-usable phrases get cached.
-    # Default false — caller (Caldwell-the-skill) must explicitly opt in for
-    # known-canonical phrases. Length cap is a safety net: phrases > 40 chars
-    # are almost always context-specific and never get cached even if flagged.
+    # Cache discipline: only generic, reusable phrases get cached. Default
+    # false — caller (Caldwell-the-skill) opts in based on judgment about
+    # whether the line is likely to recur. No length cap; reusability is
+    # contextual, not character-bound.
     cacheable = bool(body.get("cacheable", False))
-    cacheable_effective = cacheable and len(text) <= PHRASE_CACHE_MAX_TEXT_LEN
 
     vid = await resolve_voice_async(voice_raw)
     if not _api_key():
@@ -1260,14 +1260,8 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
             try:
                 path = await asyncio.to_thread(_fetch_tts, text, vid)
                 entry.audio_path = path
-                if cacheable_effective:
+                if cacheable:
                     await asyncio.to_thread(_phrase_cache_put, text, vid, path)
-                elif cacheable and not cacheable_effective:
-                    log.info(
-                        f"Cache write refused for {entry_id}: text length "
-                        f"{len(text)} > SPEAK_PHRASE_CACHE_MAX_TEXT_LEN "
-                        f"({PHRASE_CACHE_MAX_TEXT_LEN}). Likely context-specific."
-                    )
             except Exception as exc:
                 log.error(f"Background TTS fetch failed for {entry_id}: {exc}")
                 entry.fetch_failed = True

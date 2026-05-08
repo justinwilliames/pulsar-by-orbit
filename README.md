@@ -1,5 +1,7 @@
 # Caldwell
 
+[![Build CaldwellDashboard](https://github.com/justinwilliames/caldwell-speak/actions/workflows/build.yml/badge.svg)](https://github.com/justinwilliames/caldwell-speak/actions/workflows/build.yml)
+
 A voice for Claude Code. Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives, "Sir" by default. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, and a launchd config that keeps Caldwell ready whenever Claude Code calls. Caldwell speaks for everything: completions, blockers, sub-agent results — the lot.
 
 Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is theirs, the persona is mine.

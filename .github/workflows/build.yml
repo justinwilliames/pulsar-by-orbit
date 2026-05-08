@@ -1,0 +1,57 @@
+name: Build CaldwellDashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'macos/CaldwellDashboard/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+    paths:
+      - 'macos/CaldwellDashboard/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          swift --version
+          xcode-select -p || true
+
+      - name: Verify runner is macOS 26+
+        run: |
+          MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+          if [ "$MAJOR" -lt 26 ]; then
+            echo "::error::Runner is on macOS $(sw_vers -productVersion). Caldwell requires macOS 26+ (Liquid Glass APIs). If macos-latest still points to an older version, change runs-on to macos-26 explicitly once GitHub publishes that label."
+            exit 1
+          fi
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: macos/CaldwellDashboard/.build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/CaldwellDashboard/Package.swift', 'macos/CaldwellDashboard/Sources/**/*.swift') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
+
+      - name: Build (release)
+        working-directory: macos/CaldwellDashboard
+        run: swift build -c release
+
+      - name: Verify binary
+        run: |
+          BINARY=$(find macos/CaldwellDashboard/.build -name CaldwellDashboard -type f -path "*/release/*" | head -1)
+          if [ -z "$BINARY" ]; then
+            echo "::error::Build did not produce a CaldwellDashboard binary"
+            exit 1
+          fi
+          file "$BINARY"
+          echo "Built: $BINARY"

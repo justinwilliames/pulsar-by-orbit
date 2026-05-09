@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingPanel: FloatingPanelController?
+    private var httpServer: CaldwellHTTPServer?
     let viewModel = DashboardViewModel()
 
     // Minimum time the panel stays visible after isActive flips to false.
@@ -25,7 +26,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         viewModel.connect()
-        NSLog("[Caldwell] AppDelegate finished launching, floatingPanel=\(floatingPanel != nil), SSE connecting")
+
+        // Start the in-process HTTP server. During the Python → Swift
+        // migration this listens on port 7866 alongside the daemon's 7865;
+        // Phase 5 flips it to 7865 and retires the daemon.
+        httpServer = CaldwellHTTPServer()
+        httpServer?.start()
+
+        NSLog("[Caldwell] AppDelegate finished launching, floatingPanel=\(floatingPanel != nil), SSE connecting, httpServer on \(CaldwellHTTPServer.migrationPort)")
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        httpServer?.stop()
     }
 
     private func updateFloatingPanel(isActive: Bool) {

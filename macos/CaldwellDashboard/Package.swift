@@ -7,9 +7,20 @@ let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().pat
 let package = Package(
     name: "CaldwellDashboard",
     platforms: [.macOS("26.0")],
+    dependencies: [
+        // Hummingbird — SSWG-endorsed lightweight HTTP server. Used to host
+        // the local API (/speak, /queue, /cache, /settings, /events, …)
+        // inside the app process so we can retire the standalone Python
+        // daemon. Keeping the HTTP surface preserves say.sh + Stop hook
+        // compatibility while collapsing to a single binary.
+        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
+    ],
     targets: [
         .executableTarget(
             name: "CaldwellDashboard",
+            dependencies: [
+                .product(name: "Hummingbird", package: "hummingbird"),
+            ],
             path: "Sources",
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-sectcreate",

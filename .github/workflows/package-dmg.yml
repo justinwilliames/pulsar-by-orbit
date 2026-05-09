@@ -1,0 +1,171 @@
+name: Package DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'macos/CaldwellDashboard/**'
+      - 'assets/portraits/**'
+      - '.github/workflows/package-dmg.yml'
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  package:
+    # Same macOS 26 caveat as build.yml — Liquid Glass APIs require macOS 26.
+    # Soft-skip on Sequoia runners so the workflow stays green; flip runs-on
+    # to macos-26 once GitHub publishes that label.
+    runs-on: macos-latest
+
+    permissions:
+      contents: write   # needed for gh release create on tag pushes
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Skip if runner is below macOS 26
+        id: precheck
+        run: |
+          MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+          if [ "$MAJOR" -lt 26 ]; then
+            echo "::warning::Runner is macOS $(sw_vers -productVersion); Caldwell requires macOS 26+. Skipping DMG until a macos-26 runner is available."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Build ────────────────────────────────────────────────────────────
+
+      - name: Cache SwiftPM
+        if: steps.precheck.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: macos/CaldwellDashboard/.build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/CaldwellDashboard/Package.swift', 'macos/CaldwellDashboard/Sources/**/*.swift') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
+
+      - name: Build (release)
+        if: steps.precheck.outputs.skip != 'true'
+        working-directory: macos/CaldwellDashboard
+        run: swift build -c release 2>&1
+
+      # ── Assemble .app bundle ─────────────────────────────────────────────
+
+      - name: Assemble Caldwell.app
+        if: steps.precheck.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Caldwell.app"
+          MACOS_DIR="$APP/Contents/MacOS"
+          RES_DIR="$APP/Contents/Resources"
+
+          mkdir -p "$MACOS_DIR" "$RES_DIR"
+
+          # Executable
+          BINARY=$(find macos/CaldwellDashboard/.build -name CaldwellDashboard \
+                   -type f -path "*/release/*" | head -1)
+          cp "$BINARY" "$MACOS_DIR/CaldwellDashboard"
+
+          # Info.plist (the linker embeds it in __TEXT/__info_plist but the OS
+          # also needs a standalone copy in Contents/ to read bundle metadata)
+          cp macos/CaldwellDashboard/Info.plist "$APP/Contents/Info.plist"
+
+          # Portraits — bundled into Resources/assets/portraits so the app
+          # works standalone without the full repo present on the user's machine
+          if [ -d assets/portraits ]; then
+            mkdir -p "$RES_DIR/assets"
+            cp -R assets/portraits "$RES_DIR/assets/portraits"
+          fi
+
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "Bundle assembled at $APP"
+          find "$APP" -type f | sort
+
+      # ── Sign (ad-hoc) ────────────────────────────────────────────────────
+
+      - name: Ad-hoc code sign
+        if: steps.precheck.outputs.skip != 'true'
+        run: |
+          # Ad-hoc signing (-) lets the app launch on the build machine and
+          # for personal/team use without a paid Developer ID certificate.
+          # Replace with a real identity for notarised distribution.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          echo "Signed OK (ad-hoc)"
+
+      # ── Package DMG ──────────────────────────────────────────────────────
+
+      - name: Create DMG
+        if: steps.precheck.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+
+          # Derive version: from tag (v1.2.3 → 1.2.3) or short SHA
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(git rev-parse --short HEAD)"
+          fi
+
+          DMG_NAME="Caldwell-${VERSION}.dmg"
+          DMG_PATH="$RUNNER_TEMP/$DMG_NAME"
+          STAGING="$RUNNER_TEMP/dmg-staging"
+
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/Caldwell.app"
+          # Applications symlink so users can drag-to-install
+          ln -s /Applications "$STAGING/Applications"
+
+          hdiutil create \
+            -volname "Caldwell ${VERSION}" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "$DMG_PATH"
+
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION"   >> "$GITHUB_ENV"
+          ls -lh "$DMG_PATH"
+
+      # ── Upload artifact (every run) ──────────────────────────────────────
+
+      - name: Upload DMG artifact
+        if: steps.precheck.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DMG_NAME }}
+          path: ${{ env.DMG_PATH }}
+          retention-days: 30
+
+      # ── GitHub Release (tag pushes only) ─────────────────────────────────
+
+      - name: Create GitHub Release
+        if: >
+          steps.precheck.outputs.skip != 'true' &&
+          startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Caldwell ${{ env.VERSION }}" \
+            --notes "## Caldwell ${{ env.VERSION }}
+
+          macOS 26 (Tahoe) required.
+
+          **Install**
+          1. Open the DMG, drag Caldwell to Applications.
+          2. Run \`scripts/install-caldwell-app-launchd.sh\` to register the LaunchAgent.
+          3. Run \`scripts/warm-cache.sh\` to pre-cache the Tier 0 phrase canon.
+
+          Ad-hoc signed — right-click → Open on first launch to bypass Gatekeeper." \
+            "$DMG_PATH"

@@ -244,7 +244,8 @@ struct SettingsView: View {
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .glassEffect(.regular.tint(.accentColor), in: Capsule())
+                        .background(Color.accentColor.opacity(0.18), in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 0.5))
                     Spacer()
                     runRateBadge(eleven)
                 }
@@ -336,7 +337,8 @@ struct SettingsView: View {
             .font(.caption2.weight(.medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .glassEffect(.regular.tint(colour), in: Capsule())
+            .background(colour.opacity(0.18), in: Capsule())
+            .overlay(Capsule().strokeBorder(colour.opacity(0.4), lineWidth: 0.5))
     }
 
     private func runRateLabel(for status: ElevenLabsUsage.Status) -> (String, Color) {

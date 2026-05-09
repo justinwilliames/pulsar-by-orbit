@@ -50,18 +50,16 @@ struct PopoverRootView: View {
 
     @State private var selectedTab: DashboardTab = .history
     @State private var navigatingForward = true
-    @Namespace private var tabNamespace
 
     var body: some View {
-        GlassEffectContainer {
-            VStack(spacing: 0) {
-                header
-                tabPicker
-                tabContent
-            }
-            .frame(width: 360, height: 520)
-            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 12))
+        VStack(spacing: 0) {
+            header
+            tabPicker
+            tabContent
         }
+        .frame(width: 360, height: 520)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
     }
 
     private var header: some View {
@@ -98,45 +96,38 @@ struct PopoverRootView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .glassEffect(
-                muted ? .regular.tint(.red).interactive() : .regular.tint(.green).interactive(),
-                in: Capsule()
-            )
+            .background(muted ? Color.red.opacity(0.18) : Color.green.opacity(0.18), in: Capsule())
+            .overlay(Capsule().strokeBorder(muted ? Color.red.opacity(0.4) : Color.green.opacity(0.4), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .help(muted ? "Caldwell is muted — click to unmute. No ElevenLabs calls while muted." : "Click to mute Caldwell — stops all ElevenLabs calls until unmuted.")
     }
 
     private var tabPicker: some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(DashboardTab.allCases, id: \.self) { tab in
-                    let isSelected = selectedTab == tab
-                    Button {
-                        guard tab != selectedTab else { return }
-                        navigatingForward = tab.index > selectedTab.index
-                        withAnimation(.spring(duration: 0.5, bounce: 0.18)) {
-                            selectedTab = tab
-                        }
-                    } label: {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
-                            .symbolEffect(.bounce, value: isSelected)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
+        HStack(spacing: 0) {
+            ForEach(DashboardTab.allCases, id: \.self) { tab in
+                let isSelected = selectedTab == tab
+                Button {
+                    guard tab != selectedTab else { return }
+                    navigatingForward = tab.index > selectedTab.index
+                    withAnimation(.spring(duration: 0.5, bounce: 0.18)) {
+                        selectedTab = tab
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-                    .glassEffect(
-                        isSelected ? .regular.tint(.accentColor).interactive() : .clear,
-                        in: Capsule()
-                    )
-                    .glassEffectID(tab.rawValue, in: tabNamespace)
-                    .help(tab.rawValue)
+                } label: {
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                        .symbolEffect(.bounce, value: isSelected)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
+                .help(tab.rawValue)
             }
         }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }

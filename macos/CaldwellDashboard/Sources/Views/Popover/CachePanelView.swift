@@ -83,10 +83,8 @@ struct CachePanelView: View {
                 .font(.caption2)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .glassEffect(
-                    isActive ? .regular.tint(.accentColor) : .regular,
-                    in: Capsule()
-                )
+                .background(isActive ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.1), in: Capsule())
+                .overlay(isActive ? Capsule().strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 0.5) : nil)
         }
         .buttonStyle(.plain)
     }
@@ -139,7 +137,8 @@ struct CachePanelView: View {
                     .symbolEffect(.pulse, isActive: playingKey == phrase.key)
             }
             .buttonStyle(.plain)
-            .glassEffect(.regular.interactive())
+            .background(.regularMaterial, in: Circle())
+            .shadow(color: .black.opacity(0.1), radius: 4)
             .help("Replay (free — from cache)")
         }
         .padding(.horizontal, 12)

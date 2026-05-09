@@ -44,12 +44,6 @@ jobs:
     needs: decide
     if: needs.decide.outputs.should_run == 'true'
     name: Build & package .dmg
-    # Caldwell uses Liquid Glass APIs introduced in macOS 26 (Tahoe). Prefer
-    # the explicit macos-26 label once GitHub has published it; until then,
-    # fall back to macos-latest with a soft pre-flight that exits 0 (rather
-    # than failing the run) when the runner is still on Sequoia. This keeps
-    # the workflow green on push while making it obvious in the logs that
-    # the build was skipped pending a 26-class runner.
     runs-on: macos-latest
     timeout-minutes: 25
 
@@ -57,19 +51,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Skip if runner is below macOS 26
-        id: precheck
-        run: |
-          MAJOR=$(sw_vers -productVersion | cut -d. -f1)
-          if [ "$MAJOR" -lt 26 ]; then
-            echo "::warning::Runner is on macOS $(sw_vers -productVersion); Caldwell requires macOS 26+ (Liquid Glass APIs). Skipping build until GitHub publishes a macos-26 label — flip runs-on to macos-26 in this workflow when it goes GA."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Cache SwiftPM
-        if: steps.precheck.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: macos/CaldwellDashboard/.build
@@ -78,7 +60,6 @@ jobs:
             swiftpm-${{ runner.os }}-
 
       - name: Resolve build version from tag (or main)
-        if: steps.precheck.outputs.skip != 'true'
         id: version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -92,13 +73,11 @@ jobs:
           echo "Building Caldwell $MARKETING_VERSION (build $BUILD_NUMBER)"
 
       - name: Build (unsigned, Release)
-        if: steps.precheck.outputs.skip != 'true'
         run: |
           cd macos/CaldwellDashboard
           swift build -c release
 
       - name: Locate built binary
-        if: steps.precheck.outputs.skip != 'true'
         id: locate
         run: |
           set -e
@@ -112,7 +91,6 @@ jobs:
           echo "Found binary at: $BINARY_PATH"
 
       - name: Assemble Caldwell.app bundle
-        if: steps.precheck.outputs.skip != 'true'
         id: bundle
         run: |
           set -e
@@ -153,7 +131,6 @@ jobs:
       # Developer ID for distribution but is the highest level of unsigned
       # distribution macOS will treat as a stable identity.
       - name: Replace linker-signed stamp with explicit ad-hoc signature
-        if: steps.precheck.outputs.skip != 'true'
         run: |
           set -e
           APP_PATH="${{ steps.bundle.outputs.app_path }}"
@@ -185,7 +162,6 @@ jobs:
           fi
 
       - name: Build .dmg via hdiutil
-        if: steps.precheck.outputs.skip != 'true'
         id: dmg
         run: |
           set -e
@@ -209,7 +185,6 @@ jobs:
           ls -la dist/
 
       - name: Upload .dmg as workflow artifact
-        if: steps.precheck.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.dmg.outputs.dmg_name }}
@@ -217,7 +192,7 @@ jobs:
           retention-days: 30
 
       - name: Install Sparkle CLI tools (sign_update)
-        if: steps.precheck.outputs.skip != 'true' && env.SPARKLE_ED_PRIVATE_KEY != ''
+        if: env.SPARKLE_ED_PRIVATE_KEY != ''
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
@@ -234,7 +209,7 @@ jobs:
           echo "SIGN_UPDATE=$SIGN_UPDATE" >> "$GITHUB_ENV"
 
       - name: Sign .dmg + generate appcast.xml
-        if: steps.precheck.outputs.skip != 'true' && env.SPARKLE_ED_PRIVATE_KEY != ''
+        if: env.SPARKLE_ED_PRIVATE_KEY != ''
         id: appcast
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
@@ -281,7 +256,7 @@ jobs:
                 <link>https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}</link>
                 <sparkle:version>${VERSION}</sparkle:version>
                 <sparkle:shortVersionString>${SHORT_VERSION}</sparkle:shortVersionString>
-                <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
                 <pubDate>${PUB_DATE}</pubDate>
                 <enclosure
                   url="${DOWNLOAD_URL}"
@@ -296,7 +271,7 @@ jobs:
           echo "appcast_path=dist/appcast.xml" >> "$GITHUB_OUTPUT"
 
       - name: Update rolling 'latest' release
-        if: steps.precheck.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
@@ -334,7 +309,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create tagged GitHub Release with .dmg + appcast
-        if: steps.precheck.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |

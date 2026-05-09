@@ -78,7 +78,8 @@ struct HistoryPanelView: View {
                     Image(systemName: "play.circle")
                         .font(.caption)
                 }
-                .glassEffect(.regular.interactive())
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.1), radius: 4)
             }
 
             if expandedId == entry.id {
@@ -124,10 +125,8 @@ struct HistoryPanelView: View {
                 .font(.caption2)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .glassEffect(
-                    isActive ? .regular.tint(.accentColor) : .regular,
-                    in: Capsule()
-                )
+                .background(isActive ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.1), in: Capsule())
+                .overlay(isActive ? Capsule().strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 0.5) : nil)
         }
         .buttonStyle(.plain)
     }

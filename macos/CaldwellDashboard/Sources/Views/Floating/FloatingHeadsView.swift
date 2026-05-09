@@ -10,8 +10,7 @@ struct FloatingHeadsView: View {
     private let arcEnd: Double = 150
 
     var body: some View {
-        GlassEffectContainer(spacing: 20) {
-            ZStack {
+        ZStack {
                 if let voice = viewModel.playback.currentVoice {
                     // Active speaker — Caldwell is the only voice, no label needed
                     FloatingPortraitView(
@@ -42,7 +41,6 @@ struct FloatingHeadsView: View {
                         .zIndex(Double(5 - index))
                     }
                 }
-            }
         }
         .frame(width: 240, height: 260)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: viewModel.queueItems.map(\.id))

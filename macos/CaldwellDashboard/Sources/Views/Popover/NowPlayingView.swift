@@ -15,8 +15,7 @@ struct NowPlayingView: View {
                 )
                 .background {
                     Circle()
-                        .fill(.clear)
-                        .glassEffect(.clear, in: Circle())
+                        .fill(.ultraThinMaterial)
                         .frame(width: 110, height: 110)
                         .allowsHitTesting(false)
                 }
@@ -61,7 +60,8 @@ struct NowPlayingView: View {
                             .font(.title2)
                     }
                     .padding(8)
-                    .glassEffect(.regular.interactive())
+                    .background(.regularMaterial, in: Circle())
+                    .shadow(color: .black.opacity(0.1), radius: 4)
                 }
                 .padding(.bottom, 8)
             }

@@ -29,15 +29,13 @@ struct TransportControlsView: View {
                 ZStack(alignment: .leading) {
                     // Track
                     Capsule()
-                        .fill(.clear)
+                        .fill(Color.secondary.opacity(0.2))
                         .frame(height: 4)
-                        .glassEffect(.clear, in: Capsule())
 
                     // Fill
                     Capsule()
                         .fill(Color.accentColor)
                         .frame(width: max(0, geo.size.width * progress), height: 4)
-                        .glassEffect(.regular.tint(.accentColor), in: Capsule())
                         .animation(.linear(duration: isDragging ? 0 : 1.0 / 30.0), value: progress)
 
                     // Thumb
@@ -92,7 +90,8 @@ struct TransportControlsView: View {
                         .font(.title2)
                 }
                 .padding(8)
-                .glassEffect(.regular.interactive())
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.1), radius: 4)
 
                 Button {
                     Task { await viewModel.skip() }
@@ -101,7 +100,8 @@ struct TransportControlsView: View {
                         .font(.title2)
                 }
                 .padding(8)
-                .glassEffect(.regular.interactive())
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.1), radius: 4)
             }
         }
         .padding(.horizontal, 16)

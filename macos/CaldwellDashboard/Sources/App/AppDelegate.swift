@@ -27,9 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         viewModel.connect()
 
-        // Start the in-process HTTP server. During the Python → Swift
-        // migration this listens on port 7866 alongside the daemon's 7865;
-        // Phase 5 flips it to 7865 and retires the daemon.
+        // Start the in-process HTTP server. Phase 5 is complete: the Swift
+        // app is now the sole listener on port 7865.
         httpServer = CaldwellHTTPServer()
         httpServer?.start()
         if let httpServer {

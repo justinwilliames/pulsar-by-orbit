@@ -15,32 +15,28 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 - **Polite / Potty Mouth toggle** — single segmented picker at the top of the menu-bar Settings panel. Persisted to `config.json` as `CALDWELL_EXPLETIVES`, surfaced via `GET /settings`, read by Caldwell-the-skill at session start.
 - **Single shared queue** — sub-agents and chief-of-staff routines never overlap their spoken output, all rendered in Caldwell's voice.
 - **macOS 26 menu-bar app** (`Caldwell.app`) — three-tab popover (History / Cache / Settings) plus an animated floating portrait that auto-appears top-left when Caldwell speaks. Mute toggle in the popover header switches the menu-bar glyph itself, so AFK mute is one click.
-- **Always-on** — optional `launchctl` configs keep both the daemon and the menu-bar app running across reboots and login sessions.
+- **Always-on** — an optional `launchctl` config keeps the menu-bar app running across reboots and login sessions.
 
 ---
 
 ## Install — Claude Code one-shot
 
-Want Claude Code to drive the whole install? Open a fresh session in any directory and paste this prompt. It walks system deps, clone, daemon, API key, playback test, skill symlink, optional menu-bar app, and persistent LaunchAgents — pausing before anything destructive.
+Want Claude Code to drive the whole install? Open a fresh session in any directory and paste this prompt. It walks system deps, clone, Swift app install, API key setup, warm-cache, skill symlink, and the single LaunchAgent that keeps Caldwell on `127.0.0.1:7865` — pausing before anything destructive.
 
 ```text
 Install Caldwell on this macOS machine end-to-end.
 
-1. Check for `ffmpeg` and `uv`. If either's missing, install with `brew install ffmpeg` and the official `uv` shell installer (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
+1. Check for `ffmpeg` and `swift`. If `ffmpeg` is missing, install it with `brew install ffmpeg`. If `swift` is missing, run `xcode-select --install`.
 2. Clone https://github.com/justinwilliames/caldwell-speak to `~/code/caldwell-speak` if it doesn't exist; otherwise `git pull` to update.
-3. Start the daemon in the background (`uv run daemon/server.py` from the repo) and confirm `curl -sf http://127.0.0.1:7865/health` returns OK.
-4. Ask me for my ElevenLabs API key and voice ID, then save them via `./scripts/say.sh --set-api-key sk_...` and `./scripts/say.sh --set-voice-id <20-char-id>`. The daemon writes the key to macOS Keychain and the voice ID to `config.json`. (If I'm on macOS 26 with the menu-bar app installed, I can also paste them into the menu-bar Settings tab — same destination.)
-5. Run `./scripts/warm-cache.sh` to pre-cache the 25 canonical Tier 0 phrases (Polite + Potty Mouth) in one go. This burns ~475 chars of the monthly free-tier 10,000 budget once, but means every Caldwell turn-end ping from day one is a free cached replay — no slow-start credit-burn period. Script is silent (cache_only mode skips audio playback during install) and idempotent (already-cached phrases skipped). Takes ~100 seconds with the rate-limit-friendly pacing.
-6. Run `./scripts/say.sh "Right then Sir, the daemon is up."` to verify playback.
+3. Check `sw_vers -productVersion`. If it's below 26, stop and tell me the single-binary Swift app install isn't supported on this machine yet. If it's 26 or later, run `./scripts/install-caldwell-app.sh` and `./scripts/install-caldwell-app-launchd.sh`, then confirm `curl -sf http://127.0.0.1:7865/health` returns OK. The LaunchAgent script should retire any old `team.yourorbit.caldwell-speak` Python daemon agent.
+4. Ask me for my ElevenLabs API key and voice ID, then save them via `./scripts/say.sh --set-api-key sk_...` and `./scripts/say.sh --set-voice-id <20-char-id>`. Caldwell writes the key to macOS Keychain and the voice ID to `config.json`. I can also paste them into the menu-bar Settings tab — same destination.
+5. Run `./scripts/warm-cache.sh` once to pre-cache the 25 canonical Tier 0 phrases (Polite + Potty Mouth). This burns ~475 chars of the monthly free-tier 10,000 budget once, but means every Caldwell turn-end ping from day one is a free cached replay. The script is silent (cache_only mode skips audio playback during install), idempotent (already-cached phrases skipped), and takes ~100 seconds with the rate-limit-friendly pacing.
+6. Run `./scripts/say.sh "Right then Sir, the Swift app is up."` to verify playback.
 7. Install the Claude Code skill: `mkdir -p ~/.claude/skills && ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak` (skip if the symlink already exists).
-8. If `sw_vers -productVersion` returns 26 or later, run `./scripts/install-caldwell-app.sh` to build and install `/Applications/Caldwell.app`.
-9. Install LaunchAgents so daemon and app auto-start at every login:
-   - `./scripts/install-launchd.sh` (daemon)
-   - `./scripts/install-caldwell-app-launchd.sh` (menu-bar app — only if step 8 ran; the script kills any duplicate instance before loading the plist)
-10. Print `launchctl list | grep yourorbit` so I can see both are registered.
-11. Tell me to open the menu-bar Caldwell → Settings tab and pick the persona mode (default is Potty Mouth; flip to Polite if I'd rather no swearing).
-12. Optional but recommended for Caldwell to actually fire on every turn: tell me to add a "Voice — fire `say.sh` at every turn-end" section to my `~/.claude/CLAUDE.md` mirroring the one in this repo's [`SKILL.md`](SKILL.md). The skill description alone is descriptive, not enforcing — the CLAUDE.md instruction is what makes it load-bearing.
-13. Remind me to restart Claude Code so it discovers the skill and re-reads CLAUDE.md.
+8. Print `launchctl list | grep yourorbit` so I can see the app LaunchAgent is registered and the old daemon is gone.
+9. Tell me to open the menu-bar Caldwell → Settings tab and pick the persona mode (default is Potty Mouth; flip to Polite if I'd rather no swearing).
+10. Optional but recommended for Caldwell to actually fire on every turn: tell me to add a "Voice — fire `say.sh` at every turn-end" section to my `~/.claude/CLAUDE.md` mirroring the one in this repo's [`SKILL.md`](SKILL.md). The skill description alone is descriptive, not enforcing — the CLAUDE.md instruction is what makes it load-bearing.
+11. Remind me to restart Claude Code so it discovers the skill and re-reads CLAUDE.md.
 
 Pause and confirm before anything that overwrites existing state (re-cloning over a working repo, overwriting `/Applications/Caldwell.app`, replacing existing LaunchAgents).
 ```
@@ -53,14 +49,18 @@ Prefer to drive each step yourself? The manual path is below.
 
 ## Install — manual five steps
 
-**macOS only** (uses `afplay` for playback). Detailed Mac setup notes: [docs/SETUP_MAC.md](docs/SETUP_MAC.md).
+**macOS only** (uses `afplay` for playback). The single-binary install path below requires macOS 26+ because `Caldwell.app` now owns the HTTP server on `127.0.0.1:7865`. Detailed Mac setup notes: [docs/SETUP_MAC.md](docs/SETUP_MAC.md).
 
 ### Step 1 — System dependencies
 
 ```
 brew install ffmpeg
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
+```
+
+If `swift` is missing, run:
+
+```
+xcode-select --install
 ```
 
 If `brew install` fails with a permissions error on `/opt/homebrew`, run `sudo chown -R $(whoami) /opt/homebrew` first, then retry.
@@ -68,8 +68,8 @@ If `brew install` fails with a permissions error on `/opt/homebrew`, run `sudo c
 Verify:
 
 ```
-which uv
 which ffmpeg
+which swift
 ```
 
 Both should return paths.
@@ -81,19 +81,19 @@ git clone https://github.com/justinwilliames/caldwell-speak.git ~/code/caldwell-
 cd ~/code/caldwell-speak
 ```
 
-### Step 3 — Start the daemon (one-off, manual)
+### Step 3 — Install the Swift app and register it at login
 
 ```
-uv run daemon/server.py
+./scripts/install-caldwell-app.sh
+./scripts/install-caldwell-app-launchd.sh
+curl -sf http://127.0.0.1:7865/health
 ```
 
-First run downloads Starlette + Uvicorn into uv's cache (one-time, ~10s), then binds to `127.0.0.1:7865`. Leave the terminal open — that's the daemon. `Ctrl-C` to stop.
-
-For an always-running daemon (recommended after first manual test), see Step 5.
+This builds `Caldwell.app`, loads the app LaunchAgent, retires any old `team.yourorbit.caldwell-speak` Python daemon agent, and makes the Swift app the sole listener on `127.0.0.1:7865`.
 
 ### Step 4 — Configure the API key + voice ID
 
-There are two equivalent ways depending on whether the menu-bar app is installed.
+There are two equivalent ways:
 
 **Via CLI (works on any macOS):**
 
@@ -102,31 +102,27 @@ There are two equivalent ways depending on whether the menu-bar app is installed
 ./scripts/say.sh --set-voice-id <20-char-id>
 ```
 
-The daemon writes the key to macOS Keychain and the voice ID to `config.json`, validating both against ElevenLabs on save.
+Caldwell writes the key to macOS Keychain and the voice ID to `config.json`, validating both against ElevenLabs on save.
 
 **Via the menu-bar app's Settings tab (macOS 26 only):**
 
-If you've already done the optional menu-bar app install (below), click the menu-bar icon → Settings, paste the API key and voice ID, hit Save. Same destinations.
+Click the menu-bar icon → Settings, paste the API key and voice ID, hit Save. Same destinations.
 
 **Where to get them:**
 
 - ElevenLabs API key — [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys)
 - Voice ID — add a voice from the [Voice Library](https://elevenlabs.io/app/voice-library) to your VoiceLab first, then copy the 20-character ID
 
-Test:
+### Step 5 — Warm the cache, test playback, and install as a Claude Code skill
 
 ```
-./scripts/say.sh "Right then Sir, the daemon is up."
-```
-
-### Step 5 — Install as a Claude Code skill
-
-This is what makes Caldwell speak *automatically* at the end of substantive Claude Code turns, rather than only when you run `say.sh` by hand.
-
-```
+./scripts/warm-cache.sh
+./scripts/say.sh "Right then Sir, the Swift app is up."
 mkdir -p ~/.claude/skills
 ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak
 ```
+
+This is what makes Caldwell speak *automatically* at the end of substantive Claude Code turns, rather than only when you run `say.sh` by hand.
 
 Then **restart Claude Code** (close and reopen) so it discovers the new skill.
 
@@ -136,7 +132,7 @@ The credit envelope is preserved by the cache, the daily char cap, and the per-m
 
 ---
 
-## Optional — native menu-bar app with floating Caldwell
+## Native menu-bar app with floating Caldwell
 
 The repo ships a SwiftUI menu-bar app (`macos/CaldwellDashboard/`) that gives you:
 
@@ -165,7 +161,7 @@ This compiles the binary, assembles `Caldwell.app`, ad-hoc-signs it, and copies 
 open -a Caldwell
 ```
 
-The menu-bar icon appears. Click it for the popover. Caldwell's floating portrait shows up automatically when audio is playing (which won't happen until you've configured the daemon and an API key — see Steps 3 and 4 above).
+The menu-bar icon appears. Click it for the popover. Caldwell's floating portrait shows up automatically when audio is playing (which won't happen until you've configured the app and an API key — see Steps 3 and 4 above).
 
 ### Auto-launch at login
 
@@ -174,6 +170,7 @@ The menu-bar icon appears. Click it for the popover. Caldwell's floating portrai
 ```
 
 Registers `Caldwell.app` with `launchd` so it starts at every login. Removes itself cleanly via the printed `launchctl unload` command if you want to disable it later.
+If a legacy `team.yourorbit.caldwell-speak` Python daemon LaunchAgent exists, the script unloads and disables it first.
 
 ### Just rebuild after pulling updates
 
@@ -182,31 +179,6 @@ Registers `Caldwell.app` with `launchd` so it starts at every login. Removes its
 ```
 
 Same script handles re-builds — it overwrites the existing `/Applications/Caldwell.app`.
-
----
-
-## Optional — keep the daemon always running (launchd)
-
-After Step 3 confirms the daemon works, register it with `launchd` so macOS keeps it alive across reboots and logins:
-
-```
-./scripts/install-launchd.sh
-```
-
-The script generates a plist using your current `uv` and repo paths, copies it to `~/Library/LaunchAgents/`, and loads it. Logs go to `logs/daemon.{out,err}.log` in the repo.
-
-Check it's running:
-
-```
-launchctl list | grep caldwell-speak
-curl -sf http://127.0.0.1:7865/health
-```
-
-To stop and remove:
-
-```
-./scripts/uninstall-launchd.sh
-```
 
 ---
 

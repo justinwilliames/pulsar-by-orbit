@@ -3,21 +3,20 @@ import Hummingbird
 
 /// Local HTTP server hosted inside Caldwell.app. Exposes the same REST surface
 /// as the Python daemon so `say.sh`, the Stop hook, and external scripts keep
-/// working unchanged once the daemon is retired.
+/// working unchanged now that the daemon is retired.
 ///
-/// Port schedule:
-///   7866 — migration port (coexists with Python daemon on 7865)
-///   7865 — Phase 5: daemon retired, this becomes the sole listener
+/// Port:
+///   7865 — Phase 5: now the sole listener on 7865, Python daemon retired
 ///
 /// Phase progress:
 ///   Phase 1 ✓  /health
 ///   Phase 2 ✓  /speak  (ElevenLabs TTS, phrase cache, audio queue)
 ///   Phase 3    /history, /cache/*, /settings, /usage
 ///   Phase 4    /events (SSE), /portraits/*
-///   Phase 5    flip to 7865, retire Python daemon
+///   Phase 5 ✓  flip to 7865, retire Python daemon
 final class CaldwellHTTPServer: @unchecked Sendable {
 
-    static let migrationPort: Int = 7866
+    static let migrationPort: Int = 7865
 
     private var serverTask: Task<Void, Error>?
     private let port: Int

@@ -6,6 +6,9 @@ set -e
 
 LABEL="team.yourorbit.CaldwellDashboard"
 PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
+DAEMON_LABEL="team.yourorbit.caldwell-speak"
+DAEMON_PLIST_PATH="$HOME/Library/LaunchAgents/$DAEMON_LABEL.plist"
+GUI_DOMAIN="gui/$(id -u)"
 APP_PATH="/Applications/Caldwell.app"
 EXECUTABLE="$APP_PATH/Contents/MacOS/CaldwellDashboard"
 
@@ -49,6 +52,13 @@ if pgrep -f "$EXECUTABLE" >/dev/null 2>&1; then
   echo "Stopping existing Caldwell.app instance(s) so launchd can manage a single process..."
   pkill -f "$EXECUTABLE" 2>/dev/null || true
   sleep 1
+fi
+
+if [ -f "$DAEMON_PLIST_PATH" ] || launchctl list 2>/dev/null | grep -q "$DAEMON_LABEL"; then
+  echo "Retiring legacy Python daemon LaunchAgent ($DAEMON_LABEL)..."
+  launchctl unload "$DAEMON_PLIST_PATH" 2>/dev/null || true
+  launchctl disable "$GUI_DOMAIN/$DAEMON_LABEL" 2>/dev/null || true
+  echo "say.sh now points at the Swift app on http://127.0.0.1:7865"
 fi
 
 launchctl unload "$PLIST_PATH" 2>/dev/null || true

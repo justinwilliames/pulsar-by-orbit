@@ -21,7 +21,7 @@
     <key>SUFeedURL</key>
     <string>https://github.com/justinwilliames/caldwell-speak/releases/download/latest/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>REPLACE_WITH_PUBLIC_KEY</string>
+    <string>4HZt8Wm9W7FCkufc4a8CneXFmCd9v3UM3dIa6ob2xXE=</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSAppTransportSecurity</key>

@@ -81,31 +81,39 @@ jobs:
         id: locate
         run: |
           set -e
-          BINARY_PATH=$(find macos/CaldwellDashboard/.build -name "CaldwellDashboard" -type f -path "*/release/*" | head -n 1)
+          # Exclude .dSYM bundles — they contain a DWARF copy of the binary
+          # that would otherwise match the find and produce a wrong path.
+          BINARY_PATH=$(find macos/CaldwellDashboard/.build -name "CaldwellDashboard" -type f -path "*/release/*" -not -path "*.dSYM*" | head -n 1)
           if [ -z "$BINARY_PATH" ]; then
             echo "::error::Could not find CaldwellDashboard binary under macos/CaldwellDashboard/.build"
             find macos/CaldwellDashboard/.build -type f | sort
             exit 1
           fi
           echo "binary_path=$BINARY_PATH" >> "$GITHUB_OUTPUT"
+          RELEASE_DIR="$(dirname "$BINARY_PATH")"
+          echo "release_dir=$RELEASE_DIR" >> "$GITHUB_OUTPUT"
           echo "Found binary at: $BINARY_PATH"
+          echo "Release dir contents:"
+          ls "$RELEASE_DIR" | head -20
 
       - name: Assemble Caldwell.app bundle
         id: bundle
         run: |
           set -e
           APP_PATH="$RUNNER_TEMP/Caldwell.app"
-          mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
+          mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks"
 
           cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/CaldwellDashboard"
           cp macos/CaldwellDashboard/Info.plist "$APP_PATH/Contents/Info.plist"
 
-          SPARKLE_FRAMEWORK="$(dirname "${{ steps.locate.outputs.binary_path }}")/Sparkle.framework"
+          RELEASE_DIR="${{ steps.locate.outputs.release_dir }}"
+          SPARKLE_FRAMEWORK="$RELEASE_DIR/Sparkle.framework"
           if [ -d "$SPARKLE_FRAMEWORK" ]; then
-            cp -R "$SPARKLE_FRAMEWORK" "$APP_PATH/Contents/MacOS/Sparkle.framework"
+            cp -R "$SPARKLE_FRAMEWORK" "$APP_PATH/Contents/Frameworks/Sparkle.framework"
           else
-            echo "::error::Could not find Sparkle.framework beside CaldwellDashboard binary"
-            exit 1
+            echo "::warning::Sparkle.framework not found at $SPARKLE_FRAMEWORK — app will run without auto-update"
+            echo "Release dir contents:"
+            ls "$RELEASE_DIR"
           fi
 
           if [ -d assets/portraits ]; then

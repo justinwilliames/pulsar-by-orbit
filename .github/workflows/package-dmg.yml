@@ -1,48 +1,72 @@
-name: Package DMG
+name: Build Caldwell
+
+# Builds an unsigned Caldwell.app, wraps it in a .dmg, and (when
+# triggered by a v*.*.* tag) attaches the .dmg + appcast.xml to a GitHub
+# Release. Modelled on the orion-by-orbit build workflow.
+#
+# No Apple Developer ID required for now. Output is unsigned — users see a
+# Gatekeeper prompt on first launch and bypass it once with
+# `xattr -dr com.apple.quarantine /Applications/Caldwell.app`
+# (documented in the README and in each release's body).
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'macos/CaldwellDashboard/**'
-      - 'assets/portraits/**'
-      - '.github/workflows/package-dmg.yml'
-  push:
     tags:
       - 'v*.*.*'
-  workflow_dispatch:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
-  package:
-    # Same macOS 26 caveat as build.yml — Liquid Glass APIs require macOS 26.
-    # Soft-skip on Sequoia runners so the workflow stays green; flip runs-on
-    # to macos-26 once GitHub publishes that label.
-    runs-on: macos-latest
+  decide:
+    name: Skip duplicate run?
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.gate.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: gate
+        run: |
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+            if git tag --points-at HEAD | grep -qE '^v[0-9]'; then
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "::notice::Skipping main run — commit has v* tag"
+              exit 0
+            fi
+          fi
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
 
-    permissions:
-      contents: write   # needed for gh release create on tag pushes
+  build:
+    needs: decide
+    if: needs.decide.outputs.should_run == 'true'
+    name: Build & package .dmg
+    # Caldwell uses Liquid Glass APIs introduced in macOS 26 (Tahoe). Prefer
+    # the explicit macos-26 label once GitHub has published it; until then,
+    # fall back to macos-latest with a soft pre-flight that exits 0 (rather
+    # than failing the run) when the runner is still on Sequoia. This keeps
+    # the workflow green on push while making it obvious in the logs that
+    # the build was skipped pending a 26-class runner.
+    runs-on: macos-latest
+    timeout-minutes: 25
 
     steps:
-      - name: Checkout
+      - name: Check out source
         uses: actions/checkout@v4
-
-      - name: Show toolchain
-        run: |
-          sw_vers
-          swift --version
 
       - name: Skip if runner is below macOS 26
         id: precheck
         run: |
           MAJOR=$(sw_vers -productVersion | cut -d. -f1)
           if [ "$MAJOR" -lt 26 ]; then
-            echo "::warning::Runner is macOS $(sw_vers -productVersion); Caldwell requires macOS 26+. Skipping DMG until a macos-26 runner is available."
+            echo "::warning::Runner is on macOS $(sw_vers -productVersion); Caldwell requires macOS 26+ (Liquid Glass APIs). Skipping build until GitHub publishes a macos-26 label — flip runs-on to macos-26 in this workflow when it goes GA."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-
-      # ── Build ────────────────────────────────────────────────────────────
 
       - name: Cache SwiftPM
         if: steps.precheck.outputs.skip != 'true'
@@ -53,119 +77,296 @@ jobs:
           restore-keys: |
             swiftpm-${{ runner.os }}-
 
-      - name: Build (release)
+      - name: Resolve build version from tag (or main)
         if: steps.precheck.outputs.skip != 'true'
-        working-directory: macos/CaldwellDashboard
-        run: swift build -c release 2>&1
-
-      # ── Assemble .app bundle ─────────────────────────────────────────────
-
-      - name: Assemble Caldwell.app
-        if: steps.precheck.outputs.skip != 'true'
+        id: version
         run: |
-          set -euo pipefail
-          APP="$RUNNER_TEMP/Caldwell.app"
-          MACOS_DIR="$APP/Contents/MacOS"
-          RES_DIR="$APP/Contents/Resources"
-
-          mkdir -p "$MACOS_DIR" "$RES_DIR"
-
-          # Executable
-          BINARY=$(find macos/CaldwellDashboard/.build -name CaldwellDashboard \
-                   -type f -path "*/release/*" | head -1)
-          cp "$BINARY" "$MACOS_DIR/CaldwellDashboard"
-
-          # Info.plist (the linker embeds it in __TEXT/__info_plist but the OS
-          # also needs a standalone copy in Contents/ to read bundle metadata)
-          cp macos/CaldwellDashboard/Info.plist "$APP/Contents/Info.plist"
-
-          # Portraits — bundled into Resources/assets/portraits so the app
-          # works standalone without the full repo present on the user's machine
-          if [ -d assets/portraits ]; then
-            mkdir -p "$RES_DIR/assets"
-            cp -R assets/portraits "$RES_DIR/assets/portraits"
-          fi
-
-          echo "APP=$APP" >> "$GITHUB_ENV"
-          echo "Bundle assembled at $APP"
-          find "$APP" -type f | sort
-
-      # ── Sign (ad-hoc) ────────────────────────────────────────────────────
-
-      - name: Ad-hoc code sign
-        if: steps.precheck.outputs.skip != 'true'
-        run: |
-          # Ad-hoc signing (-) lets the app launch on the build machine and
-          # for personal/team use without a paid Developer ID certificate.
-          # Replace with a real identity for notarised distribution.
-          codesign --force --deep --sign - "$APP"
-          codesign --verify --deep --strict "$APP"
-          echo "Signed OK (ad-hoc)"
-
-      # ── Package DMG ──────────────────────────────────────────────────────
-
-      - name: Create DMG
-        if: steps.precheck.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-
-          # Derive version: from tag (v1.2.3 → 1.2.3) or short SHA
-          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            MARKETING_VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="$(git rev-parse --short HEAD)"
+            MARKETING_VERSION="0.0.${{ github.run_number }}"
+          fi
+          BUILD_NUMBER="${{ github.run_number }}"
+          echo "marketing_version=$MARKETING_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Building Caldwell $MARKETING_VERSION (build $BUILD_NUMBER)"
+
+      - name: Build (unsigned, Release)
+        if: steps.precheck.outputs.skip != 'true'
+        run: |
+          cd macos/CaldwellDashboard
+          swift build -c release
+
+      - name: Locate built binary
+        if: steps.precheck.outputs.skip != 'true'
+        id: locate
+        run: |
+          set -e
+          BINARY_PATH=$(find macos/CaldwellDashboard/.build -name "CaldwellDashboard" -type f -path "*/release/*" | head -n 1)
+          if [ -z "$BINARY_PATH" ]; then
+            echo "::error::Could not find CaldwellDashboard binary under macos/CaldwellDashboard/.build"
+            find macos/CaldwellDashboard/.build -type f | sort
+            exit 1
+          fi
+          echo "binary_path=$BINARY_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found binary at: $BINARY_PATH"
+
+      - name: Assemble Caldwell.app bundle
+        if: steps.precheck.outputs.skip != 'true'
+        id: bundle
+        run: |
+          set -e
+          APP_PATH="$RUNNER_TEMP/Caldwell.app"
+          mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
+
+          cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/CaldwellDashboard"
+          cp macos/CaldwellDashboard/Info.plist "$APP_PATH/Contents/Info.plist"
+
+          if [ -d assets/portraits ]; then
+            mkdir -p "$APP_PATH/Contents/Resources/assets"
+            cp -R assets/portraits "$APP_PATH/Contents/Resources/assets/portraits"
           fi
 
-          DMG_NAME="Caldwell-${VERSION}.dmg"
-          DMG_PATH="$RUNNER_TEMP/$DMG_NAME"
-          STAGING="$RUNNER_TEMP/dmg-staging"
+          chmod +x "$APP_PATH/Contents/MacOS/CaldwellDashboard"
 
-          mkdir -p "$STAGING"
-          cp -R "$APP" "$STAGING/Caldwell.app"
-          # Applications symlink so users can drag-to-install
-          ln -s /Applications "$STAGING/Applications"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found .app at: $APP_PATH"
+
+      # The swift build step above produces a binary with only the
+      # *linker-signed* ad-hoc stamp the arm64 linker emits during
+      # compilation. macOS treats linker-signed binaries as effectively
+      # unsigned for TCC purposes — Accessibility / Mic / Keychain grants
+      # are silently ignored even when the user has toggled the permission
+      # on in System Settings.
+      #
+      # Replacing it with an explicit ad-hoc signature (`codesign --sign -`)
+      # produces a code signature with a real Designated Requirement keyed to
+      # the binary's CDHash. TCC honours that. Doesn't replace a real
+      # Developer ID for distribution but is the highest level of unsigned
+      # distribution macOS will treat as a stable identity.
+      - name: Replace linker-signed stamp with explicit ad-hoc signature
+        if: steps.precheck.outputs.skip != 'true'
+        run: |
+          set -e
+          APP_PATH="${{ steps.bundle.outputs.app_path }}"
+
+          echo "Before re-signing:"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -E "Signature|flags|CDHash" || true
+
+          # `--deep` re-signs nested frameworks (Sparkle.framework) so the
+          # bundle is internally consistent. `--force` overrides the existing
+          # linker-signed signature.
+          #
+          # Intentionally NOT passing `--options runtime`. Hardened runtime
+          # without the matching entitlements (com.apple.security.cs.*)
+          # prevents Sparkle.framework from loading at app launch — the
+          # binary signs cleanly but the .app silently fails to start. We
+          # can revisit hardened runtime after the real Developer ID cert
+          # lands and we set up the full notarisation flow with
+          # entitlements; for ad-hoc distribution it adds risk without
+          # benefit because TCC doesn't require it.
+          codesign --force --deep --sign - "$APP_PATH"
+
+          echo "After re-signing:"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -E "Signature|flags|CDHash" || true
+
+          # Sanity check: signature should be `adhoc` without `linker-signed`.
+          if codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "linker-signed"; then
+            echo "::error::Signature still flagged linker-signed after explicit codesign"
+            exit 1
+          fi
+
+      - name: Build .dmg via hdiutil
+        if: steps.precheck.outputs.skip != 'true'
+        id: dmg
+        run: |
+          set -e
+          APP_PATH="${{ steps.bundle.outputs.app_path }}"
+          VERSION="${{ steps.version.outputs.marketing_version }}"
+          DMG_NAME="Caldwell-${VERSION}.dmg"
+
+          mkdir -p dist dmg-staging
+          cp -R "$APP_PATH" dmg-staging/
+          ln -s /Applications dmg-staging/Applications
 
           hdiutil create \
-            -volname "Caldwell ${VERSION}" \
-            -srcfolder "$STAGING" \
+            -volname "Caldwell" \
+            -srcfolder dmg-staging \
             -ov \
             -format UDZO \
-            "$DMG_PATH"
+            "dist/${DMG_NAME}"
 
-          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
-          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
-          echo "VERSION=$VERSION"   >> "$GITHUB_ENV"
-          ls -lh "$DMG_PATH"
+          echo "dmg_path=dist/${DMG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "dmg_name=${DMG_NAME}" >> "$GITHUB_OUTPUT"
+          ls -la dist/
 
-      # ── Upload artifact (every run) ──────────────────────────────────────
-
-      - name: Upload DMG artifact
+      - name: Upload .dmg as workflow artifact
         if: steps.precheck.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.DMG_NAME }}
-          path: ${{ env.DMG_PATH }}
+          name: ${{ steps.dmg.outputs.dmg_name }}
+          path: ${{ steps.dmg.outputs.dmg_path }}
           retention-days: 30
 
-      # ── GitHub Release (tag pushes only) ─────────────────────────────────
-
-      - name: Create GitHub Release
-        if: >
-          steps.precheck.outputs.skip != 'true' &&
-          startsWith(github.ref, 'refs/tags/v')
+      - name: Install Sparkle CLI tools (sign_update)
+        if: steps.precheck.outputs.skip != 'true' && env.SPARKLE_ED_PRIVATE_KEY != ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Caldwell ${{ env.VERSION }}" \
-            --notes "## Caldwell ${{ env.VERSION }}
+          set -e
+          SPARKLE_VERSION="2.6.4"
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" -o /tmp/sparkle.tar.xz
+          mkdir -p /tmp/sparkle && tar -xJf /tmp/sparkle.tar.xz -C /tmp/sparkle
+          SIGN_UPDATE=$(find /tmp/sparkle -name "sign_update" -type f | head -n 1)
+          if [ -z "$SIGN_UPDATE" ]; then
+            echo "::error::sign_update not found in Sparkle bundle"
+            exit 1
+          fi
+          chmod +x "$SIGN_UPDATE"
+          echo "SIGN_UPDATE=$SIGN_UPDATE" >> "$GITHUB_ENV"
 
-          macOS 26 (Tahoe) required.
+      - name: Sign .dmg + generate appcast.xml
+        if: steps.precheck.outputs.skip != 'true' && env.SPARKLE_ED_PRIVATE_KEY != ''
+        id: appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -e
+          DMG_PATH="${{ steps.dmg.outputs.dmg_path }}"
+          DMG_NAME="${{ steps.dmg.outputs.dmg_name }}"
 
-          **Install**
-          1. Open the DMG, drag Caldwell to Applications.
-          2. Run \`scripts/install-caldwell-app-launchd.sh\` to register the LaunchAgent.
-          3. Run \`scripts/warm-cache.sh\` to pre-cache the Tier 0 phrase canon.
+          BUILD_NUMBER="${{ steps.version.outputs.build_number }}"
+          SHORT_VERSION="${{ steps.version.outputs.marketing_version }}"
+          VERSION="$BUILD_NUMBER"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          else
+            RELEASE_TAG="latest"
+          fi
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${DMG_NAME}"
 
-          Ad-hoc signed — right-click → Open on first launch to bypass Gatekeeper." \
-            "$DMG_PATH"
+          KEY_FILE=$(mktemp)
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$KEY_FILE"
+
+          SIG_OUTPUT=$("$SIGN_UPDATE" -f "$KEY_FILE" "$DMG_PATH")
+          rm -f "$KEY_FILE"
+          ED_SIGNATURE=$(echo "$SIG_OUTPUT" | grep -oE 'sparkle:edSignature="[^"]*"' | sed 's/.*="\(.*\)"/\1/')
+          DMG_LENGTH=$(echo "$SIG_OUTPUT" | grep -oE 'length="[^"]*"' | sed 's/.*="\(.*\)"/\1/')
+          if [ -z "$ED_SIGNATURE" ] || [ -z "$DMG_LENGTH" ]; then
+            echo "::error::Could not parse sign_update output"
+            exit 1
+          fi
+
+          PUB_DATE=$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")
+
+          mkdir -p dist
+          cat > dist/appcast.xml <<APPCAST
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Caldwell</title>
+              <link>https://github.com/${GITHUB_REPOSITORY}/releases/latest</link>
+              <description>Caldwell — ElevenLabs TTS voice assistant for macOS.</description>
+              <language>en</language>
+              <item>
+                <title>Caldwell ${SHORT_VERSION}</title>
+                <link>https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}</link>
+                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:shortVersionString>${SHORT_VERSION}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+                <pubDate>${PUB_DATE}</pubDate>
+                <enclosure
+                  url="${DOWNLOAD_URL}"
+                  length="${DMG_LENGTH}"
+                  type="application/octet-stream"
+                  sparkle:edSignature="${ED_SIGNATURE}" />
+              </item>
+            </channel>
+          </rss>
+          APPCAST
+
+          echo "appcast_path=dist/appcast.xml" >> "$GITHUB_OUTPUT"
+
+      - name: Update rolling 'latest' release
+        if: steps.precheck.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Caldwell — latest dev build"
+          files: |
+            ${{ steps.dmg.outputs.dmg_path }}
+            ${{ steps.appcast.outputs.appcast_path }}
+          prerelease: true
+          make_latest: "false"
+          body: |
+            **Caldwell — ElevenLabs TTS voice assistant for macOS.** Rolling latest dev build, refreshed on every push to `main`. For tagged stable releases see the [Releases list](https://github.com/justinwilliames/caldwell-speak/releases).
+
+            Built from commit [`${{ github.sha }}`](https://github.com/justinwilliames/caldwell-speak/commit/${{ github.sha }}).
+
+            > [!IMPORTANT]
+            > **You MUST run a Terminal command before this app will open.**
+            > Caldwell is unsigned (no Apple Developer ID yet), so macOS Gatekeeper will refuse to launch it.
+
+            ## Install
+
+            ### 1. Download the .dmg below
+            ### 2. Drag Caldwell into Applications
+            ### 3. ⚠️ REQUIRED — run this in Terminal
+
+            ```bash
+            xattr -dr com.apple.quarantine "/Applications/Caldwell.app"
+            ```
+
+            One-time per install. Right-click → **Open** also works.
+
+            ### 4. Launch from Applications
+
+            Caldwell runs from Applications and checks this feed for updates.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create tagged GitHub Release with .dmg + appcast
+        if: steps.precheck.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.dmg.outputs.dmg_path }}
+            ${{ steps.appcast.outputs.appcast_path }}
+          name: Caldwell ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: false
+          make_latest: "true"
+          body: |
+            **Caldwell — ElevenLabs TTS voice assistant for macOS.**
+
+            > [!IMPORTANT]
+            > **You MUST run a Terminal command before this app will open.**
+            > Caldwell is unsigned (no Apple Developer ID yet), so macOS Gatekeeper will refuse to launch it.
+
+            ## Install — three steps, do all of them
+
+            ### 1. Download the .dmg
+
+            Click `${{ steps.dmg.outputs.dmg_name }}` below.
+
+            ### 2. Drag Caldwell into Applications
+
+            Open the `.dmg`, drag the **Caldwell** icon into the **Applications** shortcut.
+
+            ### 3. ⚠️ REQUIRED — run this in Terminal
+
+            ```bash
+            xattr -dr com.apple.quarantine "/Applications/Caldwell.app"
+            ```
+
+            One-time per install. Right-click → **Open** also works, as does System Settings → Privacy & Security → "Open Anyway".
+
+            ### 4. Launch from Applications
+
+            Caldwell runs from Applications and checks this feed for updates.
+
+            ## What this is
+
+            A personal macOS text-to-speech tool built around ElevenLabs voice playback and a lightweight local app bundle.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -14,12 +14,14 @@ let package = Package(
         // daemon. Keeping the HTTP surface preserves say.sh + Stop hook
         // compatibility while collapsing to a single binary.
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.0.0"),
     ],
     targets: [
         .executableTarget(
             name: "CaldwellDashboard",
             dependencies: [
                 .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources",
             linkerSettings: [

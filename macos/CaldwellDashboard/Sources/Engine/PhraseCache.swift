@@ -17,6 +17,12 @@ final class PhraseCache: @unchecked Sendable {
     static let shared = PhraseCache()
     private init() {}
 
+    let maxBytes = 100 * 1024 * 1024
+
+    var phraseCacheDir: URL {
+        CaldwellConfig.shared.phraseCacheDir
+    }
+
     // MARK: - Key
 
     /// Derive the 32-char cache key for (text, voiceId).
@@ -97,7 +103,7 @@ final class PhraseCache: @unchecked Sendable {
     // MARK: - Helpers
 
     private func phraseDir() -> URL {
-        CaldwellConfig.shared.phraseCacheDir
+        phraseCacheDir
     }
 
     /// Produce a JSON string literal (with surrounding quotes) that matches

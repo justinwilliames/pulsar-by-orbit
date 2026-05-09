@@ -120,6 +120,40 @@ final class CaldwellConfig: @unchecked Sendable {
         reload()
     }
 
+    /// Persist the ElevenLabs API key in macOS Keychain.
+    func setApiKey(_ key: String) throws {
+        let data = Data(key.utf8)
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: keychainService,
+            kSecAttrAccount: keychainAccountApiKey,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        switch status {
+        case errSecSuccess:
+            let attributes: [CFString: Any] = [kSecValueData: data]
+            let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+            guard updateStatus == errSecSuccess else {
+                throw NSError(domain: NSOSStatusErrorDomain, code: Int(updateStatus))
+            }
+        case errSecItemNotFound:
+            var addQuery = query
+            addQuery[kSecValueData] = data
+            addQuery.removeValue(forKey: kSecReturnData)
+            addQuery.removeValue(forKey: kSecMatchLimit)
+            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            guard addStatus == errSecSuccess else {
+                throw NSError(domain: NSOSStatusErrorDomain, code: Int(addStatus))
+            }
+        default:
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+    }
+
     // MARK: - Keychain
 
     private func readKeychain() -> String? {

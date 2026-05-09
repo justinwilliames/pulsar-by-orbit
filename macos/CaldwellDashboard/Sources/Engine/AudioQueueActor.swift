@@ -104,6 +104,16 @@ actor AudioQueueActor {
         currentProcess?.terminate()
     }
 
+    func historyItems(limit: Int, offset: Int = 0, channel: String? = nil) -> [HistoryItem] {
+        let filtered = channel.map { name in
+            history.filter { $0.channel == name }
+        } ?? history
+        let reversed = Array(filtered.reversed())
+        guard offset < reversed.count else { return [] }
+        let end = min(offset + limit, reversed.count)
+        return Array(reversed[offset..<end])
+    }
+
     // MARK: - Worker
 
     private func runWorker() async {

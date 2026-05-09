@@ -145,4 +145,21 @@ struct QueueStatusResponse: Codable {
 struct HistoryResponse: Codable {
     let entries: [HistoryEntry]
     let total: Int
+
+    enum CodingKeys: String, CodingKey {
+        case entries
+        case total
+    }
+
+    init(from decoder: Decoder) throws {
+        if let entries = try? decoder.singleValueContainer().decode([HistoryEntry].self) {
+            self.entries = entries
+            self.total = entries.count
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.entries = try container.decode([HistoryEntry].self, forKey: .entries)
+        self.total = try container.decodeIfPresent(Int.self, forKey: .total) ?? entries.count
+    }
 }

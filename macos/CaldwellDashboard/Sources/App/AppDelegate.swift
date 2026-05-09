@@ -32,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Phase 5 flips it to 7865 and retires the daemon.
         httpServer = CaldwellHTTPServer()
         httpServer?.start()
+        if let httpServer {
+            Task {
+                await httpServer.configure()
+            }
+        }
 
         NSLog("[Caldwell] AppDelegate finished launching, floatingPanel=\(floatingPanel != nil), SSE connecting, httpServer on \(CaldwellHTTPServer.migrationPort)")
     }

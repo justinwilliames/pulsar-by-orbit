@@ -48,6 +48,47 @@ struct HistoryItem: Sendable {
     let failed: Bool
 }
 
+struct QueueStatusSnapshot: Encodable, Sendable {
+    let playing: Bool
+    let queued: Int
+    let total: Int
+    let items: [QueueStatusSnapshotItem]
+    let paused: Bool
+    let channelPaused: [String]
+    let recentHistory: [QueueStatusHistorySnapshot]
+
+    enum CodingKeys: String, CodingKey {
+        case playing
+        case queued
+        case total
+        case items
+        case paused
+        case channelPaused = "channel_paused"
+        case recentHistory = "recent_history"
+    }
+}
+
+struct QueueStatusSnapshotItem: Encodable, Sendable {
+    let position: Int
+    let status: String
+    let id: String
+    let voice: String
+    let text: String
+    let channel: String?
+    let priority: Bool
+}
+
+struct QueueStatusHistorySnapshot: Encodable, Sendable {
+    let id: String
+    let voice: String
+    let text: String
+    let channel: String?
+    let timestamp: Double
+    let duration: Double?
+    let type: String
+    let failed: Bool
+}
+
 // MARK: - AudioQueueActor
 
 /// Serial audio playback queue. One utterance plays at a time via `afplay`.
@@ -66,6 +107,7 @@ actor AudioQueueActor {
     private var queue: [AudioEntry] = []
     private var workerRunning = false
     private var currentProcess: Process?
+    private var currentEntry: AudioEntry?
 
     // Keyed by entry ID. Populated for nil-audioURL entries on enqueue;
     // resumed by markReady/markFailed.
@@ -104,6 +146,10 @@ actor AudioQueueActor {
         currentProcess?.terminate()
     }
 
+    func setBroadcaster(_ broadcaster: any SSEBroadcasterProtocol) {
+        self.broadcaster = broadcaster
+    }
+
     func historyItems(limit: Int, offset: Int = 0, channel: String? = nil) -> [HistoryItem] {
         let filtered = channel.map { name in
             history.filter { $0.channel == name }
@@ -114,11 +160,67 @@ actor AudioQueueActor {
         return Array(reversed[offset..<end])
     }
 
+    func statusSnapshot(limit: Int = 20, channel: String? = nil) -> QueueStatusSnapshot {
+        var items: [QueueStatusSnapshotItem] = []
+
+        if let currentEntry, channel == nil || currentEntry.channel == channel {
+            items.append(QueueStatusSnapshotItem(
+                position: 0,
+                status: "playing",
+                id: currentEntry.id,
+                voice: currentEntry.voiceLabel,
+                text: currentEntry.text,
+                channel: currentEntry.channel,
+                priority: currentEntry.priority
+            ))
+        }
+
+        for (index, entry) in queue.enumerated() {
+            if channel != nil, entry.channel != channel {
+                continue
+            }
+            let isReady = entry.audioURL != nil || resolvedURLs[entry.id] != nil
+            items.append(QueueStatusSnapshotItem(
+                position: index + 1,
+                status: isReady ? "queued" : "pending",
+                id: entry.id,
+                voice: entry.voiceLabel,
+                text: entry.text,
+                channel: entry.channel,
+                priority: entry.priority
+            ))
+        }
+
+        let recentHistory = historyItems(limit: limit, channel: channel).map {
+            QueueStatusHistorySnapshot(
+                id: $0.id,
+                voice: $0.voice,
+                text: $0.text,
+                channel: $0.channel,
+                timestamp: $0.timestamp.timeIntervalSince1970,
+                duration: $0.duration,
+                type: "speak",
+                failed: $0.failed
+            )
+        }
+
+        return QueueStatusSnapshot(
+            playing: currentEntry != nil,
+            queued: queue.count,
+            total: items.count,
+            items: items,
+            paused: false,
+            channelPaused: [],
+            recentHistory: recentHistory
+        )
+    }
+
     // MARK: - Worker
 
     private func runWorker() async {
         while !queue.isEmpty {
             var entry = queue.removeFirst()
+            currentEntry = entry
 
             // Wait for the audio URL if not yet available.
             if entry.audioURL == nil && !entry.fetchFailed {
@@ -133,7 +235,9 @@ actor AudioQueueActor {
             }
 
             await playEntry(entry)
+            currentEntry = nil
         }
+        currentEntry = nil
         workerRunning = false
     }
 
@@ -143,7 +247,11 @@ actor AudioQueueActor {
         guard !entry.fetchFailed, let audioURL = entry.audioURL else {
             NSLog("[AudioQueue] Skipping \(entry.id) — fetch failed or no audio URL")
             await broadcaster.broadcast(event: "voice_active", json: jsonString(idlePayload(queued: queue.count)))
-            recordHistory(entry: entry, duration: nil, failed: true)
+            let historyItem = recordHistory(entry: entry, duration: nil, failed: true)
+            await broadcaster.broadcast(
+                event: "history_update",
+                json: jsonString(historyPayload(for: historyItem, type: entry.isReplay ? "replay" : "speak"))
+            )
             return
         }
 
@@ -191,7 +299,11 @@ actor AudioQueueActor {
         }
 
         await broadcaster.broadcast(event: "voice_active", json: jsonString(idlePayload(queued: queue.count)))
-        recordHistory(entry: entry, duration: duration, failed: false)
+        let historyItem = recordHistory(entry: entry, duration: duration, failed: false)
+        await broadcaster.broadcast(
+            event: "history_update",
+            json: jsonString(historyPayload(for: historyItem, type: entry.isReplay ? "replay" : "speak"))
+        )
     }
 
     // MARK: - Helpers
@@ -201,7 +313,21 @@ actor AudioQueueActor {
          "text": NSNull(), "duration": NSNull(), "queued": queued]
     }
 
-    private func recordHistory(entry: AudioEntry, duration: Double?, failed: Bool) {
+    private func historyPayload(for item: HistoryItem, type: String) -> [String: Any] {
+        [
+            "id": item.id,
+            "voice": item.voice,
+            "text": item.text,
+            "channel": item.channel as Any,
+            "timestamp": item.timestamp.timeIntervalSince1970,
+            "duration": item.duration as Any,
+            "type": type,
+            "failed": item.failed,
+        ]
+    }
+
+    @discardableResult
+    private func recordHistory(entry: AudioEntry, duration: Double?, failed: Bool) -> HistoryItem {
         let item = HistoryItem(
             id: entry.id, voice: entry.voiceLabel,
             text: entry.fullText.isEmpty ? entry.text : entry.fullText,
@@ -212,6 +338,7 @@ actor AudioQueueActor {
         if history.count > maxHistory {
             history.removeFirst(history.count - maxHistory)
         }
+        return item
     }
 
     /// Synchronously reads audio duration via `afinfo`. Runs on the calling

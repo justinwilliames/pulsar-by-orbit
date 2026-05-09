@@ -22,9 +22,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     private var serverTask: Task<Void, Error>?
     private let port: Int
     let audioQueue = AudioQueueActor()
+    let sseBroadcaster = SSEBroadcaster()
 
     init(port: Int = CaldwellHTTPServer.migrationPort) {
         self.port = port
+    }
+
+    func configure() async {
+        await audioQueue.setBroadcaster(sseBroadcaster)
     }
 
     func start() {
@@ -35,11 +40,16 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
         let port = self.port
         let audioQueue = self.audioQueue
+        let sseBroadcaster = self.sseBroadcaster
 
         serverTask = Task.detached(priority: .userInitiated) {
             do {
                 let router = Router()
-                Self.registerRoutes(on: router, audioQueue: audioQueue)
+                Self.registerRoutes(
+                    on: router,
+                    audioQueue: audioQueue,
+                    sseBroadcaster: sseBroadcaster
+                )
 
                 let app = Application(
                     router: router,
@@ -66,7 +76,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     nonisolated private static func registerRoutes(
         on router: Router<BasicRequestContext>,
-        audioQueue: AudioQueueActor
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
     ) {
         // GET /health — parity with Python daemon
         router.get("/health") { _, _ -> Response in
@@ -86,6 +97,11 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // GET /history — recent playback history
         router.get("/history") { request, _ -> Response in
             return try await Self.handleHistory(request: request, audioQueue: audioQueue)
+        }
+
+        // GET /events — server-sent events stream
+        router.get("/events") { _, _ -> Response in
+            return try await Self.handleEvents(audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
         }
 
         // GET /cache/phrases — cached phrase metadata
@@ -127,6 +143,11 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         router.get("/usage") { _, _ -> Response in
             return try await Self.handleUsage()
         }
+
+        // GET /portraits/:name/:frame — serve portrait assets to the app UI
+        router.get("/portraits/:name/:frame") { _, context -> Response in
+            return try Self.handlePortrait(context: context)
+        }
     }
 
     // MARK: - /history handler
@@ -142,6 +163,97 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let items = await audioQueue.historyItems(limit: limit, offset: offset, channel: channel)
             .map(HistoryResponseItem.init)
         return try Self.json(items)
+    }
+
+    // MARK: - /events handler
+
+    nonisolated private static func handleEvents(
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async throws -> Response {
+        let state = await audioQueue.statusSnapshot(limit: 20)
+        let stateJSON = try Self.jsonString(state)
+        let clientStream = await sseBroadcaster.makeStream()
+
+        let bodyStream = AsyncStream<ByteBuffer> { continuation in
+            let task = Task {
+                continuation.yield(ByteBuffer(string: Self.ssePayload(event: "connected", json: "{}")))
+                continuation.yield(ByteBuffer(string: Self.ssePayload(event: "state", json: stateJSON)))
+
+                for await payload in clientStream {
+                    if Task.isCancelled {
+                        break
+                    }
+                    continuation.yield(ByteBuffer(string: payload))
+                }
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+
+        var headers = HTTPFields()
+        headers[.contentType] = "text/event-stream"
+        headers[.cacheControl] = "no-cache"
+        headers[.connection] = "keep-alive"
+
+        return Response(
+            status: .ok,
+            headers: headers,
+            body: ResponseBody(asyncSequence: bodyStream)
+        )
+    }
+
+    // MARK: - /portraits handler
+
+    nonisolated private static func handlePortrait(
+        context: BasicRequestContext
+    ) throws -> Response {
+        let name = try context.parameters.require("name")
+        let frame = try context.parameters.require("frame")
+
+        let portraitsRoot = CaldwellConfig.shared.repoRoot
+            .appendingPathComponent("assets/portraits", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let portraitURL = portraitsRoot
+            .appendingPathComponent(name, isDirectory: true)
+            .appendingPathComponent(frame)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let legacyPortraitURL = portraitsRoot
+            .appendingPathComponent(Self.legacyPortraitFilename(name: name, frame: frame))
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let rootPrefix = portraitsRoot.path.hasSuffix("/") ? portraitsRoot.path : portraitsRoot.path + "/"
+
+        guard portraitURL.path.hasPrefix(rootPrefix), legacyPortraitURL.path.hasPrefix(rootPrefix) else {
+            return try Self.json(ErrorResponse("not found"), status: .notFound)
+        }
+
+        let fileURL: URL
+        if FileManager.default.fileExists(atPath: portraitURL.path) {
+            fileURL = portraitURL
+        } else if FileManager.default.fileExists(atPath: legacyPortraitURL.path) {
+            fileURL = legacyPortraitURL
+        } else {
+            return try Self.json(ErrorResponse("not found"), status: .notFound)
+        }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            var headers = HTTPFields()
+            headers[.contentType] = Self.contentType(for: fileURL)
+            return Response(
+                status: .ok,
+                headers: headers,
+                body: ResponseBody(byteBuffer: ByteBuffer(bytes: data))
+            )
+        } catch {
+            return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
+        }
     }
 
     // MARK: - /cache handlers
@@ -552,6 +664,10 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         )
     }
 
+    nonisolated private static func jsonString<T: Encodable>(_ value: T) throws -> String {
+        String(decoding: try encoder.encode(value), as: UTF8.self)
+    }
+
     nonisolated private static func decodeBody<T: Decodable>(
         _ type: T.Type,
         from request: Request,
@@ -601,6 +717,36 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             .appendingPathComponent("caldwell-tts-\(entryId)-\(UUID().uuidString).mp3")
         try FileManager.default.copyItem(at: sourceURL, to: url)
         return url
+    }
+
+    nonisolated private static func ssePayload(event: String, json: String) -> String {
+        "event: \(event)\ndata: \(json)\n\n"
+    }
+
+    nonisolated private static func contentType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "png":
+            return "image/png"
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "webp":
+            return "image/webp"
+        default:
+            return "application/octet-stream"
+        }
+    }
+
+    nonisolated private static func legacyPortraitFilename(name: String, frame: String) -> String {
+        switch frame.lowercased() {
+        case "closed.png":
+            return "\(name).png"
+        case "slight.png":
+            return "\(name)_slight.png"
+        case "open.png":
+            return "\(name)_open.png"
+        default:
+            return "\(name)_\(frame)"
+        }
     }
 
     nonisolated private static func fetchUsage(apiKey: String) async throws -> UsageResponse {

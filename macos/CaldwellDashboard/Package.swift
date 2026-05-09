@@ -6,7 +6,7 @@ let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().pat
 
 let package = Package(
     name: "CaldwellDashboard",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS(.v14)],
     dependencies: [
         // Hummingbird — SSWG-endorsed lightweight HTTP server. Used to host
         // the local API (/speak, /queue, /cache, /settings, /events, …)
@@ -24,6 +24,9 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-sectcreate",
                               "-Xlinker", "__TEXT",

@@ -26,8 +26,8 @@ Endpoints:
   GET  /voices             Voice configuration
   GET  /events             SSE stream
   GET  /health             Health check
-  GET  /                   Dashboard
-  GET  /portraits/{name}   Portrait images
+  GET  /                   Friendly help message (use the menubar app or say.sh CLI)
+  GET  /portraits/{name}   Caldwell portrait images (used by the menubar app)
 """
 
 import asyncio
@@ -55,7 +55,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
-from starlette.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.routing import Route
 import uvicorn
 
@@ -87,7 +87,7 @@ API_BASE = "https://api.elevenlabs.io/v1"
 DEFAULT_MODEL = "eleven_v3"
 DEFAULT_FORMAT = "mp3_44100_128"
 TEMP_PREFIX = "claude-tts-"
-DASHBOARD_DIR = REPO_ROOT / "dashboard"
+PORTRAITS_DIR = REPO_ROOT / "assets" / "portraits"
 FFMPEG = (
     shutil.which("ffmpeg")
     or next((p for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg") if Path(p).exists()), "ffmpeg")
@@ -1845,11 +1845,18 @@ async def handle_health(request: StarletteRequest) -> JSONResponse:
     })
 
 
-async def handle_index(request: StarletteRequest) -> HTMLResponse:
-    index_path = DASHBOARD_DIR / "index.html"
-    if index_path.exists():
-        return HTMLResponse(index_path.read_text())
-    return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
+async def handle_index(request: StarletteRequest) -> JSONResponse:
+    """Friendly landing — the web dashboard was dropped (redundant with the
+    macOS menubar app). Anyone hitting / by accident gets a quick pointer
+    rather than a 404."""
+    return JSONResponse({
+        "name": "Caldwell daemon",
+        "version": "2.0",
+        "ui": "Use Caldwell.app (menu-bar) or scripts/say.sh CLI",
+        "setup": "say.sh --set-api-key sk_... && say.sh --set-voice-id <20-char>",
+        "health": "/health",
+        "endpoints": "/speak, /queue, /history, /cache/phrases, /settings, /usage, /events",
+    })
 
 
 def _mask_api_key(key: str) -> str:
@@ -2029,6 +2036,28 @@ async def handle_usage(request: StarletteRequest) -> JSONResponse:
     return JSONResponse(base)
 
 
+async def handle_portrait(request: StarletteRequest) -> FileResponse | JSONResponse:
+    """Serve Caldwell's portrait images to the menubar app's PortraitManager.
+    The web dashboard was dropped, but the portraits are still a real asset
+    used by the floating panel and Now Playing portrait views."""
+    name = request.path_params["name"]
+    portraits_root = PORTRAITS_DIR.resolve()
+    portrait_path = (portraits_root / name).resolve()
+    try:
+        portrait_path.relative_to(portraits_root)
+    except ValueError:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+
+    if portrait_path.exists() and portrait_path.is_file():
+        suffix = portrait_path.suffix.lower()
+        media = {
+            ".png": "image/png", ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg", ".webp": "image/webp",
+        }.get(suffix, "application/octet-stream")
+        return FileResponse(portrait_path, media_type=media)
+    return JSONResponse({"error": "Not found"}, status_code=404)
+
+
 async def handle_voices(request: StarletteRequest) -> JSONResponse:
     voices_path = REPO_ROOT / "voices.json"
     if voices_path.exists():
@@ -2038,25 +2067,6 @@ async def handle_voices(request: StarletteRequest) -> JSONResponse:
         except json.JSONDecodeError:
             pass
     return JSONResponse([])
-
-
-async def handle_portrait(request: StarletteRequest) -> FileResponse | HTMLResponse:
-    name = request.path_params["name"]
-    portraits_root = (DASHBOARD_DIR / "portraits").resolve()
-    portrait_path = (portraits_root / name).resolve()
-    try:
-        portrait_path.relative_to(portraits_root)
-    except ValueError:
-        return HTMLResponse("Not found", status_code=404)
-
-    if portrait_path.exists() and portrait_path.is_file():
-        suffix = portrait_path.suffix.lower()
-        media = {
-            ".png": "image/png", ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg", ".webp": "image/webp",
-        }.get(suffix, "application/octet-stream")
-        return FileResponse(portrait_path, media_type=media)
-    return HTMLResponse("Not found", status_code=404)
 
 
 # --- Main ---

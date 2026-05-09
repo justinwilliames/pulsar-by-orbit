@@ -387,16 +387,9 @@ Tags direct voice *acting*, not audio *production*. Think stage directions.
 
 **Caldwell, full stop.** Alfred Pennyworth with a trucker's mouth — RP precision, butler composure, casual unflinching expletives. He speaks for everything in this setup; there is no team.
 
-Dashboard: `http://127.0.0.1:7865`
+## UI
 
-## Dashboard
-
-The dashboard at `http://127.0.0.1:7865` shows:
-- **Caldwell's portrait** ping-ponging through 4 panels while he speaks (1→2→3→4→3→2→...).
-- **Transport bar** — pause/resume (Space), skip (Right arrow), settings (gear icon).
-- **Audio scrubber** — progress bar, drag to seek.
-- **Queue panel** — upcoming items, per-channel pause toggles.
-- **History panel** — past entries with replay (free, comes from cache).
+User-facing UX is the macOS menu-bar app (`Caldwell.app`) — three-tab popover with **History**, **Cache**, **Settings**, plus an animated floating portrait that auto-appears top-left when Caldwell speaks and auto-hides when the queue empties. The previous web dashboard was dropped as redundant; the daemon's `/` endpoint now returns a small JSON help message pointing at the menu-bar app and `say.sh` CLI flags for setup.
 
 ## Sub-agents and orchestration
 

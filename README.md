@@ -2,7 +2,7 @@
 
 [![Build CaldwellDashboard](https://github.com/justinwilliames/caldwell-speak/actions/workflows/build.yml/badge.svg)](https://github.com/justinwilliames/caldwell-speak/actions/workflows/build.yml)
 
-A voice for Claude Code. Alfred Pennyworth as the base, with two registers — **Polite** (butler-formal RP, no swearing) or **Potty Mouth** (RP precision plus unflinching expletives where the moment earns them) — switchable from the menu-bar Settings panel. "Sir" in both modes. Wrapped around an ElevenLabs TTS daemon with a queue, a dashboard, a phrase cache that makes repeated lines free, and a launchd config that keeps Caldwell ready whenever Claude Code calls. Caldwell speaks for everything: completions, blockers, sub-agent results — the lot.
+A voice for Claude Code. Alfred Pennyworth as the base, with two registers — **Polite** (butler-formal RP, no swearing) or **Potty Mouth** (RP precision plus unflinching expletives where the moment earns them) — switchable from the menu-bar Settings panel. "Sir" in both modes. Wrapped around an ElevenLabs TTS daemon with a queue, a macOS 26 menu-bar app, a phrase cache that makes repeated lines free, and a launchd config that keeps Caldwell ready whenever Claude Code calls. Caldwell speaks for everything: completions, blockers, sub-agent results — the lot.
 
 Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is theirs, the persona is mine.
 
@@ -14,7 +14,7 @@ Forked from [tomc98/speak](https://github.com/tomc98/speak) — the engine is th
 - **Free-tier survivable via the phrase cache** — reusable lines (any tier — "Pushed, Sir." through "I'm afraid the tests are failing — log's in the chat.") get cached locally as MP3s and replay for **zero credits**. Cache writes are **opt-in**: Caldwell-the-skill passes `--cacheable` for any line he'd happily fire again on a different turn, never for context-specific one-shots. Spend caps and a daily char budget gate everything that misses the cache.
 - **Polite / Potty Mouth toggle** — single segmented picker at the top of the menu-bar Settings panel. Persisted to `config.json` as `CALDWELL_EXPLETIVES`, surfaced via `GET /settings`, read by Caldwell-the-skill at session start.
 - **Single shared queue** — sub-agents and chief-of-staff routines never overlap their spoken output, all rendered in Caldwell's voice.
-- **Two surfaces, one daemon** — a web dashboard at `http://127.0.0.1:7865` (Caldwell's portrait ping-pongs through 4 panels while he speaks; transport, queue, history, settings) and a native macOS 26 menu-bar app (`Caldwell.app`) with the same plus a Cache panel showing every cached phrase, its play count, and a free-replay button.
+- **macOS 26 menu-bar app** (`Caldwell.app`) — three-tab popover (History / Cache / Settings) plus an animated floating portrait that auto-appears top-left when Caldwell speaks. Mute toggle in the popover header switches the menu-bar glyph itself, so AFK mute is one click.
 - **Always-on** — optional `launchctl` configs keep both the daemon and the menu-bar app running across reboots and login sessions.
 
 ---
@@ -29,7 +29,7 @@ Install Caldwell on this macOS machine end-to-end.
 1. Check for `ffmpeg` and `uv`. If either's missing, install with `brew install ffmpeg` and the official `uv` shell installer (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
 2. Clone https://github.com/justinwilliames/caldwell-speak to `~/code/caldwell-speak` if it doesn't exist; otherwise `git pull` to update.
 3. Start the daemon in the background (`uv run daemon/server.py` from the repo) and confirm `curl -sf http://127.0.0.1:7865/health` returns OK.
-4. Open http://127.0.0.1:7865 in the browser and tell me to paste my ElevenLabs API key and voice ID into the gear-icon Settings panel. Wait until I confirm I've saved them — do NOT ask me for the key in chat (it'd end up in this session's transcript on disk).
+4. Ask me for my ElevenLabs API key and voice ID, then save them via `./scripts/say.sh --set-api-key sk_...` and `./scripts/say.sh --set-voice-id <20-char-id>`. The daemon writes the key to macOS Keychain and the voice ID to `config.json`. (If I'm on macOS 26 with the menu-bar app installed, I can also paste them into the menu-bar Settings tab — same destination.)
 5. Run `./scripts/say.sh "Right then Sir, the daemon is up."` to verify playback.
 6. Install the Claude Code skill: `mkdir -p ~/.claude/skills && ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak` (skip if the symlink already exists).
 7. If `sw_vers -productVersion` returns 26 or later, run `./scripts/install-caldwell-app.sh` to build and install `/Applications/Caldwell.app`.
@@ -90,20 +90,27 @@ First run downloads Starlette + Uvicorn into uv's cache (one-time, ~10s), then b
 
 For an always-running daemon (recommended after first manual test), see Step 5.
 
-### Step 4 — Configure via the dashboard
+### Step 4 — Configure the API key + voice ID
 
-In a second terminal:
+There are two equivalent ways depending on whether the menu-bar app is installed.
+
+**Via CLI (works on any macOS):**
 
 ```
-open http://127.0.0.1:7865
+./scripts/say.sh --set-api-key sk_...
+./scripts/say.sh --set-voice-id <20-char-id>
 ```
 
-The gear icon in the transport bar shows an orange dot when no API key is set. Click it, paste:
+The daemon writes the key to macOS Keychain and the voice ID to `config.json`, validating both against ElevenLabs on save.
 
-- **ElevenLabs API key** — get one at [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys).
-- **Default voice ID** — add a voice from the [Voice Library](https://elevenlabs.io/app/voice-library) to your VoiceLab first, then copy the 20-character ID.
+**Via the menu-bar app's Settings tab (macOS 26 only):**
 
-Save. The panel validates both against ElevenLabs and writes to `config.json` (gitignored).
+If you've already done the optional menu-bar app install (below), click the menu-bar icon → Settings, paste the API key and voice ID, hit Save. Same destinations.
+
+**Where to get them:**
+
+- ElevenLabs API key — [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys)
+- Voice ID — add a voice from the [Voice Library](https://elevenlabs.io/app/voice-library) to your VoiceLab first, then copy the 20-character ID
 
 Test:
 
@@ -213,7 +220,7 @@ To stop and remove:
 | `SPEAK_DAILY_CHAR_CAP` | env var | default `2000` | Per-day character cap |
 | `SPEAK_PHRASE_CACHE_MAX_BYTES` | env var | default `104857600` (100 MB) | Phrase cache size budget |
 
-The dashboard Settings panel writes to the primary store automatically — Keychain for the API key, `config.json` for the voice ID and the persona mode. The daemon migrates any `ELEVENLABS_API_KEY` it finds in `config.json` to the Keychain on startup, then clears it from the file.
+The menu-bar app's Settings tab and the `say.sh --set-*` CLI flags both write to the primary store — Keychain for the API key, `config.json` for the voice ID and the persona mode. The daemon migrates any `ELEVENLABS_API_KEY` it finds in `config.json` to the Keychain on startup, then clears it from the file.
 
 ### Persona modes — Polite vs Potty Mouth
 
@@ -251,9 +258,9 @@ The `Cache` tab in the menu-bar popover renders the live list with sort, popular
 
 Ships **Caldwell-only** — he is the voice for everything. No supporting cast, no team, no per-sub-agent voice differentiation.
 
-> **Note:** The shipped Caldwell entry uses ElevenLabs' "George" voice ID as a placeholder — British, RP, mature. Right register; not necessarily the final pick. Replace via the dashboard Settings panel once you've chosen your Caldwell voice from the [Voice Library](https://elevenlabs.io/app/voice-library) — look for older British male, butler-leaning, RP or Estuary, capable of carrying expletives without breaking composure.
+> **Note:** The shipped Caldwell entry uses ElevenLabs' "George" voice ID as a placeholder — British, RP, mature. Right register; not necessarily the final pick. Replace via the menu-bar Settings tab or `say.sh --set-voice-id <id>` once you've chosen your Caldwell voice from the [Voice Library](https://elevenlabs.io/app/voice-library) — look for older British male, butler-leaning, RP or Estuary, capable of carrying expletives without breaking composure.
 
-The underlying daemon retains support for multiple voices and the `/speak/dialogue` endpoint, so if you ever change your mind, add entries to `voices.json` and they'll appear in the dashboard. The persona spec and SKILL.md are intentionally Caldwell-only — sub-agents and orchestrated workflows route their spoken output through him.
+The underlying daemon retains support for multiple voices and the `/speak/dialogue` endpoint, so if you ever change your mind, add entries to `voices.json`. The persona spec and SKILL.md are intentionally Caldwell-only — sub-agents and orchestrated workflows route their spoken output through him.
 
 ---
 
@@ -291,6 +298,19 @@ Queue and history control:
 ./scripts/say.sh --clear
 ./scripts/say.sh --history --limit 10
 ./scripts/say.sh --replay <id>
+```
+
+Setup and runtime config (replaces the dropped web dashboard's settings panel — same destinations, just over the wire):
+
+```
+./scripts/say.sh --set-api-key sk_...        # writes to macOS Keychain
+./scripts/say.sh --set-voice-id <20-char-id> # writes to config.json
+./scripts/say.sh --mute                       # AFK silence; daemon refuses /speak
+./scripts/say.sh --unmute                     # back on
+./scripts/say.sh --polite                     # persona: no swearing
+./scripts/say.sh --potty                      # persona: heavy expletives (default)
+./scripts/say.sh --settings                   # show current state
+./scripts/say.sh --usage                      # daily/monthly/ElevenLabs usage stats
 ```
 
 The `--voice` and `--channel` flags exist in the daemon but are intentionally unused in this Caldwell-only setup — Caldwell speaks for everything.
@@ -340,7 +360,7 @@ Cache hits **bypass** the spend cap entirely — repeated phrases are always fre
 
 ### Caveats
 
-- **Dashboard pause halts playback, not the API fetch.** The daemon fetches TTS audio from ElevenLabs the moment a message is enqueued — pausing the dashboard doesn't refund credits on items already queued. Mute (prevents enqueue) and the spend cap (refuses fetch) do.
+- **Pause halts playback, not the API fetch.** The daemon fetches TTS audio from ElevenLabs the moment a message is enqueued — pausing playback doesn't refund credits on items already queued. The menu-bar Mute toggle (or `say.sh --mute`) prevents enqueue at all and is the right tool for AFK saves; the spend cap refuses pre-fetch when daily/monthly limits are hit.
 - **Persona mode is a contract, not a filter.** When Polite mode is on, Caldwell-the-skill is told to stay clean, but the daemon doesn't sanitize the text. If a session ignores the instruction the audio's already paid for. Hard daemon-side regex enforcement isn't shipped — Claude-side compliance is the contract.
 
 ---
@@ -379,15 +399,14 @@ The hook lives in `.githooks/pre-commit` (version-controlled). Bypass for genuin
 
 ```
 caldwell-speak/
-  daemon/server.py                   Starlette HTTP server — TTS, queue, cache, SSE, settings, dashboard
+  daemon/server.py                   Starlette HTTP server — TTS, queue, cache, SSE, settings
   scripts/say.sh                     CLI wrapper — talks to daemon, falls back to speak.py
   scripts/speak.py                   Standalone TTS (no daemon needed)
   scripts/install-launchd.sh         Register the daemon with launchd for always-on
   scripts/uninstall-launchd.sh       Reverse the above
   scripts/install-caldwell-app.sh    Build + install the macOS menu-bar app
   scripts/install-caldwell-app-launchd.sh  Auto-launch the app at login (kills duplicate first)
-  dashboard/index.html               Single-file web dashboard (incl. settings panel)
-  dashboard/portraits/               Voice portraits — Caldwell ships with 4 panels for ping-pong cycle
+  assets/portraits/                  Caldwell portrait images (4 frames; served via /portraits/)
   voices.json                        Voice name/ID/color mapping (Caldwell only)
   cache/phrases/{hash}.mp3           Phrase cache — free replays, content-addressed by text+voice
   cache/phrases/{hash}.json          Sidecar metadata (text, voice, timestamps, play count)
@@ -428,7 +447,8 @@ caldwell-speak/
 | `GET` | `/usage` | Current minute call count + daily char count + caps |
 | `GET` | `/events` | SSE event stream |
 | `GET` | `/health` | Health check |
-| `GET` | `/` | Dashboard |
+| `GET` | `/` | Friendly help message (use the menu-bar app or `say.sh` CLI) |
+| `GET` | `/portraits/{name}` | Caldwell portrait images served from `assets/portraits/` |
 
 ---
 

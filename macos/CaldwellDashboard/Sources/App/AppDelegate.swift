@@ -69,12 +69,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let remaining = max(0, Self.minVisibleDuration - elapsed)
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            // Re-check at fire time: if more audio queued up while we were
-            // waiting, keep the panel visible
-            let stillActive = self.viewModel.playback.isPlaying || !self.viewModel.queueItems.isEmpty
-            if !stillActive {
+            // At fire time, only check `isPlaying`. queueItems is updated via
+            // SSE state events which can lag behind voice_active type=idle —
+            // using it caused the panel to stick when queueItems held a
+            // stale entry from the just-finished utterance. Bursts of
+            // back-to-back utterances are handled by the
+            // `hideWorkItem?.cancel()` at the top of updateFloatingPanel —
+            // the next isActive=true event cancels this scheduled hide
+            // before it fires.
+            if !self.viewModel.playback.isPlaying {
                 panel.orderOut(nil)
                 NSLog("[Caldwell] Panel ordered out after min-visible elapsed")
+            } else {
+                NSLog("[Caldwell] Hide deferred — playback still active at fire time")
             }
         }
         hideWorkItem = item

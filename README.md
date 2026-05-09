@@ -30,16 +30,17 @@ Install Caldwell on this macOS machine end-to-end.
 2. Clone https://github.com/justinwilliames/caldwell-speak to `~/code/caldwell-speak` if it doesn't exist; otherwise `git pull` to update.
 3. Start the daemon in the background (`uv run daemon/server.py` from the repo) and confirm `curl -sf http://127.0.0.1:7865/health` returns OK.
 4. Ask me for my ElevenLabs API key and voice ID, then save them via `./scripts/say.sh --set-api-key sk_...` and `./scripts/say.sh --set-voice-id <20-char-id>`. The daemon writes the key to macOS Keychain and the voice ID to `config.json`. (If I'm on macOS 26 with the menu-bar app installed, I can also paste them into the menu-bar Settings tab — same destination.)
-5. Run `./scripts/say.sh "Right then Sir, the daemon is up."` to verify playback.
-6. Install the Claude Code skill: `mkdir -p ~/.claude/skills && ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak` (skip if the symlink already exists).
-7. If `sw_vers -productVersion` returns 26 or later, run `./scripts/install-caldwell-app.sh` to build and install `/Applications/Caldwell.app`.
-8. Install LaunchAgents so daemon and app auto-start at every login:
+5. Run `./scripts/warm-cache.sh` to pre-cache the 25 canonical Tier 0 phrases (Polite + Potty Mouth) in one go. This burns ~475 chars of the monthly free-tier 10,000 budget once, but means every Caldwell turn-end ping from day one is a free cached replay — no slow-start credit-burn period. Script is silent (cache_only mode skips audio playback during install) and idempotent (already-cached phrases skipped). Takes ~100 seconds with the rate-limit-friendly pacing.
+6. Run `./scripts/say.sh "Right then Sir, the daemon is up."` to verify playback.
+7. Install the Claude Code skill: `mkdir -p ~/.claude/skills && ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak` (skip if the symlink already exists).
+8. If `sw_vers -productVersion` returns 26 or later, run `./scripts/install-caldwell-app.sh` to build and install `/Applications/Caldwell.app`.
+9. Install LaunchAgents so daemon and app auto-start at every login:
    - `./scripts/install-launchd.sh` (daemon)
-   - `./scripts/install-caldwell-app-launchd.sh` (menu-bar app — only if step 7 ran; the script kills any duplicate instance before loading the plist)
-9. Print `launchctl list | grep yourorbit` so I can see both are registered.
-10. Tell me to open the menu-bar Caldwell → Settings tab and pick the persona mode (default is Potty Mouth; flip to Polite if I'd rather no swearing).
-11. Optional but recommended for Caldwell to actually fire on every turn: tell me to add a "Voice — fire `say.sh` at every turn-end" section to my `~/.claude/CLAUDE.md` mirroring the one in this repo's [`SKILL.md`](SKILL.md). The skill description alone is descriptive, not enforcing — the CLAUDE.md instruction is what makes it load-bearing.
-12. Remind me to restart Claude Code so it discovers the skill and re-reads CLAUDE.md.
+   - `./scripts/install-caldwell-app-launchd.sh` (menu-bar app — only if step 8 ran; the script kills any duplicate instance before loading the plist)
+10. Print `launchctl list | grep yourorbit` so I can see both are registered.
+11. Tell me to open the menu-bar Caldwell → Settings tab and pick the persona mode (default is Potty Mouth; flip to Polite if I'd rather no swearing).
+12. Optional but recommended for Caldwell to actually fire on every turn: tell me to add a "Voice — fire `say.sh` at every turn-end" section to my `~/.claude/CLAUDE.md` mirroring the one in this repo's [`SKILL.md`](SKILL.md). The skill description alone is descriptive, not enforcing — the CLAUDE.md instruction is what makes it load-bearing.
+13. Remind me to restart Claude Code so it discovers the skill and re-reads CLAUDE.md.
 
 Pause and confirm before anything that overwrites existing state (re-cloning over a working repo, overwriting `/Applications/Caldwell.app`, replacing existing LaunchAgents).
 ```

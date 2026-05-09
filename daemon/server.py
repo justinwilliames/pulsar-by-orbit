@@ -1388,6 +1388,14 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     # contextual, not character-bound.
     cacheable = bool(body.get("cacheable", False))
 
+    # Cache-warming mode: fetch + cache the audio but don't enqueue for
+    # playback. Used by scripts/warm-cache.sh during first-time setup so
+    # the canonical canon is pre-cached without making first-install a
+    # 25-line concert. Implies cacheable=true.
+    cache_only = bool(body.get("cache_only", False))
+    if cache_only:
+        cacheable = True
+
     vid = await resolve_voice_async(voice_raw)
     if not _api_key():
         return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
@@ -1396,6 +1404,17 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
 
     # Phrase cache check — repeated phrases replay free (no API call, no quota cost)
     cache_hit_path = await asyncio.to_thread(_phrase_cache_get, text, vid)
+
+    # cache_only short-circuit: if the phrase is already cached, return
+    # immediately without enqueueing. If it's a miss, fall through to fetch
+    # below but skip the queue entry on the way out.
+    if cache_only and cache_hit_path is not None:
+        return JSONResponse({
+            "cached": True,
+            "fresh": False,
+            "key": _phrase_cache_key(text, vid),
+            "char_count": len(text),
+        })
 
     # Spend cap check — only enforced on cache miss (cache hits don't hit ElevenLabs)
     if cache_hit_path is None:
@@ -1408,6 +1427,25 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
             })
             return JSONResponse({"error": err, "quota": QUOTA.status()}, status_code=429)
         QUOTA.increment(len(text))
+
+    # cache_only on a miss: synchronously fetch, cache, return — no queue
+    if cache_only:
+        try:
+            path = await asyncio.to_thread(_fetch_tts, text, vid)
+            await asyncio.to_thread(_phrase_cache_put, text, vid, path)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            return JSONResponse({
+                "cached": True,
+                "fresh": True,
+                "key": _phrase_cache_key(text, vid),
+                "char_count": len(text),
+            })
+        except Exception as exc:
+            log.error(f"cache_only fetch failed for '{text[:40]}...': {exc}")
+            return JSONResponse({"error": str(exc)}, status_code=500)
 
     entry_id = uuid.uuid4().hex[:8]
 

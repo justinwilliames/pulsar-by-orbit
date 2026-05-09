@@ -26,9 +26,12 @@ final class PlaybackState {
     func updateFromVoiceActive(_ data: VoiceActiveEvent) {
         stopTimer()
         if data.type == "idle" {
+            // Audio finished. Keep currentVoice + currentText set so the
+            // floating panel keeps rendering the portrait through its
+            // min-visible tail window (~6s after isPlaying flips false).
+            // Otherwise the panel goes blank for most of its visible time
+            // and Sir thinks it never appeared.
             isPlaying = false
-            currentVoice = nil
-            currentText = nil
             currentId = nil
             currentType = "idle"
             duration = nil

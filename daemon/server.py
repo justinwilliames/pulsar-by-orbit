@@ -1396,14 +1396,15 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     if cache_only:
         cacheable = True
 
+    # Resolve voice ID before the cache check — it's part of the cache key.
+    # Intentionally do NOT gate on api_key or vid yet: cached phrases replay
+    # from disk with zero ElevenLabs involvement, so they must succeed even
+    # when the API key is absent or the monthly quota is exhausted.
     vid = await resolve_voice_async(voice_raw)
-    if not _api_key():
-        return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
-    if not vid:
-        return JSONResponse({"error": "No voice specified and ELEVENLABS_VOICE_ID not set"}, status_code=400)
 
-    # Phrase cache check — repeated phrases replay free (no API call, no quota cost)
-    cache_hit_path = await asyncio.to_thread(_phrase_cache_get, text, vid)
+    # Phrase cache check — repeated phrases replay free (no API call, no quota cost).
+    # This runs before api_key / vid / quota validation so cached lines always play.
+    cache_hit_path = await asyncio.to_thread(_phrase_cache_get, text, vid) if vid else None
 
     # cache_only short-circuit: if the phrase is already cached, return
     # immediately without enqueueing. If it's a miss, fall through to fetch
@@ -1416,8 +1417,13 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
             "char_count": len(text),
         })
 
-    # Spend cap check — only enforced on cache miss (cache hits don't hit ElevenLabs)
+    # From here on we need ElevenLabs — validate credentials and quota.
+    # Cache hits bypass this block entirely (they jump to the enqueue path below).
     if cache_hit_path is None:
+        if not _api_key():
+            return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
+        if not vid:
+            return JSONResponse({"error": "No voice specified and ELEVENLABS_VOICE_ID not set"}, status_code=400)
         ok, err = QUOTA.check(len(text))
         if not ok:
             log.warning(f"Quota refused: {err}")

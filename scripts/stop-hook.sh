@@ -20,11 +20,16 @@ SAY="$SCRIPT_DIR/say.sh"
 # 1. Daemon up?
 curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1 || exit 0
 
-# 2. Muted? Full silent mode — no ElevenLabs calls, no Tier 0 fallback
-MUTED=$(curl -sf --connect-timeout 1 "$DAEMON/settings" 2>/dev/null \
-  | python3 -c 'import sys,json
+# 2. Pull /settings once — check muted AND persona mode in one trip
+SETTINGS=$(curl -sf --connect-timeout 1 "$DAEMON/settings" 2>/dev/null || echo "{}")
+MUTED=$(echo "$SETTINGS" | python3 -c 'import sys,json
 try: print("true" if json.load(sys.stdin).get("muted") else "false")
 except: print("false")' 2>/dev/null || echo "false")
+POTTY=$(echo "$SETTINGS" | python3 -c 'import sys,json
+try: print("true" if json.load(sys.stdin).get("expletives_enabled") else "false")
+except: print("false")' 2>/dev/null || echo "false")
+
+# Muted? Full silent mode — no ElevenLabs calls, no Tier 0 fallback
 [ "$MUTED" = "true" ] && exit 0
 
 # 3. Recent /speak in the last 60 seconds? skill fired, hook backs off
@@ -40,14 +45,44 @@ try:
 except: print("none")' 2>/dev/null || echo "none")
 [ "$RECENT" = "recent" ] && exit 0
 
-# 4. Pick a random Tier 0 phrase (cached canon — free replays)
+# 4. Pick a random Tier 0 phrase from the persona-appropriate pool.
+# Mode-neutral canon — works in both Polite and Potty Mouth modes.
 PHRASES=(
   "Right then Sir."
+  "Right then Sir, on it."
   "On it, Sir."
+  "Onto it."
   "Quite, Sir."
   "Sorted, Sir."
+  "Sorted."
   "Most kind, Sir."
+  "Most regrettable, Sir."
+  "I'll have a look."
+  "Tests passing."
+  "Build's clean."
+  "Pushed, Sir."
+  "Bit of a faff, that."
+  "Found it, Sir."
 )
+
+# When Potty Mouth is on, blend in profane canon at ~40% rate so Sir
+# actually hears the dial. Keep the polite phrases in too — Caldwell's
+# RP cadence is the bit; expletives are flavor, not every line.
+if [ "$POTTY" = "true" ]; then
+  PHRASES+=(
+    "Fuckin' pushed."
+    "Sorted, fuckin' done."
+    "Tests fuckin' passing."
+    "Right then Sir, fuckin' on it."
+    "Bloody hell, Sir."
+    "Bollocks."
+    "Cocked it up, Sir."
+    "Sweet fuck-all to worry about, Sir."
+    "Bloody well done, that."
+    "Job's a good 'un, Sir."
+  )
+fi
+
 PHRASE="${PHRASES[$RANDOM % ${#PHRASES[@]}]}"
 
 # Fire — say.sh queues to daemon and returns immediately. Pass --cacheable

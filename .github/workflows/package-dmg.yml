@@ -122,6 +122,14 @@ jobs:
           cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/CaldwellDashboard"
           cp macos/CaldwellDashboard/Info.plist "$APP_PATH/Contents/Info.plist"
 
+          SPARKLE_FRAMEWORK="$(dirname "${{ steps.locate.outputs.binary_path }}")/Sparkle.framework"
+          if [ -d "$SPARKLE_FRAMEWORK" ]; then
+            cp -R "$SPARKLE_FRAMEWORK" "$APP_PATH/Contents/MacOS/Sparkle.framework"
+          else
+            echo "::error::Could not find Sparkle.framework beside CaldwellDashboard binary"
+            exit 1
+          fi
+
           if [ -d assets/portraits ]; then
             mkdir -p "$APP_PATH/Contents/Resources/assets"
             cp -R assets/portraits "$APP_PATH/Contents/Resources/assets/portraits"

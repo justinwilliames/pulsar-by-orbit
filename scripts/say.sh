@@ -164,6 +164,12 @@ if sys.argv[5] == 'true': d['cacheable'] = True
 print(json.dumps(d))
 " "$TEXT" "$VOICE" "$CHANNEL" "$PRIORITY" "$CACHEABLE")
 
-    curl -sf -X POST -H "Content-Type: application/json" -d "$BODY" "$DAEMON/speak"
+    # --max-time guards against curl hanging on a stale keep-alive
+    # connection; output redirected to /dev/null so Claude Code's Bash
+    # tool sees stdout close immediately. Explicit `exit 0` ensures the
+    # shell terminates the moment curl returns.
+    curl -sf --max-time 3 -X POST -H "Content-Type: application/json" \
+      -d "$BODY" "$DAEMON/speak" >/dev/null 2>&1 || true
+    exit 0
     ;;
 esac

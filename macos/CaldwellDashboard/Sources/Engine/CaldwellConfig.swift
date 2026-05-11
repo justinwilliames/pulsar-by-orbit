@@ -16,8 +16,17 @@ final class CaldwellConfig: @unchecked Sendable {
     // MARK: - Constants matching daemon/server.py defaults
 
     static let apiBase = "https://api.elevenlabs.io/v1"
-    static let defaultModel = "eleven_v3"
+    // eleven_v3 is gated to paid tiers and returns HTTP 402 on free plans.
+    // eleven_multilingual_v2 works on free, supports custom voices, decent
+    // quality. Upgrade to v3 when Sir moves off the free tier.
+    static let defaultModel = "eleven_multilingual_v2"
     static let defaultFormat = "mp3_44100_128"
+
+    /// Stock ElevenLabs "George" — British, mature. Works on every tier
+    /// including free, ships warm-cache canon under this voice, and is
+    /// the closest premade to Caldwell's intended register. Used as the
+    /// fallback when no voice has been chosen yet.
+    static let defaultVoiceId = "JBFqnCBsd6RMkjVDRZzb"
 
     /// Keychain coordinates — must match the Python daemon's.
     private let keychainService = "caldwell-speak"
@@ -66,9 +75,13 @@ final class CaldwellConfig: @unchecked Sendable {
     }
 
     var voiceId: String {
-        lock.withLock { _config["ELEVENLABS_VOICE_ID"] }
+        let stored = lock.withLock { _config["ELEVENLABS_VOICE_ID"] }
             ?? ProcessInfo.processInfo.environment["ELEVENLABS_VOICE_ID"]
             ?? ""
+        // Fresh-install fallback: when no voice has been configured yet,
+        // use the bundled free-tier-safe default so the very first call
+        // works without Sir having to open Settings.
+        return stored.isEmpty ? Self.defaultVoiceId : stored
     }
 
     var isMuted: Bool {

@@ -29,17 +29,14 @@ struct FloatingPortraitView: View {
                     portraitManager: portraitManager
                 )
             }
-            .scaleEffect(
-                x: 1.0 + amp * 0.04 + sin(time * 2.7) * amp * 0.02,
-                y: 1.0 + amp * 0.04 + cos(time * 3.1) * amp * 0.02
-            )
-            .rotationEffect(.radians(sin(time * 1.9) * amp * 0.03))
-            .offset(
-                x: sin(time * 2.3) * amp * 2,
-                y: sin(time * 1.2) * 2 + cos(time * 1.7) * amp * 1.5
-            )
+            // One gentle, time-driven bob. Amplitude only contributes a soft
+            // scale pulse — no extra sin/cos terms fighting the breathing.
+            // Crucially: NO `.animation(value: amplitude)` here — the spring
+            // would re-interpolate every 60Hz amplitude tick on top of the
+            // already-continuous timeline, producing the jarring stutter.
+            .scaleEffect(1.0 + amp * 0.05)
+            .offset(y: sin(time * 1.1) * 2.5)
             .shadow(color: voiceColor.opacity(0.15 + amp * 0.2), radius: 4 + amp * 6)
-            .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.7), value: amplitude)
         }
     }
 

@@ -7,14 +7,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var httpServer: CaldwellHTTPServer?
     let viewModel = DashboardViewModel()
 
-    // Minimum time the panel stays visible after isActive flips to false.
-    // Short cached phrases ("Pushed.") finish in ~1s — without enough of
-    // a tail, the panel appears and disappears before Sir notices it. 6s
-    // gives proper presence for the cached short canon while still
-    // dismissing automatically.
-    private static let minVisibleDuration: TimeInterval = 6.0
+    // Tail after audio finishes — short enough that Sir doesn't think the
+    // app is hung, long enough that he registers the cached one-word pings.
+    private static let tailAfterIdle: TimeInterval = 2.0
+    // Absolute ceiling on visibility, measured from when the panel was
+    // first shown. Hard belt-and-braces against a dropped/missed idle SSE
+    // event leaving the portrait stuck on screen forever.
+    private static let maxVisibleDuration: TimeInterval = 30.0
     private var hideWorkItem: DispatchWorkItem?
-    private var lastShownAt: Date?
+    private var maxVisibleWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         floatingPanel = FloatingPanelController(viewModel: viewModel)
@@ -59,29 +60,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // rules for non-activating panels — orderFront alone can be
                 // ignored when the app has LSUIElement=true and no key window.
                 panel.orderFrontRegardless()
-                lastShownAt = Date()
                 NSLog("[Caldwell] Panel ordered front at \(panel.frame)")
+                scheduleMaxVisible()
             }
         } else {
-            scheduleHide(panel: panel)
+            scheduleHide()
         }
     }
 
-    private func scheduleHide(panel: FloatingPanelController) {
+    private func scheduleHide() {
         hideWorkItem?.cancel()
-        let elapsed = lastShownAt.map { Date().timeIntervalSince($0) } ?? 0
-        let remaining = max(0, Self.minVisibleDuration - elapsed)
-        // No isPlaying guard here. The cancellation mechanism in
-        // updateFloatingPanel(isActive: true) is the correct interlock:
-        // if a new line starts before this fires, it cancels the item.
-        // If it fires, nothing is playing — hide unconditionally.
-        // The old isPlaying guard caused the panel to stick permanently
-        // when isPlaying was transiently true at fire time (SSE lag).
-        let item = DispatchWorkItem { [weak panel] in
-            panel?.orderOut(nil)
-            NSLog("[Caldwell] Panel ordered out after min-visible elapsed")
+        let item = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.hidePanel(reason: "tail-after-idle")
+            }
         }
         hideWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.tailAfterIdle, execute: item)
+    }
+
+    /// Hard ceiling — if anything goes wrong with SSE idle events, this
+    /// kicks the panel off screen after maxVisibleDuration regardless.
+    private func scheduleMaxVisible() {
+        maxVisibleWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.hidePanel(reason: "max-visible-ceiling")
+            }
+        }
+        maxVisibleWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.maxVisibleDuration, execute: item)
+    }
+
+    private func hidePanel(reason: String) {
+        hideWorkItem?.cancel()
+        hideWorkItem = nil
+        maxVisibleWorkItem?.cancel()
+        maxVisibleWorkItem = nil
+        floatingPanel?.orderOut(nil)
+        viewModel.playback.currentVoice = nil
+        viewModel.playback.currentText = nil
+        NSLog("[Caldwell] Panel hidden (\(reason))")
     }
 }

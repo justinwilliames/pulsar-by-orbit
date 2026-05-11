@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 // MARK: - SSE Broadcaster
 
@@ -15,6 +16,59 @@ struct NoOpBroadcaster: SSEBroadcasterProtocol {
 }
 
 // MARK: - Payload helpers (nonisolated — no actor state captured)
+
+/// Read PCM samples and compute a per-chunk RMS envelope, normalised to the
+/// 95th percentile. Mirrors the daemon's old Python implementation so the
+/// LipSyncEngine receives the same shape of data it always did. Returns an
+/// empty array on any failure — caller's guards handle that.
+func extractEnvelope(url: URL, chunkMs: Int) -> [Float] {
+    guard let file = try? AVAudioFile(forReading: url) else { return [] }
+    let processingFormat = file.processingFormat
+    let sampleRate = processingFormat.sampleRate
+    guard sampleRate > 0 else { return [] }
+
+    let samplesPerChunk = AVAudioFrameCount(sampleRate * Double(chunkMs) / 1000.0)
+    guard samplesPerChunk > 0 else { return [] }
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else { return [] }
+    do {
+        try file.read(into: buffer)
+    } catch {
+        return []
+    }
+
+    let frameLength = Int(buffer.frameLength)
+    let channelCount = Int(processingFormat.channelCount)
+    guard frameLength > 0, channelCount > 0,
+          let channelData = buffer.floatChannelData else { return [] }
+
+    var envelope: [Float] = []
+    envelope.reserveCapacity(frameLength / Int(samplesPerChunk) + 1)
+
+    var i = 0
+    while i < frameLength {
+        let end = min(i + Int(samplesPerChunk), frameLength)
+        var sumSq: Float = 0
+        var n: Int = 0
+        for c in 0..<channelCount {
+            let ptr = channelData[c]
+            for j in i..<end {
+                let v = ptr[j]
+                sumSq += v * v
+                n += 1
+            }
+        }
+        if n > 0 {
+            envelope.append((sumSq / Float(n)).squareRoot())
+        }
+        i += Int(samplesPerChunk)
+    }
+
+    guard !envelope.isEmpty else { return [] }
+    let sorted = envelope.sorted()
+    let p95Index = min(Int(Double(sorted.count) * 0.95), sorted.count - 1)
+    let p95 = max(sorted[p95Index], 0.001)
+    return envelope.map { min($0 / p95, 1.0) }
+}
 
 private func jsonString(_ dict: [String: Any]) -> String {
     guard let data = try? JSONSerialization.data(withJSONObject: dict),
@@ -256,12 +310,16 @@ actor AudioQueueActor {
         }
 
         let duration = audioDuration(url: audioURL)
+        let chunkMs = 50
+        let envelope = await Task.detached { extractEnvelope(url: audioURL, chunkMs: chunkMs) }.value
         let startDict: [String: Any] = [
             "id": entry.id,
             "voice": entry.voiceLabel,
             "type": entry.isReplay ? "replay" : "speak",
             "text": String(entry.text.prefix(100)),
             "duration": duration as Any,
+            "envelope": envelope,
+            "chunk_ms": chunkMs,
             "queued": queue.count,
             "channel": entry.channel as Any,
             "priority": entry.priority,

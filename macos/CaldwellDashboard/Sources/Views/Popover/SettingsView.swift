@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var voiceId: String = ""
     @State private var apiKeyTouched: Bool = false
     @State private var voiceIdTouched: Bool = false
+    @State private var useCustomVoiceId: Bool = false
     @State private var saving: Bool = false
     @State private var statusMessage: String?
     @State private var statusKind: StatusKind = .info
@@ -18,12 +19,12 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                personaSection
-                Divider()
                 apiKeySection
                 voiceIdSection
                 saveButton
                 statusBanner
+                Divider()
+                personaSection
                 Divider()
                 usageSection
             }
@@ -35,6 +36,11 @@ struct SettingsView: View {
             // Sync local fields once after load
             if !voiceIdTouched, let id = viewModel.settings?.voiceId {
                 voiceId = id
+                // Default to Custom mode if the stored ID isn't one of the
+                // known premades — so Sir's cloned/library voices show in
+                // the manual field instead of being silently snapped to a
+                // preset by the Picker.
+                useCustomVoiceId = !Self.premadeVoices.contains(where: { $0.id == id })
             }
         }
     }
@@ -142,22 +148,81 @@ struct SettingsView: View {
 
     // MARK: - Voice ID
 
+    /// ElevenLabs premade (stock) voices. Universally available on every
+    /// account tier — including free — via the API. Library/professional
+    /// voices return HTTP 402 on free, so we surface only these in the
+    /// picker. For paid-tier custom voices, Sir can flip to the manual
+    /// Voice ID field via the toggle.
+    private static let premadeVoices: [(id: String, name: String)] = [
+        ("JBFqnCBsd6RMkjVDRZzb", "George — British, mature"),
+        ("CwhRBWXzGAHq8TQ4Fs17", "Roger — laid-back, resonant"),
+        ("nPczCjzI2devNBz1zQrb", "Brian — deep, calm"),
+        ("onwK4e9ZLuTAKqWW03F9", "Daniel — authoritative British"),
+        ("bIHbv24MWmeRgasZH58o", "Will — friendly American"),
+        ("iP95p4xoKVk53GoZ742B", "Chris — casual American"),
+        ("cjVigY5qzO86Huf0OWal", "Eric — smooth American"),
+        ("N2lVS1w4EtoT3dr4eOWO", "Callum — gravelly British"),
+        ("TX3LPaxmHKxFdv7VOQHJ", "Liam — articulate American"),
+        ("IKne3meq5aSn9XLyUdCD", "Charlie — warm Australian"),
+        ("pqHfZKP75CvOlQylNhV4", "Bill — older American"),
+        ("hpp4J3VqNfWAUOO0d1Us", "Bella — bright, warm"),
+        ("EXAVITQu4vr4xnSDxMaL", "Sarah — reassuring American"),
+        ("FGY2WhTYpPnrIDTdsKH5", "Laura — quirky American"),
+        ("XB0fDUnXU5powFXDhCwa", "Charlotte — sultry Swedish"),
+        ("Xb7hH8MSUJpSbSDYk0k2", "Alice — confident British"),
+        ("XrExE9yKIg1WjnnlVkGX", "Matilda — friendly American"),
+        ("cgSgspJ2msm6clMCkdW9", "Jessica — expressive American"),
+        ("pFZP5JQG7iQjIQuC4Bku", "Lily — warm British"),
+    ]
+
     @ViewBuilder
     private var voiceIdSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("DEFAULT VOICE ID")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.5)
+            HStack {
+                Text("VOICE")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.5)
+                Spacer()
+                Button(useCustomVoiceId ? "Use preset" : "Custom ID…") {
+                    useCustomVoiceId.toggle()
+                    voiceIdTouched = true
+                    if !useCustomVoiceId {
+                        // Switching back to presets: snap to closest premade
+                        // (default to George if current value isn't a known preset).
+                        if !Self.premadeVoices.contains(where: { $0.id == voiceId }) {
+                            voiceId = Self.premadeVoices.first?.id ?? voiceId
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
 
-            TextField("20-character voice ID", text: $voiceId)
-                .textFieldStyle(.roundedBorder)
+            if useCustomVoiceId {
+                TextField("20-character voice ID", text: $voiceId)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: voiceId) { _, _ in voiceIdTouched = true }
+
+                Text("Paste any ElevenLabs voice ID. Library/professional voices need a paid plan — free tier rejects them with HTTP 402.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(3)
+            } else {
+                Picker("", selection: $voiceId) {
+                    ForEach(Self.premadeVoices, id: \.id) { v in
+                        Text(v.name).tag(v.id)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
                 .onChange(of: voiceId) { _, _ in voiceIdTouched = true }
 
-            Text("Add the voice to your VoiceLab on elevenlabs.io first, then paste its ID. Validated against ElevenLabs on save.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(3)
+                Text("Premade voices — work on every tier including free. For your own cloned or library voices, switch to Custom ID.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(3)
+            }
         }
     }
 

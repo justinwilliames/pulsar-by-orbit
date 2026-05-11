@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # stop-hook.sh — Claude Code Stop event handler.
 #
-# Ensures Caldwell speaks at every turn-end. Fires a random Tier 0
-# canonical phrase (cached, free) UNLESS one of these applies:
+# Picks a context-appropriate Tier 0 canon line and asks the daemon to play
+# it — cache-only, no ElevenLabs spend. Stays silent on any of these:
 #
-#   1. Daemon unreachable — exit silent, can't speak anyway
-#   2. Daemon mute is on — Sir's gone full silent (AFK), respect it
-#   3. The skill already fired in the last 60s — don't double up
+#   1. Daemon unreachable
+#   2. Daemon mute is on (Sir AFK)
+#   3. Skill already fired in the last 60s (don't double up)
+#   4. Context detected but no cached canon matches it (daemon returns 204)
+#
+# Context comes from grepping the last assistant message in the Claude Code
+# transcript for tells like "pushed", "tests pass", "build failed", "found",
+# etc. The Stop hook receives a JSON event on stdin with `transcript_path`.
 #
 # Stop hooks block Claude Code until they exit, so this is built to be
 # fast (<100ms typical) and silent (all output redirected to /dev/null).
@@ -17,6 +22,15 @@ DAEMON="http://127.0.0.1:7865"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SAY="$SCRIPT_DIR/say.sh"
 
+# Read the Stop event from stdin (best-effort — older Claude Code versions
+# may not send anything). 2s timeout so a missing producer can't hang us.
+EVENT_JSON=""
+if [ -t 0 ]; then
+  : # tty — nothing to read
+else
+  EVENT_JSON=$(timeout 2 cat 2>/dev/null || true)
+fi
+
 # 1. Daemon up?
 curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1 || exit 0
 
@@ -24,9 +38,6 @@ curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1 || exit 0
 SETTINGS=$(curl -sf --connect-timeout 1 "$DAEMON/settings" 2>/dev/null || echo "{}")
 MUTED=$(echo "$SETTINGS" | python3 -c 'import sys,json
 try: print("true" if json.load(sys.stdin).get("muted") else "false")
-except: print("false")' 2>/dev/null || echo "false")
-POTTY=$(echo "$SETTINGS" | python3 -c 'import sys,json
-try: print("true" if json.load(sys.stdin).get("expletives_enabled") else "false")
 except: print("false")' 2>/dev/null || echo "false")
 
 # Muted? Full silent mode — no ElevenLabs calls, no Tier 0 fallback
@@ -45,49 +56,60 @@ try:
 except: print("none")' 2>/dev/null || echo "none")
 [ "$RECENT" = "recent" ] && exit 0
 
-# 4. Pick a random Tier 0 phrase from the persona-appropriate pool.
-# Mode-neutral canon — works in both Polite and Potty Mouth modes.
-PHRASES=(
-  "Right then Sir."
-  "Right then Sir, on it."
-  "On it, Sir."
-  "Onto it."
-  "Quite, Sir."
-  "Sorted, Sir."
-  "Sorted."
-  "Most kind, Sir."
-  "Most regrettable, Sir."
-  "I'll have a look."
-  "Tests passing."
-  "Build's clean."
-  "Pushed, Sir."
-  "Bit of a faff, that."
-  "Found it, Sir."
-)
-
-# When Potty Mouth is on, blend in profane canon at ~40% rate so Sir
-# actually hears the dial. Keep the polite phrases in too — Caldwell's
-# RP cadence is the bit; expletives are flavor, not every line.
-if [ "$POTTY" = "true" ]; then
-  PHRASES+=(
-    "Fuckin' pushed."
-    "Sorted, fuckin' done."
-    "Tests fuckin' passing."
-    "Right then Sir, fuckin' on it."
-    "Bloody hell, Sir."
-    "Bollocks."
-    "Cocked it up, Sir."
-    "Sweet fuck-all to worry about, Sir."
-    "Bloody well done, that."
-    "Job's a good 'un, Sir."
-  )
+# 4. Detect context from the last assistant message in the transcript.
+#    Falls back to "neutral" if no transcript path or no tells matched.
+CONTEXT="neutral"
+TRANSCRIPT_PATH=""
+if [ -n "$EVENT_JSON" ]; then
+  TRANSCRIPT_PATH=$(echo "$EVENT_JSON" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("transcript_path",""))
+except: print("")' 2>/dev/null || echo "")
 fi
 
-PHRASE="${PHRASES[$RANDOM % ${#PHRASES[@]}]}"
+if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+  # Pull the last assistant text content. Read tail to stay fast on big
+  # transcripts. Detection runs in lowercase; bash globbing handles substrings.
+  LAST_TEXT=$(tail -c 200000 "$TRANSCRIPT_PATH" 2>/dev/null | python3 -c '
+import sys, json
+last = ""
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw or not raw.startswith("{"): continue
+    try:
+        ev = json.loads(raw)
+    except: continue
+    if ev.get("type") != "assistant": continue
+    msg = ev.get("message", {})
+    for chunk in msg.get("content", []):
+        if chunk.get("type") == "text":
+            text = chunk.get("text", "")
+            if text: last = text
+print(last.lower()[-4000:])
+' 2>/dev/null || echo "")
 
-# Fire — say.sh queues to daemon and returns immediately. Pass --cacheable
-# so the daemon writes to phrase cache on first miss; subsequent fires of
-# the same phrase replay free.
-"$SAY" "$PHRASE" --cacheable >/dev/null 2>&1 || true
+  case "$LAST_TEXT" in
+    *"force-push"*|*"pushed to"*|*" pushed,"*|*" pushed."*|*"git push"*)
+      CONTEXT="push" ;;
+    *"tests pass"*|*"tests are passing"*|*"all tests"*|*"all green"*|*"test suite pass"*)
+      CONTEXT="tests-pass" ;;
+    *"build's clean"*|*"build is clean"*|*"build succe"*|*"build complete"*|*"compiled clean"*)
+      CONTEXT="build-pass" ;;
+    *"found it"*|*"found the bug"*|*"located the"*|*"spotted the"*|*"root cause"*)
+      CONTEXT="found" ;;
+    *"failed"*|*" failure"*|*"crashed"*|*"wedged"*|*"broke "*|*"broken"*|*"errored"*|*"didn't work"*)
+      CONTEXT="fail" ;;
+    *"fixed"*|*"sorted"*|*"shipped"*|*"merged"*|*" done."*|*"all set"*|*"ready to ship"*)
+      CONTEXT="done" ;;
+    *"on it"*|*"let me"*|*"i'll"*|*"investigating"*|*"taking a look"*|*"reading "*)
+      CONTEXT="start" ;;
+    *)
+      CONTEXT="neutral" ;;
+  esac
+fi
+
+# 5. Fire the daemon's canon picker with the detected context.
+#    Cache-only — if no cached canon matches this context, daemon returns
+#    204 and we stay silent rather than spend ElevenLabs credit on a guess.
+"$SAY" --canon "$CONTEXT" >/dev/null 2>&1 || true
 
 exit 0

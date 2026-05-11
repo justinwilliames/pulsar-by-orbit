@@ -147,6 +147,13 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         router.get("/portraits/:name/:frame") { _, context -> Response in
             return try Self.handlePortrait(context: context)
         }
+
+        // POST /canon/pick — play a context-appropriate cached canon line.
+        // Cache-only — never spends ElevenLabs credit. Returns 204 if no
+        // cached canon matches the requested context.
+        router.post("/canon/pick") { request, _ -> Response in
+            return try await Self.handleCanonPick(request: request, audioQueue: audioQueue)
+        }
     }
 
     // MARK: - /history handler
@@ -509,6 +516,143 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
     }
 
+    // MARK: - /canon/pick handler
+
+    /// Context → list of candidate canon phrases. The first list is the
+    /// always-on Polite pool; Potty mode adds the second list on top.
+    /// Phrases here must match (byte-for-byte) what `warm-cache.sh` and
+    /// `stop-hook.sh` use, otherwise the cache lookup misses.
+    nonisolated private static let canonContexts: [String: (polite: [String], potty: [String])] = [
+        "push": (
+            polite: ["Pushed, Sir."],
+            potty:  ["Fuckin' pushed."]
+        ),
+        "tests-pass": (
+            polite: ["Tests passing."],
+            potty:  ["Tests fuckin' passing."]
+        ),
+        "build-pass": (
+            polite: ["Build's clean."],
+            potty:  []
+        ),
+        "found": (
+            polite: ["Found it, Sir."],
+            potty:  []
+        ),
+        "fail": (
+            polite: ["Cocked it up, Sir.", "Most regrettable, Sir."],
+            potty:  ["Bollocks.", "Bloody hell, Sir.", "Cocked it up, Sir."]
+        ),
+        "done": (
+            polite: ["Sorted, Sir.", "Sorted.", "Bit of a faff, that.", "Job's a good 'un, Sir."],
+            potty:  ["Sorted, fuckin' done.", "Bloody well done, that.", "Job's a good 'un, Sir."]
+        ),
+        "start": (
+            polite: ["Right then Sir.", "Right then Sir, on it.", "On it, Sir.", "Onto it.", "I'll have a look."],
+            potty:  ["Right then Sir, fuckin' on it."]
+        ),
+        "ack": (
+            polite: ["Quite, Sir.", "Most kind, Sir."],
+            potty:  []
+        ),
+        "reassure": (
+            polite: [],
+            potty:  ["Sweet fuck-all to worry about, Sir."]
+        ),
+    ]
+
+    nonisolated private static func handleCanonPick(
+        request: Request,
+        audioQueue: AudioQueueActor
+    ) async throws -> Response {
+        // Parse optional body — context defaults to "neutral" (union of all).
+        var requestedContext = "neutral"
+        if let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+           let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
+           let ctx = body["context"] as? String,
+           !ctx.isEmpty {
+            requestedContext = ctx.lowercased()
+        }
+
+        let cfg = CaldwellConfig.shared
+
+        // Mute respects the global setting — same as /speak.
+        if cfg.isMuted {
+            return Response(status: .noContent)
+        }
+
+        // Build the candidate pool for this context.
+        let candidates = canonCandidates(for: requestedContext, expletives: cfg.expletivesEnabled)
+        guard !candidates.isEmpty else {
+            return Response(status: .noContent)
+        }
+
+        // Filter to those actually cached for the current voice.
+        let voiceId = cfg.voiceId
+        guard !voiceId.isEmpty else {
+            return Response(status: .noContent)
+        }
+        let cached = candidates.compactMap { text -> (String, URL)? in
+            guard let url = PhraseCache.shared.get(text: text, voiceId: voiceId) else { return nil }
+            return (text, url)
+        }
+        guard !cached.isEmpty else {
+            // No cached canon for this context — stay silent rather than
+            // spend ElevenLabs credit on a guess.
+            return Response(status: .noContent)
+        }
+
+        // Random pick from cached pool.
+        let (text, sourceURL) = cached.randomElement()!
+        let entryId = Self.nextEntryId()
+        let tmpURL: URL
+        do {
+            tmpURL = try Self.copyCacheAudioToTemp(sourceURL: sourceURL, entryId: entryId)
+        } catch {
+            return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
+        }
+
+        let entry = AudioEntry(
+            id: entryId,
+            text: text,
+            voiceId: voiceId,
+            voiceLabel: "Caldwell",
+            createdAt: Date(),
+            channel: nil,
+            priority: false,
+            fullText: text,
+            isReplay: true,
+            audioURL: tmpURL
+        )
+
+        let position = await audioQueue.enqueue(entry)
+        return try Self.json(CanonPickResponse(
+            id: entryId,
+            played: text,
+            context: requestedContext,
+            position: position
+        ))
+    }
+
+    /// Resolve a context tag into its candidate phrase list. "neutral"
+    /// returns the union across all contexts. Unknown tags return [].
+    nonisolated private static func canonCandidates(for context: String, expletives: Bool) -> [String] {
+        if context == "neutral" {
+            var pool: [String] = []
+            for (_, lists) in canonContexts {
+                pool.append(contentsOf: lists.polite)
+                if expletives { pool.append(contentsOf: lists.potty) }
+            }
+            // De-dup while preserving order.
+            var seen = Set<String>()
+            return pool.filter { seen.insert($0).inserted }
+        }
+        guard let lists = canonContexts[context] else { return [] }
+        var pool = lists.polite
+        if expletives { pool.append(contentsOf: lists.potty) }
+        return pool
+    }
+
     // MARK: - /speak handler
 
     nonisolated private static func handleSpeak(
@@ -619,12 +763,17 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             let textCopy = text
             let voiceIdCopy = voiceId
             let apiKey = cfg.apiKey
+            // Cache eligibility: caller asked for it AND the text is short
+            // enough to plausibly recur. Anything longer is almost certainly
+            // session-specific (file paths, findings, one-shot prose) and
+            // will never replay — caching it just bloats the LRU.
+            let cacheEligible = cacheable && isCacheEligible(text: textCopy)
             Task.detached {
                 do {
                     let url = try await ElevenLabsClient.fetchTTS(
                         text: textCopy, voiceId: voiceIdCopy, apiKey: apiKey
                     )
-                    if cacheable {
+                    if cacheEligible {
                         try? PhraseCache.shared.put(text: textCopy, voiceId: voiceIdCopy, sourceURL: url)
                     }
                     await audioQueue.markReady(id: entryIdCopy, url: url)
@@ -692,6 +841,25 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     nonisolated private static func isValidPhraseCacheKey(_ key: String) -> Bool {
         !key.isEmpty && key.count <= 64 && key.allSatisfy { $0.isHexDigit }
+    }
+
+    /// Phrase-cache admission policy. Caller-set `cacheable: true` is a hint,
+    /// not a command — the daemon refuses to cache text that's obviously
+    /// one-shot. Generic short canon ("Pushed, Sir.", "Build's clean.")
+    /// passes; detailed Tier 3 lines do not.
+    nonisolated static func isCacheEligible(text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count > 60 { return false }
+        if trimmed.contains("://") { return false }
+        // Em-dash is the dead giveaway of a Tier 3 detailed alert.
+        if trimmed.contains("—") { return false }
+        // File extensions, PR/issue refs — session-specific by definition.
+        let oneShotSubstrings = [".swift", ".ts", ".tsx", ".js", ".py", ".json",
+                                 ".md", ".sh", ".plist", "PR #", "issue #"]
+        for marker in oneShotSubstrings where trimmed.contains(marker) {
+            return false
+        }
+        return true
     }
 
     nonisolated private static func loadPhraseSidecar(from url: URL) -> PhraseSidecar? {
@@ -938,6 +1106,13 @@ private struct CachePlayBody: Decodable, Sendable {
 
 private struct CachePlayResponse: Encodable, Sendable {
     let id: String
+    let position: Int
+}
+
+private struct CanonPickResponse: Encodable, Sendable {
+    let id: String
+    let played: String
+    let context: String
     let position: Int
 }
 

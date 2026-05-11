@@ -271,21 +271,41 @@ actor AudioQueueActor {
 
     // MARK: - Worker
 
+    /// Maximum time the worker will wait for a background fetch before giving
+    /// up on an entry and moving on. Without this, a hung URLSession call
+    /// wedges the entire queue — and because `/speak` spawns a fetch eagerly,
+    /// every subsequent enqueue burns ElevenLabs quota for audio nobody hears.
+    static let fetchWaitTimeoutSeconds: UInt64 = 30
+
     private func runWorker() async {
         while !queue.isEmpty {
             var entry = queue.removeFirst()
             currentEntry = entry
 
-            // Wait for the audio URL if not yet available.
-            if entry.audioURL == nil && !entry.fetchFailed {
-                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                    readyContinuations[entry.id] = cont
-                }
+            // Resolution may have raced ahead of us — check the resolved
+            // table before setting up a continuation we'd be stuck on.
+            if entry.audioURL == nil, !entry.fetchFailed,
+               let pre = resolvedURLs.removeValue(forKey: entry.id) {
+                entry.audioURL = pre
             }
 
-            // Pick up URL from resolvedURLs (set by markReady after pop).
-            if entry.audioURL == nil {
+            // Wait for the audio URL if still not available.
+            if entry.audioURL == nil && !entry.fetchFailed {
+                let entryId = entry.id
+                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                    readyContinuations[entryId] = cont
+                    // Watchdog: if no markReady/markFailed arrives in
+                    // `fetchWaitTimeoutSeconds`, resume the continuation
+                    // ourselves and skip this entry.
+                    Task { [weak self] in
+                        try? await Task.sleep(nanoseconds: Self.fetchWaitTimeoutSeconds * 1_000_000_000)
+                        await self?.timeoutEntry(id: entryId)
+                    }
+                }
                 entry.audioURL = resolvedURLs.removeValue(forKey: entry.id)
+                if entry.audioURL == nil {
+                    entry.fetchFailed = true
+                }
             }
 
             await playEntry(entry)
@@ -293,6 +313,14 @@ actor AudioQueueActor {
         }
         currentEntry = nil
         workerRunning = false
+    }
+
+    /// Watchdog: if a fetch never reports back, free the worker.
+    /// Idempotent — safe if markReady/markFailed already cleared the entry.
+    func timeoutEntry(id: String) {
+        guard let cont = readyContinuations.removeValue(forKey: id) else { return }
+        NSLog("[AudioQueue] ⏱ fetch timeout for \(id) after \(Self.fetchWaitTimeoutSeconds)s — skipping")
+        cont.resume()
     }
 
     // MARK: - Playback
@@ -309,15 +337,19 @@ actor AudioQueueActor {
             return
         }
 
-        let duration = audioDuration(url: audioURL)
+        let fileDuration = audioDuration(url: audioURL)
         let chunkMs = 50
         let envelope = await Task.detached { extractEnvelope(url: audioURL, chunkMs: chunkMs) }.value
+        // Compute where speech actually ends so we can kill afplay before it
+        // plays through ElevenLabs' trailing silence. Falls back to fileDuration
+        // when the envelope is unusable.
+        let effectiveDuration = effectiveSpeechEnd(envelope: envelope, chunkMs: chunkMs, fallback: fileDuration)
         let startDict: [String: Any] = [
             "id": entry.id,
             "voice": entry.voiceLabel,
             "type": entry.isReplay ? "replay" : "speak",
             "text": String(entry.text.prefix(100)),
-            "duration": duration as Any,
+            "duration": effectiveDuration as Any,
             "envelope": envelope,
             "chunk_ms": chunkMs,
             "queued": queue.count,
@@ -326,7 +358,7 @@ actor AudioQueueActor {
         ]
         await broadcaster.broadcast(event: "voice_active", json: jsonString(startDict))
 
-        NSLog("[AudioQueue] ▶ \(entry.id) '\(entry.text.prefix(60))'")
+        NSLog("[AudioQueue] ▶ \(entry.id) '\(entry.text.prefix(60))' eff=\(effectiveDuration ?? -1)s file=\(fileDuration ?? -1)s")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
@@ -338,9 +370,25 @@ actor AudioQueueActor {
         do {
             try process.run()
             // Wait off-actor so we don't block other actor calls during playback.
+            // Race two tasks: natural exit, or the effective-end deadline.
+            // First one to finish wins; the other gets cancelled.
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                Task.detached {
+                let exitTask = Task.detached {
                     process.waitUntilExit()
+                }
+                let killTask: Task<Void, Never>?
+                if let cutoff = effectiveDuration, cutoff > 0,
+                   fileDuration == nil || cutoff < (fileDuration ?? 0) - 0.05 {
+                    killTask = Task.detached {
+                        try? await Task.sleep(nanoseconds: UInt64(cutoff * 1_000_000_000))
+                        if process.isRunning { process.terminate() }
+                    }
+                } else {
+                    killTask = nil
+                }
+                Task.detached {
+                    await exitTask.value
+                    killTask?.cancel()
                     cont.resume()
                 }
             }
@@ -357,11 +405,29 @@ actor AudioQueueActor {
         }
 
         await broadcaster.broadcast(event: "voice_active", json: jsonString(idlePayload(queued: queue.count)))
-        let historyItem = recordHistory(entry: entry, duration: duration, failed: false)
+        let historyItem = recordHistory(entry: entry, duration: effectiveDuration, failed: false)
         await broadcaster.broadcast(
             event: "history_update",
             json: jsonString(historyPayload(for: historyItem, type: entry.isReplay ? "replay" : "speak"))
         )
+    }
+
+    /// Walk back from the end of the envelope to find the last chunk loud
+    /// enough to be considered speech, then add a small tail so words don't
+    /// get clipped. Returns nil only if envelope is empty.
+    private func effectiveSpeechEnd(envelope: [Float], chunkMs: Int, fallback: Double?) -> Double? {
+        guard !envelope.isEmpty else { return fallback }
+        let silenceThreshold: Float = 0.04
+        let tailMs = 180
+        var lastLoud = -1
+        for i in stride(from: envelope.count - 1, through: 0, by: -1) {
+            if envelope[i] > silenceThreshold { lastLoud = i; break }
+        }
+        guard lastLoud >= 0 else { return fallback }
+        let endMs = (lastLoud + 1) * chunkMs + tailMs
+        let effective = Double(endMs) / 1000.0
+        if let fb = fallback { return min(effective, fb) }
+        return effective
     }
 
     // MARK: - Helpers

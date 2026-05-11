@@ -36,6 +36,7 @@ ACTION=""
 LIMIT=50
 REPLAY_ID=""
 SETUP_VALUE=""
+CANON_CONTEXT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -43,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --channel)       CHANNEL="$2"; shift 2 ;;
     --priority)      PRIORITY=true; shift ;;
     --cacheable)     CACHEABLE=true; shift ;;
+    --canon)         ACTION="canon"; CANON_CONTEXT="$2"; shift 2 ;;
     --status)        ACTION="status"; shift ;;
     --skip)          ACTION="skip"; shift ;;
     --clear)         ACTION="clear"; shift ;;
@@ -127,6 +129,23 @@ case "${ACTION:-speak}" in
   set-mode)
     BODY=$(python3 -c "import json, sys; print(json.dumps({'expletives_enabled': sys.argv[1] == 'true'}))" "$SETUP_VALUE")
     curl -sf -X POST -H "Content-Type: application/json" -d "$BODY" "$DAEMON/settings" | python3 -m json.tool
+    ;;
+  canon)
+    # Context-aware cached-canon pick. Daemon picks a phrase tagged with the
+    # given context that's actually in cache, then enqueues it. Cache-only —
+    # never spends ElevenLabs credit. Stays silent (HTTP 204) if nothing
+    # cached matches the context. Use this for turn-end pings instead of
+    # hand-writing canon strings that might miss the cache.
+    #
+    # Known contexts: push, tests-pass, build-pass, found, fail, done,
+    # start, ack, reassure, neutral.
+    if ! daemon_up; then
+      exit 0
+    fi
+    BODY=$(python3 -c "import json, sys; print(json.dumps({'context': sys.argv[1]}))" "$CANON_CONTEXT")
+    curl -sf --max-time 3 -X POST -H "Content-Type: application/json" \
+      -d "$BODY" "$DAEMON/canon/pick" >/dev/null 2>&1 || true
+    exit 0
     ;;
   speak)
     [[ -z "$TEXT" ]] && {

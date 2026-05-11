@@ -29,6 +29,21 @@ enum ElevenLabsClient {
 
     // MARK: - Public
 
+    /// Per-attempt request timeout. Without this, URLSession's default 60s
+    /// can pile up (60 × (retries+1) = 3 min worst-case) and stall the queue
+    /// worker upstream. 20s is plenty for a small TTS call.
+    static let perAttemptTimeoutSeconds: TimeInterval = 20
+
+    /// Shared session with a sane request timeout. URLSession.shared defaults
+    /// to 60s; replacing the timeout on a per-request `URLRequest` works too,
+    /// but a dedicated session keeps the cap explicit.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = perAttemptTimeoutSeconds
+        config.timeoutIntervalForResource = 60
+        return URLSession(configuration: config)
+    }()
+
     /// Fetch TTS audio for `text` and write it to a temp file.
     /// Returns the URL of the temp MP3; caller is responsible for deletion.
     /// Retries up to `retries` times on 5xx errors (mirrors Python daemon).
@@ -68,7 +83,7 @@ enum ElevenLabsClient {
             req.httpBody = payload
 
             do {
-                let (data, response) = try await URLSession.shared.data(for: req)
+                let (data, response) = try await session.data(for: req)
                 // URLSession always returns HTTPURLResponse for http/https.
                 let http = response as! HTTPURLResponse
 

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum DashboardTab: String, CaseIterable {
@@ -70,6 +71,8 @@ struct PopoverRootView: View {
             muteToggle
 
             ConnectionStatusView(status: viewModel.connectionStatus)
+
+            quitButton
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -99,6 +102,20 @@ struct PopoverRootView: View {
         }
         .buttonStyle(.plain)
         .help(muted ? "Caldwell is muted — click to unmute. No ElevenLabs calls while muted." : "Click to mute Caldwell — stops all ElevenLabs calls until unmuted.")
+    }
+
+    private var quitButton: some View {
+        Button {
+            NSApp.terminate(nil)
+        } label: {
+            Image(systemName: "power")
+                .font(.caption.weight(.semibold))
+                .frame(width: 18, height: 18)
+                .background(Color.secondary.opacity(0.12), in: Circle())
+                .overlay(Circle().strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help("Quit Caldwell")
     }
 
     private var tabPicker: some View {

@@ -22,6 +22,9 @@ let package = Package(
                 .product(name: "Hummingbird", package: "hummingbird"),
             ],
             path: "Sources",
+            resources: [
+                .copy("Resources/AppIcon.icns"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
             ],

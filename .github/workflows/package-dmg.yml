@@ -105,6 +105,7 @@ jobs:
 
           cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/CaldwellDashboard"
           cp macos/CaldwellDashboard/Info.plist "$APP_PATH/Contents/Info.plist"
+          cp macos/CaldwellDashboard/Sources/Resources/AppIcon.icns "$APP_PATH/Contents/Resources/AppIcon.icns"
 
           if [ -d assets/portraits ]; then
             mkdir -p "$APP_PATH/Contents/Resources/assets"

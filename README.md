@@ -1,5 +1,9 @@
 # Caldwell
 
+<p align="center">
+  <img src="assets/portraits/caldwell.png" width="180" alt="Caldwell" />
+</p>
+
 [![Build Caldwell](https://github.com/justinwilliames/caldwell-speak/actions/workflows/package-dmg.yml/badge.svg)](https://github.com/justinwilliames/caldwell-speak/actions/workflows/package-dmg.yml)
 
 A macOS menu-bar app that gives Claude Code a voice. Alfred Pennyworth meets ElevenLabs — butler-formal RP, two registers (Polite or Potty Mouth), and a phrase cache that makes repeated lines free. Caldwell speaks at the end of every Claude Code turn so you know when it's done, without watching the screen.

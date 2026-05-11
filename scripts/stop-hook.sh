@@ -43,20 +43,37 @@ except: print("false")' 2>/dev/null || echo "false")
 # Muted? Full silent mode — no ElevenLabs calls, no Tier 0 fallback
 [ "$MUTED" = "true" ] && exit 0
 
-# 3. Recent /speak in the last 60 seconds? skill fired, hook backs off
+# 3. Is anything currently playing or queued? If so, the skill already
+#    fired this turn — don't stack a hook ping on top.
+#    /queue returns {playing: Bool, queued: Int, ...}; we treat either
+#    as "busy" and back off.
+BUSY=$(curl -sf --connect-timeout 1 "$DAEMON/queue" 2>/dev/null \
+  | python3 -c 'import sys,json
+try:
+    d = json.load(sys.stdin)
+    busy = bool(d.get("playing")) or int(d.get("queued", 0)) > 0
+    print("busy" if busy else "idle")
+except: print("idle")' 2>/dev/null || echo "idle")
+[ "$BUSY" = "busy" ] && exit 0
+
+# 4. Recent COMPLETED ping in the last 60 seconds? Skill fired and
+#    finished — still back off to avoid double-pings on close turns.
+#    NOTE: /history returns a bare JSON array, not {"entries":[…]}.
+#    Earlier code assumed an object and silently failed → no debounce.
 RECENT=$(curl -sf --connect-timeout 1 "$DAEMON/history?limit=1" 2>/dev/null \
   | python3 -c 'import sys,json,time
 try:
     d = json.load(sys.stdin)
-    entries = d.get("entries", [])
-    if not entries: print("none")
+    entries = d if isinstance(d, list) else d.get("entries", [])
+    if not entries:
+        print("none")
     else:
         ts = entries[0].get("timestamp", 0)
         print("recent" if (time.time() - ts) < 60 else "stale")
 except: print("none")' 2>/dev/null || echo "none")
 [ "$RECENT" = "recent" ] && exit 0
 
-# 4. Detect context from the last assistant message in the transcript.
+# 5. Detect context from the last assistant message in the transcript.
 #    Falls back to "neutral" if no transcript path or no tells matched.
 CONTEXT="neutral"
 TRANSCRIPT_PATH=""
@@ -107,7 +124,7 @@ print(last.lower()[-4000:])
   esac
 fi
 
-# 5. Fire the daemon's canon picker with the detected context.
+# 6. Fire the daemon's canon picker with the detected context.
 #    Cache-only — if no cached canon matches this context, daemon returns
 #    204 and we stay silent rather than spend ElevenLabs credit on a guess.
 "$SAY" --canon "$CONTEXT" >/dev/null 2>&1 || true

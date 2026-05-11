@@ -154,6 +154,24 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         router.post("/canon/pick") { request, _ -> Response in
             return try await Self.handleCanonPick(request: request, audioQueue: audioQueue)
         }
+
+        // GET /queue — current queue snapshot. Hook uses this to detect
+        // in-flight plays before deciding whether to fire its own ping.
+        router.get("/queue") { request, _ -> Response in
+            return try await Self.handleQueue(request: request, audioQueue: audioQueue)
+        }
+    }
+
+    // MARK: - /queue handler
+
+    nonisolated private static func handleQueue(
+        request: Request,
+        audioQueue: AudioQueueActor
+    ) async throws -> Response {
+        let limit = max(1, min(request.uri.queryParameters.get("limit", as: Int.self) ?? 20, 100))
+        let channel = request.uri.queryParameters.get("channel")
+        let snapshot = await audioQueue.statusSnapshot(limit: limit, channel: channel)
+        return try Self.json(snapshot)
     }
 
     // MARK: - /history handler

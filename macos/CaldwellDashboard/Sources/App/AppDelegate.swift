@@ -71,22 +71,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hideWorkItem?.cancel()
         let elapsed = lastShownAt.map { Date().timeIntervalSince($0) } ?? 0
         let remaining = max(0, Self.minVisibleDuration - elapsed)
-        let item = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            // At fire time, only check `isPlaying`. queueItems is updated via
-            // SSE state events which can lag behind voice_active type=idle —
-            // using it caused the panel to stick when queueItems held a
-            // stale entry from the just-finished utterance. Bursts of
-            // back-to-back utterances are handled by the
-            // `hideWorkItem?.cancel()` at the top of updateFloatingPanel —
-            // the next isActive=true event cancels this scheduled hide
-            // before it fires.
-            if !self.viewModel.playback.isPlaying {
-                panel.orderOut(nil)
-                NSLog("[Caldwell] Panel ordered out after min-visible elapsed")
-            } else {
-                NSLog("[Caldwell] Hide deferred — playback still active at fire time")
-            }
+        // No isPlaying guard here. The cancellation mechanism in
+        // updateFloatingPanel(isActive: true) is the correct interlock:
+        // if a new line starts before this fires, it cancels the item.
+        // If it fires, nothing is playing — hide unconditionally.
+        // The old isPlaying guard caused the panel to stick permanently
+        // when isPlaying was transiently true at fire time (SSE lag).
+        let item = DispatchWorkItem { [weak panel] in
+            panel?.orderOut(nil)
+            NSLog("[Caldwell] Panel ordered out after min-visible elapsed")
         }
         hideWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: item)

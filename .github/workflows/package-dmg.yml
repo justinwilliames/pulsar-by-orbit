@@ -101,20 +101,10 @@ jobs:
         run: |
           set -e
           APP_PATH="$RUNNER_TEMP/Caldwell.app"
-          mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$APP_PATH/Contents/Frameworks"
+          mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 
           cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/CaldwellDashboard"
           cp macos/CaldwellDashboard/Info.plist "$APP_PATH/Contents/Info.plist"
-
-          RELEASE_DIR="${{ steps.locate.outputs.release_dir }}"
-          SPARKLE_FRAMEWORK="$RELEASE_DIR/Sparkle.framework"
-          if [ -d "$SPARKLE_FRAMEWORK" ]; then
-            cp -R "$SPARKLE_FRAMEWORK" "$APP_PATH/Contents/Frameworks/Sparkle.framework"
-          else
-            echo "::warning::Sparkle.framework not found at $SPARKLE_FRAMEWORK — app will run without auto-update"
-            echo "Release dir contents:"
-            ls "$RELEASE_DIR"
-          fi
 
           if [ -d assets/portraits ]; then
             mkdir -p "$APP_PATH/Contents/Resources/assets"
@@ -199,85 +189,6 @@ jobs:
           path: ${{ steps.dmg.outputs.dmg_path }}
           retention-days: 30
 
-      - name: Install Sparkle CLI tools (sign_update)
-        if: env.SPARKLE_ED_PRIVATE_KEY != ''
-        env:
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-        run: |
-          set -e
-          SPARKLE_VERSION="2.6.4"
-          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" -o /tmp/sparkle.tar.xz
-          mkdir -p /tmp/sparkle && tar -xJf /tmp/sparkle.tar.xz -C /tmp/sparkle
-          SIGN_UPDATE=$(find /tmp/sparkle -name "sign_update" -type f | head -n 1)
-          if [ -z "$SIGN_UPDATE" ]; then
-            echo "::error::sign_update not found in Sparkle bundle"
-            exit 1
-          fi
-          chmod +x "$SIGN_UPDATE"
-          echo "SIGN_UPDATE=$SIGN_UPDATE" >> "$GITHUB_ENV"
-
-      - name: Sign .dmg + generate appcast.xml
-        if: env.SPARKLE_ED_PRIVATE_KEY != ''
-        id: appcast
-        env:
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-        run: |
-          set -e
-          DMG_PATH="${{ steps.dmg.outputs.dmg_path }}"
-          DMG_NAME="${{ steps.dmg.outputs.dmg_name }}"
-
-          BUILD_NUMBER="${{ steps.version.outputs.build_number }}"
-          SHORT_VERSION="${{ steps.version.outputs.marketing_version }}"
-          VERSION="$BUILD_NUMBER"
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            RELEASE_TAG="${GITHUB_REF_NAME}"
-          else
-            RELEASE_TAG="latest"
-          fi
-          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${DMG_NAME}"
-
-          KEY_FILE=$(mktemp)
-          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$KEY_FILE"
-
-          SIG_OUTPUT=$("$SIGN_UPDATE" -f "$KEY_FILE" "$DMG_PATH")
-          rm -f "$KEY_FILE"
-          ED_SIGNATURE=$(echo "$SIG_OUTPUT" | grep -oE 'sparkle:edSignature="[^"]*"' | sed 's/.*="\(.*\)"/\1/')
-          DMG_LENGTH=$(echo "$SIG_OUTPUT" | grep -oE 'length="[^"]*"' | sed 's/.*="\(.*\)"/\1/')
-          if [ -z "$ED_SIGNATURE" ] || [ -z "$DMG_LENGTH" ]; then
-            echo "::error::Could not parse sign_update output"
-            exit 1
-          fi
-
-          PUB_DATE=$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")
-
-          mkdir -p dist
-          cat > dist/appcast.xml <<APPCAST
-          <?xml version="1.0" encoding="utf-8"?>
-          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-            <channel>
-              <title>Caldwell</title>
-              <link>https://github.com/${GITHUB_REPOSITORY}/releases/latest</link>
-              <description>Caldwell — ElevenLabs TTS voice assistant for macOS.</description>
-              <language>en</language>
-              <item>
-                <title>Caldwell ${SHORT_VERSION}</title>
-                <link>https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}</link>
-                <sparkle:version>${VERSION}</sparkle:version>
-                <sparkle:shortVersionString>${SHORT_VERSION}</sparkle:shortVersionString>
-                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-                <pubDate>${PUB_DATE}</pubDate>
-                <enclosure
-                  url="${DOWNLOAD_URL}"
-                  length="${DMG_LENGTH}"
-                  type="application/octet-stream"
-                  sparkle:edSignature="${ED_SIGNATURE}" />
-              </item>
-            </channel>
-          </rss>
-          APPCAST
-
-          echo "appcast_path=dist/appcast.xml" >> "$GITHUB_OUTPUT"
-
       - name: Update rolling 'latest' release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -286,7 +197,6 @@ jobs:
           name: "Caldwell — latest dev build"
           files: |
             ${{ steps.dmg.outputs.dmg_path }}
-            ${{ steps.appcast.outputs.appcast_path }}
           prerelease: true
           make_latest: "false"
           body: |
@@ -322,7 +232,6 @@ jobs:
         with:
           files: |
             ${{ steps.dmg.outputs.dmg_path }}
-            ${{ steps.appcast.outputs.appcast_path }}
           name: Caldwell ${{ github.ref_name }}
           generate_release_notes: true
           prerelease: false

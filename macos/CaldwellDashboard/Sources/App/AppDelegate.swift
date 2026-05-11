@@ -1,12 +1,10 @@
 import AppKit
-import Sparkle
 import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingPanel: FloatingPanelController?
     private var httpServer: CaldwellHTTPServer?
-    private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     let viewModel = DashboardViewModel()
 
     // Minimum time the panel stays visible after isActive flips to false.

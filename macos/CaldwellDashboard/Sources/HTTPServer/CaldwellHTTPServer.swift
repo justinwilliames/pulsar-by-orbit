@@ -594,7 +594,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             id: entryId,
             text: String(text.prefix(100)),
             voiceId: voiceId,
-            voiceLabel: voiceId,   // Phase 3 will resolve display names
+            voiceLabel: "Caldwell",
             createdAt: Date(),
             channel: channel,
             priority: priority,

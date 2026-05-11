@@ -17,7 +17,11 @@ final class DashboardViewModel {
     var cachedPhrases: [CachedPhrase] = []
     var cacheTotalBytes: Int = 0
     var cacheMaxBytes: Int = 0
-    var cacheSort: DaemonAPI.CacheSort = .recent
+
+    /// O(1) lookup: is a given text string present in the phrase cache?
+    var cachedTextIndex: [String: CachedPhrase] {
+        Dictionary(cachedPhrases.map { ($0.text, $0) }, uniquingKeysWith: { first, _ in first })
+    }
 
     var onPlaybackChanged: ((Bool) -> Void)?
 
@@ -189,6 +193,8 @@ final class DashboardViewModel {
         if historyEntries.count > 200 {
             historyEntries = Array(historyEntries.prefix(200))
         }
+        // Refresh cached index so the new entry's cached-badge shows immediately.
+        Task { await loadCachedPhrases() }
     }
 
     // MARK: - Actions
@@ -234,15 +240,10 @@ final class DashboardViewModel {
     // MARK: - Phrase Cache
 
     func loadCachedPhrases() async {
-        guard let response = try? await api.fetchCachedPhrases(sort: cacheSort) else { return }
+        guard let response = try? await api.fetchCachedPhrases(sort: .recent) else { return }
         cachedPhrases = response.phrases
         cacheTotalBytes = response.totalSizeBytes
         cacheMaxBytes = response.maxBytes
-    }
-
-    func setCacheSort(_ sort: DaemonAPI.CacheSort) async {
-        cacheSort = sort
-        await loadCachedPhrases()
     }
 
     func playCachedPhrase(key: String) async {

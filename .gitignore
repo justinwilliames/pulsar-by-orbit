@@ -1,4 +1,4 @@
-cache/*.mp3
+cache/phrases/
 .env
 config.json
 logs/

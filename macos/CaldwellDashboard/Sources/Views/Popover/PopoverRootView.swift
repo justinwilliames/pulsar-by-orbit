@@ -2,13 +2,11 @@ import SwiftUI
 
 enum DashboardTab: String, CaseIterable {
     case history = "History"
-    case cache = "Cache"
     case settings = "Settings"
 
     var icon: String {
         switch self {
         case .history: "clock"
-        case .cache: "tray.full"
         case .settings: "gear"
         }
     }
@@ -149,8 +147,6 @@ struct PopoverRootView: View {
         switch tab {
         case .history:
             HistoryPanelView(viewModel: viewModel)
-        case .cache:
-            CachePanelView(viewModel: viewModel)
         case .settings:
             SettingsView(viewModel: viewModel)
         }

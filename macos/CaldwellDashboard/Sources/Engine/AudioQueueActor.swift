@@ -173,8 +173,19 @@ actor AudioQueueActor {
 
     // MARK: - Public API
 
-    /// Add an entry to the queue. Returns queue depth after insertion.
-    func enqueue(_ entry: AudioEntry) -> Int {
+    /// Maximum number of entries allowed to wait behind the currently-playing
+    /// one. Cap of 1 means: one playing + at most one waiting. Anything beyond
+    /// that gets dropped at enqueue. Sir's call — if it doesn't play, it
+    /// doesn't play.
+    static let maxWaitingDepth = 1
+
+    /// Add an entry to the queue. Returns queue depth after insertion, or
+    /// nil if the queue was full and the entry was dropped.
+    func enqueue(_ entry: AudioEntry) -> Int? {
+        if queue.count >= Self.maxWaitingDepth {
+            NSLog("[AudioQueue] ✋ dropped '\(entry.text.prefix(60))' — busy (waiting=\(queue.count))")
+            return nil
+        }
         queue.append(entry)
         if !workerRunning {
             workerRunning = true

@@ -453,7 +453,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         )
 
         let position = await audioQueue.enqueue(entry)
-        return try Self.json(CachePlayResponse(id: entryId, position: position))
+        if position == nil {
+            try? FileManager.default.removeItem(at: tmpURL)
+        }
+        return try Self.json(CachePlayResponse(
+            id: entryId,
+            position: position,
+            dropped: position == nil ? true : nil
+        ))
     }
 
     // MARK: - /settings handlers
@@ -644,11 +651,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         )
 
         let position = await audioQueue.enqueue(entry)
+        if position == nil {
+            // Canon is fire-and-forget — stay silent on drop. 204 is the
+            // same shape Sir's stop-hook already tolerates.
+            try? FileManager.default.removeItem(at: tmpURL)
+            return Response(status: .noContent)
+        }
         return try Self.json(CanonPickResponse(
             id: entryId,
             played: text,
             context: requestedContext,
-            position: position
+            position: position,
+            dropped: nil
         ))
     }
 
@@ -775,6 +789,19 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
         let position = await audioQueue.enqueue(entry)
 
+        // Queue full → drop without firing the ElevenLabs fetch. Critical:
+        // skipping the fetch is what stops dropped lines from burning quota.
+        if position == nil {
+            return try Self.json(SpeakResponse(
+                id: entryId,
+                position: nil,
+                voice: voiceId,
+                text_preview: String(text.prefix(100)),
+                dropped: true,
+                reason: "busy"
+            ))
+        }
+
         // Cache miss: fetch in background, signal the worker when ready.
         if cachedURL == nil {
             let entryIdCopy = String(entryId)
@@ -806,7 +833,9 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             id: entryId,
             position: position,
             voice: voiceId,
-            text_preview: String(text.prefix(100))
+            text_preview: String(text.prefix(100)),
+            dropped: nil,
+            reason: nil
         ))
     }
 
@@ -998,9 +1027,11 @@ private struct MutedResponse: Encodable, Sendable {
 
 private struct SpeakResponse: Encodable, Sendable {
     let id: String
-    let position: Int
+    let position: Int?
     let voice: String
     let text_preview: String
+    let dropped: Bool?
+    let reason: String?
 }
 
 private struct CacheOnlyResponse: Encodable, Sendable {
@@ -1124,14 +1155,16 @@ private struct CachePlayBody: Decodable, Sendable {
 
 private struct CachePlayResponse: Encodable, Sendable {
     let id: String
-    let position: Int
+    let position: Int?
+    let dropped: Bool?
 }
 
 private struct CanonPickResponse: Encodable, Sendable {
     let id: String
     let played: String
     let context: String
-    let position: Int
+    let position: Int?
+    let dropped: Bool?
 }
 
 private struct SettingsResponse: Encodable, Sendable {

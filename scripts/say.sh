@@ -163,13 +163,12 @@ case "${ACTION:-speak}" in
       exit 1
     }
 
+    # Daemon is the Swift app. If it's not running, stay silent — never
+    # fall back to direct ElevenLabs calls. Voice fires ONLY when the app
+    # is open (popover + voice are a single feature; no daemon = no voice
+    # = no spend).
     if ! daemon_up; then
-      echo "Daemon unreachable, using fallback" >&2
-      ARGS=("$TEXT")
-      [[ -n "$VOICE" ]] && ARGS+=(--voice "$VOICE")
-      ARGS+=(--sync)
-      python3 "$FALLBACK" "${ARGS[@]}"
-      exit $?
+      exit 0
     fi
 
     # Build JSON body using python3 for safe serialization

@@ -195,6 +195,12 @@ final class DashboardViewModel {
         }
         // Refresh cached index so the new entry's cached-badge shows immediately.
         Task { await loadCachedPhrases() }
+        // A fresh (non-replay) line may have spent ElevenLabs characters.
+        // Refresh usage so the popover counter stays current while open,
+        // rather than only updating on Settings re-open.
+        if entry.type != "replay" {
+            Task { await loadUsage() }
+        }
     }
 
     // MARK: - Actions

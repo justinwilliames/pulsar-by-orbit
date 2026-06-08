@@ -31,7 +31,7 @@ Set in `.env` (copy from `.env.example`) or export in shell:
 1. **`scripts/say.sh`** — Bash CLI. Parses args, POSTs to the app's HTTP server on 7865. No fallback — stays silent if the app is down (voice fires only when the app is running).
 2. **`macos/CaldwellDashboard/`** — the SwiftUI menu-bar app and sole listener on 7865. Embedded HTTP server (`Sources/HTTPServer/`), ElevenLabs TTS, audio queue via `afplay`, phrase cache (`Sources/Engine/`), SSE, and the popover dashboard. All queue logic lives here.
 3. **`voices.json`** — Voice name/ID/color mappings.
-4. **`cache/`** — MP3s keyed by history ID for replay. Auto-cleaned after 24h.
+4. **`cache/phrases/`** — dedupe phrase cache (LRU, 50 MB) for repeated canon. **`cache/history/`** — per-history-item MP3s keyed by entry id so every history line is replayable via `/history/replay`. Wiped at launch (history is in-memory) and evicted in lockstep as items fall off the 200-entry history.
 
 ## Audio Tags
 

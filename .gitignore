@@ -1,4 +1,4 @@
-cache/phrases/
+cache/
 .env
 config.json
 logs/

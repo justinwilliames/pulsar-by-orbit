@@ -29,6 +29,12 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     func configure() async {
         await audioQueue.setBroadcaster(sseBroadcaster)
+        // History lives in memory and starts empty, so any retained replay
+        // audio on disk is orphaned from a prior run — clear it.
+        await audioQueue.purgeHistoryAudioStore()
+        // Seed the usage baseline before any fetch can run, so the local
+        // character floor reconciles cleanly against ElevenLabs' laggy counter.
+        await Self.primeUsageBaseline()
     }
 
     func start() {
@@ -96,6 +102,12 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // GET /history — recent playback history
         router.get("/history") { request, _ -> Response in
             return try await Self.handleHistory(request: request, audioQueue: audioQueue)
+        }
+
+        // POST /history/replay — replay any history item from its retained
+        // per-item audio. Works for EVERY entry, not just cached canon.
+        router.post("/history/replay") { request, _ -> Response in
+            return try await Self.handleHistoryReplay(request: request, audioQueue: audioQueue)
         }
 
         // GET /events — server-sent events stream
@@ -187,6 +199,72 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let items = await audioQueue.historyItems(limit: limit, offset: offset, channel: channel)
             .map(HistoryResponseItem.init)
         return try Self.json(items)
+    }
+
+    // MARK: - /history/replay handler
+
+    /// Replay a history item from its retained per-item audio. Unlike the
+    /// UI's cache-play button (which only works for phrase-cached canon),
+    /// this resolves EVERY history entry via the per-item store written on
+    /// playback. Replays are always free — no ElevenLabs call.
+    nonisolated private static func handleHistoryReplay(
+        request: Request,
+        audioQueue: AudioQueueActor
+    ) async throws -> Response {
+        guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+              let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any]
+        else {
+            return try Self.json(ErrorResponse("Invalid JSON"), status: .badRequest)
+        }
+        guard let id = body["id"] as? String, !id.isEmpty else {
+            return try Self.json(ErrorResponse("No id provided"), status: .badRequest)
+        }
+
+        guard let item = await audioQueue.findHistory(id: id) else {
+            return try Self.json(ErrorResponse("Entry not found in history"), status: .notFound)
+        }
+
+        let audioURL = CaldwellConfig.shared.historyAudioDir.appendingPathComponent("\(id).mp3")
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            // Item is in history but its audio isn't retained — only happens
+            // for entries that failed to play (nothing was ever captured).
+            return try Self.json(
+                ErrorResponse("No audio retained for this entry (it may have failed to play)"),
+                status: .notFound
+            )
+        }
+
+        let entryId = Self.nextEntryId()
+        let tmpURL: URL
+        do {
+            tmpURL = try Self.copyCacheAudioToTemp(sourceURL: audioURL, entryId: entryId)
+        } catch {
+            return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
+        }
+
+        let entry = AudioEntry(
+            id: entryId,
+            text: String(item.text.prefix(100)),
+            voiceId: "",
+            voiceLabel: item.voice,
+            createdAt: Date(),
+            channel: item.channel,
+            priority: false,
+            fullText: item.text,
+            isReplay: true,
+            audioURL: tmpURL
+        )
+
+        let position = await audioQueue.enqueue(entry)
+        if position == nil {
+            try? FileManager.default.removeItem(at: tmpURL)
+        }
+        return try Self.json(ReplayResponse(
+            id: entryId,
+            position: position,
+            replaying: id,
+            dropped: position == nil ? true : nil
+        ))
     }
 
     // MARK: - /events handler
@@ -963,7 +1041,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
     }
 
-    nonisolated private static func fetchUsage(apiKey: String) async throws -> UsageResponse {
+    /// Raw read of ElevenLabs' subscription usage — no reconciliation.
+    nonisolated private static func fetchSubscription(apiKey: String) async throws -> ElevenLabsSubscription {
         guard let url = URL(string: "\(CaldwellConfig.apiBase)/user") else {
             throw UsageFetchError("Invalid ElevenLabs URL")
         }
@@ -982,17 +1061,42 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
 
         do {
-            let payload = try JSONDecoder().decode(ElevenLabsUserEnvelope.self, from: data)
-            return UsageResponse(
-                characters_used: payload.subscription.character_count,
-                characters_limit: payload.subscription.character_limit,
-                next_reset_unix: payload.subscription.next_character_count_reset_unix,
-                api_key_set: true,
-                error: nil
-            )
+            return try JSONDecoder().decode(ElevenLabsUserEnvelope.self, from: data).subscription
         } catch {
             throw UsageFetchError("Invalid ElevenLabs response: \(error.localizedDescription)")
         }
+    }
+
+    nonisolated private static func fetchUsage(apiKey: String) async throws -> UsageResponse {
+        let sub = try await fetchSubscription(apiKey: apiKey)
+        // ElevenLabs' character_count lags real consumption by tens of seconds.
+        // Reconcile against our local floor so usage reflects spend promptly
+        // (see UsageTracker).
+        let reconciledUsed = UsageTracker.shared.reconcile(
+            remoteUsed: sub.character_count,
+            remoteReset: sub.next_character_count_reset_unix
+        )
+        return UsageResponse(
+            characters_used: reconciledUsed,
+            characters_limit: sub.character_limit,
+            next_reset_unix: sub.next_character_count_reset_unix,
+            api_key_set: true,
+            error: nil
+        )
+    }
+
+    /// Prime the usage baseline at startup with a remote reading taken before
+    /// any fetch this process, so the local floor can't double-count spend the
+    /// remote already includes. Best-effort — lazy seeding in reconcile()
+    /// covers a failed/absent reading.
+    nonisolated private static func primeUsageBaseline() async {
+        let apiKey = CaldwellConfig.shared.apiKey
+        guard !apiKey.isEmpty else { return }
+        guard let sub = try? await fetchSubscription(apiKey: apiKey) else { return }
+        UsageTracker.shared.seedIfNeeded(
+            remoteUsed: sub.character_count,
+            remoteReset: sub.next_character_count_reset_unix
+        )
     }
 }
 
@@ -1156,6 +1260,13 @@ private struct CachePlayBody: Decodable, Sendable {
 private struct CachePlayResponse: Encodable, Sendable {
     let id: String
     let position: Int?
+    let dropped: Bool?
+}
+
+private struct ReplayResponse: Encodable, Sendable {
+    let id: String
+    let position: Int?
+    let replaying: String
     let dropped: Bool?
 }
 

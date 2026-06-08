@@ -66,6 +66,15 @@ final class CaldwellConfig: @unchecked Sendable {
         cacheDir.appendingPathComponent("phrases")
     }
 
+    /// Per-history-item audio retention store. Distinct from the phrase
+    /// (dedupe) cache: EVERY played line is copied here keyed by its history
+    /// id so `/history/replay` works for every entry, not just cache-eligible
+    /// canon. Lifecycle-coupled to the in-memory history list (wiped at launch,
+    /// evicted when an item drops off history) — see AudioQueueActor.
+    var historyAudioDir: URL {
+        cacheDir.appendingPathComponent("history")
+    }
+
     // MARK: - Config values
 
     var apiKey: String {

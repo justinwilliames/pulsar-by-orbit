@@ -409,6 +409,12 @@ actor AudioQueueActor {
 
         currentProcess = nil
 
+        // Retain a per-history-item copy keyed by entry id BEFORE temp cleanup,
+        // so /history/replay works for EVERY played line — not just the
+        // cache-eligible canon that lands in the phrase cache. Reaching here
+        // means playback succeeded (the failed branch returned above).
+        retainHistoryAudio(id: entry.id, sourceURL: audioURL)
+
         // Clean up temp files only — leave phrase-cache files intact.
         let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).standardized.path
         if audioURL.standardized.path.hasPrefix(tmpDir) {
@@ -471,9 +477,53 @@ actor AudioQueueActor {
         )
         history.append(item)
         if history.count > maxHistory {
-            history.removeFirst(history.count - maxHistory)
+            let overflow = history.count - maxHistory
+            // Keep the on-disk replay store in lockstep with in-memory history:
+            // drop the retained audio for items that just fell off the end.
+            for evicted in history.prefix(overflow) {
+                deleteHistoryAudio(id: evicted.id)
+            }
+            history.removeFirst(overflow)
         }
         return item
+    }
+
+    // MARK: - History audio retention (per-item replay store)
+
+    /// Most-recent history item with the given id, or nil. Searches newest-first
+    /// so a replayed id (which re-enters history) resolves to its latest entry.
+    func findHistory(id: String) -> HistoryItem? {
+        history.last(where: { $0.id == id })
+    }
+
+    /// Wipe the on-disk replay store. Called once at launch: history lives in
+    /// memory and starts empty, so any retained mp3s are orphans from a prior
+    /// run and can never be referenced by a replay.
+    func purgeHistoryAudioStore() {
+        let dir = CaldwellConfig.shared.historyAudioDir
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return }
+        for url in urls where url.pathExtension.lowercased() == "mp3" {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func retainHistoryAudio(id: String, sourceURL: URL) {
+        let dir = CaldwellConfig.shared.historyAudioDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent("\(id).mp3")
+        try? FileManager.default.removeItem(at: dest)
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: dest)
+        } catch {
+            NSLog("[AudioQueue] retain history audio failed for \(id): \(error)")
+        }
+    }
+
+    private func deleteHistoryAudio(id: String) {
+        let url = CaldwellConfig.shared.historyAudioDir.appendingPathComponent("\(id).mp3")
+        try? FileManager.default.removeItem(at: url)
     }
 
     /// Synchronously reads audio duration via `afinfo`. Runs on the calling

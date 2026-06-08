@@ -110,6 +110,10 @@ enum ElevenLabsClient {
                 let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
                     .appendingPathComponent("caldwell-tts-\(UUID().uuidString).mp3")
                 try data.write(to: tmp)
+                // Record the exact spend locally — this is the single chokepoint
+                // for every ElevenLabs character we consume. /usage reconciles
+                // this against ElevenLabs' laggy counter (see UsageTracker).
+                UsageTracker.shared.recordCharacters(text.count)
                 NSLog("[ElevenLabs] ✓ \(data.count) bytes → '\(text.prefix(50))'")
                 return tmp
 

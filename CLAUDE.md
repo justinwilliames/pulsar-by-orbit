@@ -4,16 +4,17 @@ ElevenLabs V3 TTS skill for Claude Code. Agents speak aloud via a shared audio q
 
 ## Running
 
-```bash
-# Start the daemon (requires uv)
-uv run daemon/server.py
+The Caldwell menu-bar app (`macos/CaldwellDashboard`) serves the HTTP API on
+`127.0.0.1:7865`. It *is* the daemon — there is no separate process to start.
 
-# Speak (daemon must be running)
+```bash
+# Install the app and register it to auto-launch at login
+scripts/install-caldwell-app.sh            # build + copy to /Applications
+scripts/install-caldwell-app-launchd.sh    # register the LaunchAgent
+
+# Speak (the Caldwell app must be running)
 scripts/say.sh "Hello"
 scripts/say.sh "Hello" --voice Adam --channel my-agent
-
-# Standalone fallback (no daemon)
-python3 scripts/speak.py "Hello" --voice VOICE_ID --sync
 ```
 
 ## Environment
@@ -27,12 +28,10 @@ Set in `.env` (copy from `.env.example`) or export in shell:
 
 ## Architecture
 
-1. **`scripts/say.sh`** — Bash CLI. Parses args, POSTs to daemon. Falls back to `speak.py` if daemon is down.
-2. **`daemon/server.py`** — Starlette+Uvicorn HTTP server (PEP 723 inline deps). TTS via ElevenLabs API, audio queue with `afplay`, caching, SSE, dashboard. All queue logic lives here.
-3. **`scripts/speak.py`** — Standalone fallback. Calls API directly, plays via `afplay`, falls back to macOS `say`. No queue.
-4. **`dashboard/index.html`** — Single-file web app. Connects via SSE (`/events`). Portraits in `dashboard/portraits/` have three frames per voice for lip-sync.
-5. **`voices.json`** — Voice name/ID/color mappings. Loaded by server and dashboard.
-6. **`cache/`** — MP3s keyed by history ID for replay. Auto-cleaned after 24h.
+1. **`scripts/say.sh`** — Bash CLI. Parses args, POSTs to the app's HTTP server on 7865. No fallback — stays silent if the app is down (voice fires only when the app is running).
+2. **`macos/CaldwellDashboard/`** — the SwiftUI menu-bar app and sole listener on 7865. Embedded HTTP server (`Sources/HTTPServer/`), ElevenLabs TTS, audio queue via `afplay`, phrase cache (`Sources/Engine/`), SSE, and the popover dashboard. All queue logic lives here.
+3. **`voices.json`** — Voice name/ID/color mappings.
+4. **`cache/`** — MP3s keyed by history ID for replay. Auto-cleaned after 24h.
 
 ## Audio Tags
 
@@ -44,7 +43,7 @@ V3 tags in brackets direct voice *acting* — they're stage directions, not soun
 
 ## Key Design Decisions
 
-- No external deps in say.sh/speak.py — stdlib + curl/afplay/python3 only. Daemon uses starlette+uvicorn via `uv run`.
+- say.sh has no external deps — `curl` plus `python3` (JSON serialization) only. The daemon is the self-contained Swift app; TTS playback uses `afplay`.
 - macOS-only — uses `afplay` for playback, `afinfo` for duration, `ffmpeg` for seeking.
 - Single shared queue — all agents enqueue to one AudioQueue. Channel-based filtering prevents overlap.
 - SSE, not WebSocket — simpler. Initial state on connect, then incremental events.

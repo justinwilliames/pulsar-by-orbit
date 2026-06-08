@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# say.sh — TTS via voice daemon
-# Falls back to speak.py if daemon is unreachable.
+# say.sh — TTS via the Caldwell app's HTTP server on 127.0.0.1:7865.
+# No fallback: if the app (daemon) is down, say.sh stays silent. Voice fires
+# only when the Caldwell app is running.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-FALLBACK="$SCRIPT_DIR/speak.py"
 
 # Load .env if present (real env vars win via ${VAR:-} pattern)
 if [[ -f "$REPO_ROOT/.env" ]]; then

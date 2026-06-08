@@ -4,8 +4,8 @@
 
 - Pull latest `main` and confirm no unexpected local changes
 - Run smoke checks:
-  - `bash -n scripts/say.sh`
-  - `python3 -m py_compile scripts/speak.py daemon/server.py`
+  - `bash -n scripts/say.sh scripts/warm-cache.sh`
+  - Build the app cleanly: `scripts/build-caldwell-app.sh`
 - Verify path traversal protection for portraits still holds
 - Confirm no secrets are committed:
   - `.env` is ignored
@@ -18,7 +18,6 @@
   - `SECURITY.md`
 - Confirm executable bits on scripts:
   - `scripts/say.sh`
-  - `scripts/speak.py`
 
 ## Release
 

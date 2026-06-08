@@ -1,122 +1,115 @@
 # macOS Setup Guide
 
-**Tested on:** macOS Darwin 25.0.0 (Apple Silicon), Python 3.12.0
+**Requires:** macOS 26 (Tahoe) or later, Apple Silicon. The app uses Liquid
+Glass APIs and Swift 6.1+, both bundled with macOS 26 — no separate runtime to
+install.
 
-## Prerequisites
+Caldwell is a SwiftUI menu-bar app. It serves the HTTP API on
+`127.0.0.1:7865` — it **is** the daemon. There is no Python process.
 
-```bash
-# 1. Check Python (need >= 3.12)
-python3 --version
+## Install
 
-# 2. Install uv package manager
-curl -LsSf https://astral.sh/uv/install.sh | sh
+### Option A — signed release (recommended)
 
-# 3. Install ffmpeg (required for lip-sync and seek)
-brew install ffmpeg
+1. Download the latest `Caldwell-*.dmg` from
+   [GitHub releases](https://github.com/justinwilliames/caldwell-speak/releases).
+2. Mount it and drag `Caldwell.app` into `/Applications`.
+3. The build is ad-hoc signed (not notarised), so strip the quarantine flag or
+   Gatekeeper will block it:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Caldwell.app
+   ```
 
-# 4. Verify macOS audio tools (should already exist)
-which afplay afinfo say
-```
-
-## Setup Steps
-
-### 1. Get ElevenLabs API Key
-
-1. Sign up at https://elevenlabs.io (free tier: 10,000 chars/month)
-2. Go to https://elevenlabs.io/app/settings/api-keys
-3. Create new API key (starts with `sk_`)
-
-### 2. Configure Environment
+### Option B — build from source
 
 ```bash
-# Create .env file
-cat > .env << 'EOF'
-ELEVENLABS_API_KEY=<YOUR_API_KEY>
-EOF
-
-# CRITICAL: Clear any empty env vars (prevents crash)
-unset SPEAK_PORT SPEAK_CACHE_DIR ELEVENLABS_VOICE_ID
+# Builds the Swift binary, assembles Caldwell.app, copies it to /Applications
+scripts/install-caldwell-app.sh
 ```
 
-### 3. Start Daemon
+### Auto-launch at login
 
 ```bash
-# Start server (runs on http://127.0.0.1:7865)
-~/.local/bin/uv run daemon/server.py
+scripts/install-caldwell-app-launchd.sh
 ```
 
-**Expected output:**
-```
-INFO:     Started server process [12345]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:7865
-```
+Registers the `team.yourorbit.CaldwellDashboard` LaunchAgent (RunAtLoad +
+KeepAlive) and retires any legacy daemon agent.
 
-### 4. Test It (Open New Terminal)
+## Configure the ElevenLabs API key
+
+1. Sign up at https://elevenlabs.io (free tier: 10,000 chars/month).
+2. Create an API key at https://elevenlabs.io/app/settings/api-keys (starts
+   with `sk_`).
+3. Store it via the app's HTTP API:
+   ```bash
+   scripts/say.sh --set-api-key sk_...
+   ```
+   The key lives in the login Keychain (account `elevenlabs-api-key`) and
+   survives reinstalls.
+
+## Verify
 
 ```bash
-# Health check
+# Health — the Swift app answers
 curl http://127.0.0.1:7865/health
-# Should return: {"status":"ok","version":"2.0","queue_size":0}
+# → {"source":"swift","status":"ok","version":"swift-...","queue_size":0}
 
-# Send test message
-./scripts/say.sh "Hello from Claude Code!" --voice Claude
+# Speak a test line
+scripts/say.sh "Hello from Claude Code."
 
-# Open dashboard
-open http://127.0.0.1:7865
+# Inspect settings (mode / muted / api_key_set) and ElevenLabs usage
+scripts/say.sh --settings
+scripts/say.sh --usage
+
+# Open the popover dashboard from the menu-bar icon
 ```
 
 ## CLI Usage
 
 ```bash
 # Basic speak
-./scripts/say.sh "Your message here"
-
-# Choose voice
-./scripts/say.sh "Deep voice" --voice Adam
+scripts/say.sh "Your message here"
+scripts/say.sh "Deep voice" --voice Adam
 
 # Queue controls
-./scripts/say.sh --status
-./scripts/say.sh --pause
-./scripts/say.sh --resume
-./scripts/say.sh --skip
-./scripts/say.sh --clear
+scripts/say.sh --status
+scripts/say.sh --pause
+scripts/say.sh --resume
+scripts/say.sh --skip
+scripts/say.sh --clear
 
 # History
-./scripts/say.sh --history --limit 10
+scripts/say.sh --history --limit 10
+
+# Mode + mute
+scripts/say.sh --polite   # expletives off
+scripts/say.sh --potty    # expletives on
+scripts/say.sh --mute
+scripts/say.sh --unmute
 ```
 
 ## Troubleshooting
 
-### 1. `ValueError: invalid literal for int()`
-
-**Cause:** Empty environment variable in shell.
-
-**Fix:**
+### Daemon not reachable on 7865
+The Caldwell app isn't running. Launch it and check the LaunchAgent:
 ```bash
-unset SPEAK_PORT SPEAK_CACHE_DIR ELEVENLABS_VOICE_ID
-~/.local/bin/uv run daemon/server.py
+open -a Caldwell
+launchctl list | grep CaldwellDashboard
 ```
 
-### 2. `HTTP Error 401: Unauthorized`
-
-**Cause:** Invalid API key.
-
-**Fix:** Verify your API key works:
+### `HTTP 401: Unauthorized`
+Invalid or missing API key. Re-set it and verify the key directly:
 ```bash
-curl -H "xi-api-key: $ELEVENLABS_API_KEY" https://api.elevenlabs.io/v1/voices
-# Should return JSON voice list, not {"detail":{"status":"invalid_api_key"}}
+scripts/say.sh --set-api-key sk_...
+curl -H "xi-api-key: sk_..." https://api.elevenlabs.io/v1/voices
+# Should return a JSON voice list, not {"detail":{"status":"invalid_api_key"}}
 ```
 
-### 3. No lip-sync animation / pause doesn't work
-
-**Cause:** `ffmpeg` not installed.
-
-**Fix:**
+### App won't launch / Gatekeeper blocks it
+The build is ad-hoc signed. Strip quarantine:
 ```bash
-brew install ffmpeg
-# Restart daemon after install
+xattr -dr com.apple.quarantine /Applications/Caldwell.app
 ```
 
 ## Available Voices
@@ -137,6 +130,5 @@ See `voices.json` for full configuration.
 
 ## Next Steps
 
-- **Dashboard:** http://127.0.0.1:7865 — Real-time queue with animated portraits
-- **Multi-voice dialogue:** See `README.md` for advanced usage
-- **API docs:** Full endpoint reference in `README.md`
+- **Dashboard:** the menu-bar popover — real-time queue with animated portraits.
+- **Multi-voice dialogue & API reference:** see `README.md`.

@@ -104,21 +104,30 @@ for raw in sys.stdin:
 print(last.lower()[-4000:])
 ' 2>/dev/null || echo "")
 
+  # High precision, low recall: only fire a SPECIFIC context when the closing
+  # message clearly signals it. Everything else falls through to "neutral" —
+  # which the daemon now treats as a dedicated generic-acknowledgement pool,
+  # not the union of every context. So a missed match costs a safe butler
+  # line ("Quite, Sir."), never an irrelevant specific ("Tests passing.").
+  #
+  # Success is matched BEFORE failure so "fixed the failed test" reads as
+  # done, not a fresh cock-up. Failure tells are deliberately strict — a
+  # wrongly-fired "Cocked it up, Sir." is the most jarring miss of the lot.
+  # There is no "start" case: this hook runs at turn-END, where "on it /
+  # I'll take a look" lines are backwards (the work is already finished).
   case "$LAST_TEXT" in
-    *"force-push"*|*"pushed to"*|*" pushed,"*|*" pushed."*|*"git push"*)
+    *"force-push"*|*"force pushed"*|*"pushed to"*|*" pushed,"*|*" pushed."*|*"git push"*)
       CONTEXT="push" ;;
-    *"tests pass"*|*"tests are passing"*|*"all tests"*|*"all green"*|*"test suite pass"*)
+    *"tests pass"*|*"tests are passing"*|*"tests passing"*|*"all tests pass"*|*"all green"*|*"test suite pass"*)
       CONTEXT="tests-pass" ;;
     *"build's clean"*|*"build is clean"*|*"build succe"*|*"build complete"*|*"compiled clean"*)
       CONTEXT="build-pass" ;;
-    *"found it"*|*"found the bug"*|*"located the"*|*"spotted the"*|*"root cause"*)
+    *"found it"*|*"found the bug"*|*"located the"*|*"spotted the"*|*"root cause is"*|*"that's the culprit"*)
       CONTEXT="found" ;;
-    *"failed"*|*" failure"*|*"crashed"*|*"wedged"*|*"broke "*|*"broken"*|*"errored"*|*"didn't work"*)
-      CONTEXT="fail" ;;
-    *"fixed"*|*"sorted"*|*"shipped"*|*"merged"*|*" done."*|*"all set"*|*"ready to ship"*)
+    *"all sorted"*|*"that's sorted"*|*"shipped"*|*"merged"*|*" done."*|*"all set"*|*"ready to ship"*|*"that's done"*)
       CONTEXT="done" ;;
-    *"on it"*|*"let me"*|*"i'll"*|*"investigating"*|*"taking a look"*|*"reading "*)
-      CONTEXT="start" ;;
+    *"still failing"*|*"still broken"*|*"that didn't work"*|*"couldn't get it"*|*"no joy"*|*"won't compile"*|*"still red"*)
+      CONTEXT="fail" ;;
     *)
       CONTEXT="neutral" ;;
   esac

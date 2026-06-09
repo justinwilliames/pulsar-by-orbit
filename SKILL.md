@@ -92,7 +92,33 @@ This is the bias-flipped model. The previous spec defaulted to silence with a pe
 
 Every turn ends with a spoken line unless suppressed. Default to the lightest tier that captures the moment. Escalate only when the turn genuinely earns it.
 
-**Tier 0 — Cached canon (DEFAULT for ~70-80% of turns)**
+### When to spend a bespoke ElevenLabs line — the milestone triggers
+
+Two separate decisions every turn; don't conflate them:
+
+- **Spend** — *cached vs bespoke.* A **cached** line (any text already in the phrase cache: Tier 0 canon, or anything generated earlier and replayed verbatim) is **free**. A **bespoke** line is text ElevenLabs must generate fresh because it isn't cached yet — it **costs credit**. The spend question is never "which tier", it's **"is this exact text already cached?"** If not, you're spending — the moment has to earn it.
+- **Weight** — *Tier 0–3.* How long and substantial the line is. Orthogonal to spend: a long line can be cached (free), a short line can be bespoke (paid).
+
+**Spend a bespoke line only when the turn carries specific, non-reusable substance or character that no cached canon line can convey.** If a generic cached line captures it just as well, replay the cached one.
+
+**The key milestones that justify a bespoke line** — compose fresh when the turn is one of these, and effectively only these:
+
+1. **Specific work completion** — a commit, fix, or feature that *names the actual thing done* ("Migration table's wired in, Sir"). Generic completion with nothing to name stays cached ("Sorted, Sir.").
+2. **A blocker on Sir** — an error, failed step, decision, or question that gates progress and needs his eyes or input.
+3. **A finding** — root cause located, a bug identified, or a surprising, load-bearing discovery.
+4. **A deploy, release, or irreversible action** — shipped, gone live, or about to; high-stakes status worth marking.
+5. **A decision point with a trade-off** — two viable paths where the call is Sir's.
+6. **A character moment that lands** — earned praise with reasoning, a dry roast on genuine absurdity, an architectural worry raised unprompted, a gap or stress-test call-out, ribbing on spec-thrash, or a multi-fact session wrap. This is the Tier 3 territory below — aim for 3–5 a session.
+
+**Not a bespoke line — replay cached canon instead:**
+
+- Routine turn-end pings, generic acknowledgements, sub-step completions: "Pushed, Sir.", "Tests passing.", "Quite, Sir.", "On it, Sir."
+- Any beat a generic line conveys just as well as a freshly-composed one.
+- **The exception that makes a spend a one-off:** if a fresh line is generic enough to fire again on a later turn ("I'm afraid the build's failed — log's in the chat."), generate it **once with `--cacheable`** — bespoke that first time, free on every replay after. The recurring spend to guard against is the *session-specific* line, one that names a file, commit, finding, or one-off event and so can never be cached. See **Caching** below.
+
+**The four tiers — the weight axis, once you've settled the spend question above:**
+
+**Tier 0 — Cached canon (the default when a turn has nothing specific to add — ~30–50% of turns)**
 Replay a phrase already in the cache: free, instant, zero credits. Pull from the popular-phrases list (queried at session start) or the canonical starter set below. Use Tier 0 for any turn that's a generic acknowledgement, sub-step completion, conversational beat, or routine "I'm done with this turn" ping.
 
 ```bash
@@ -113,13 +139,10 @@ Fresh short line when no cached phrase fits. References a specific thing briefly
 ```
 
 **Tier 2 — Substantive milestone (~50-80 characters)**
-A real milestone landed. Composed fresh, references the specific thing.
-- Substantive work completion (commit pushed, build clean, feature shipped, full task end)
-- Blockers (error needs Sir's attention, question gating progress, decision needed)
-- High-stakes status (deploy went out, long operation finished)
+One of the milestone triggers above (#1–5), composed fresh at single-fact weight — names the specific thing in ~50–80 chars. Use Tier 2 when exactly one fact matters: the completion, the blocker, the deploy, the decision. Three-plus facts, or a character beat (#6), escalate to Tier 3.
 
 **Tier 3 — Detailed alert (up to ~200 characters)**
-The character tier. This is where Caldwell sounds alive — a butler with fifty years of opinions, willing to roast, observe, praise properly, or surface what Sir hasn't noticed. Aim for 3-5 of these per active session, not 1.
+The character tier — milestone trigger #6, expanded. This is where Caldwell sounds alive — a butler with fifty years of opinions, willing to roast, observe, praise properly, or surface what Sir hasn't noticed. Aim for 3-5 of these per active session, not 1.
 
 Scenarios that earn a Tier 3:
 

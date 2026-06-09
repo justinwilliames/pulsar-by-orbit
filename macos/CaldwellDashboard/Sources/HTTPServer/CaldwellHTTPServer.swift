@@ -623,23 +623,29 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     /// Context → list of candidate canon phrases. The first list is the
     /// always-on Polite pool; Potty mode adds the second list on top.
-    /// Phrases here must match (byte-for-byte) what `warm-cache.sh` and
-    /// `stop-hook.sh` use, otherwise the cache lookup misses.
+    /// Phrases here must match (byte-for-byte) what `warm-cache.sh` warms,
+    /// otherwise the cache lookup misses.
+    ///
+    /// "neutral" is a FIRST-CLASS context with its own generic-acknowledgement
+    /// pool — it is NOT the union of every other context. The old union
+    /// behaviour is what made turn-end pings fire irrelevant specifics
+    /// ("Tests passing." after a turn with no tests). Generic lines are safe
+    /// after literally any turn; specifics only fire on a confident match.
     nonisolated private static let canonContexts: [String: (polite: [String], potty: [String])] = [
         "push": (
-            polite: ["Pushed, Sir."],
+            polite: ["Pushed, Sir.", "Pushed."],
             potty:  ["Fuckin' pushed."]
         ),
         "tests-pass": (
-            polite: ["Tests passing."],
+            polite: ["Tests passing.", "All green, Sir."],
             potty:  ["Tests fuckin' passing."]
         ),
         "build-pass": (
-            polite: ["Build's clean."],
+            polite: ["Build's clean.", "Compiled clean, Sir."],
             potty:  []
         ),
         "found": (
-            polite: ["Found it, Sir."],
+            polite: ["Found it, Sir.", "There it is, Sir."],
             potty:  []
         ),
         "fail": (
@@ -662,7 +668,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             polite: [],
             potty:  ["Sweet fuck-all to worry about, Sir."]
         ),
+        "neutral": (
+            polite: ["Quite, Sir.", "Very good, Sir.", "Right then, Sir.", "Noted, Sir.", "Right you are, Sir.", "As you wish, Sir."],
+            potty:  ["Bloody good, Sir.", "Right you fuckin' are, Sir."]
+        ),
     ]
+
+    /// Anti-repeat: the exact canon line we last played. When the chosen
+    /// context has more than one cached candidate, the picker drops this line
+    /// from the pool so Caldwell never fires the same phrase twice running.
+    /// Guarded by `canonLock` — the pick path is `nonisolated static`.
+    nonisolated(unsafe) private static var lastCanonText: String?
+    nonisolated private static let canonLock = NSLock()
 
     nonisolated private static func handleCanonPick(
         request: Request,
@@ -705,8 +722,17 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return Response(status: .noContent)
         }
 
-        // Random pick from cached pool.
-        let (text, sourceURL) = cached.randomElement()!
+        // Anti-repeat: if the pool has alternatives, never replay the exact
+        // line we played last time. Falls back to the full pool when the
+        // last line is the only cached option.
+        let lastPlayed = Self.canonLock.withLock { Self.lastCanonText }
+        var pickable = cached
+        if pickable.count > 1, let lastPlayed {
+            let fresh = pickable.filter { $0.0 != lastPlayed }
+            if !fresh.isEmpty { pickable = fresh }
+        }
+        let (text, sourceURL) = pickable.randomElement()!
+        Self.canonLock.withLock { Self.lastCanonText = text }
         let entryId = Self.nextEntryId()
         let tmpURL: URL
         do {
@@ -744,19 +770,11 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         ))
     }
 
-    /// Resolve a context tag into its candidate phrase list. "neutral"
-    /// returns the union across all contexts. Unknown tags return [].
+    /// Resolve a context tag into its candidate phrase list. Every context —
+    /// including "neutral" — is a key in `canonContexts`, so this is a plain
+    /// lookup. Unknown tags (anything the skill passes that we don't
+    /// recognise) return [], so the picker stays silent rather than guessing.
     nonisolated private static func canonCandidates(for context: String, expletives: Bool) -> [String] {
-        if context == "neutral" {
-            var pool: [String] = []
-            for (_, lists) in canonContexts {
-                pool.append(contentsOf: lists.polite)
-                if expletives { pool.append(contentsOf: lists.potty) }
-            }
-            // De-dup while preserving order.
-            var seen = Set<String>()
-            return pool.filter { seen.insert($0).inserted }
-        }
         guard let lists = canonContexts[context] else { return [] }
         var pool = lists.polite
         if expletives { pool.append(contentsOf: lists.potty) }

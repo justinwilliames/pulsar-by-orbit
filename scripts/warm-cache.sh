@@ -6,8 +6,8 @@
 # credits (one-time, ~10-30 chars). Pre-warming on first install means
 # every turn from day one is a free cached replay — no slow-start period.
 #
-# Total one-time cost: ~475 chars of the monthly free-tier 10,000 budget
-# (under 5%). All Polite phrases warm always. Potty phrases warm too so
+# Total one-time cost: ~650 chars of the monthly free-tier 10,000 budget
+# (under 7%). All Polite phrases warm always. Potty phrases warm too so
 # the cache is ready regardless of which mode Sir picks later.
 #
 # Hits the daemon's /speak endpoint with cache_only=true, which fetches +
@@ -18,38 +18,58 @@ set -e
 
 DAEMON="${DAEMON:-http://127.0.0.1:7865}"
 
-# Canonical Tier 0 phrases — kept in sync with SKILL.md and the hook's
-# fallback pool. Changes here should be mirrored to scripts/stop-hook.sh.
+# Canonical Tier 0 phrases. SOURCE OF TRUTH is the `canonContexts` dict in
+# macos/CaldwellDashboard/Sources/HTTPServer/CaldwellHTTPServer.swift — this
+# array must be the full union of every phrase there (byte-for-byte), or the
+# picker will choose a line that was never cached and silently fall through.
+# Adding a context phrase in Swift? Add it here too, then re-run this script.
 
 POLITE_PHRASES=(
+  # neutral — generic acknowledgements, safe after any turn
+  "Quite, Sir."
+  "Very good, Sir."
+  "Right then, Sir."
+  "Noted, Sir."
+  "Right you are, Sir."
+  "As you wish, Sir."
+  # start
   "Right then Sir."
   "Right then Sir, on it."
   "On it, Sir."
   "Onto it."
-  "Quite, Sir."
+  "I'll have a look."
+  # done
   "Sorted, Sir."
   "Sorted."
-  "Most kind, Sir."
-  "Most regrettable, Sir."
-  "I'll have a look."
-  "Tests passing."
-  "Build's clean."
-  "Pushed, Sir."
   "Bit of a faff, that."
+  "Job's a good 'un, Sir."
+  # ack
+  "Most kind, Sir."
+  # fail
+  "Most regrettable, Sir."
+  "Cocked it up, Sir."
+  # push / tests / build / found
+  "Pushed, Sir."
+  "Pushed."
+  "Tests passing."
+  "All green, Sir."
+  "Build's clean."
+  "Compiled clean, Sir."
   "Found it, Sir."
+  "There it is, Sir."
 )
 
 POTTY_PHRASES=(
   "Fuckin' pushed."
-  "Sorted, fuckin' done."
   "Tests fuckin' passing."
-  "Right then Sir, fuckin' on it."
-  "Bloody hell, Sir."
   "Bollocks."
-  "Cocked it up, Sir."
-  "Sweet fuck-all to worry about, Sir."
+  "Bloody hell, Sir."
+  "Sorted, fuckin' done."
   "Bloody well done, that."
-  "Job's a good 'un, Sir."
+  "Right then Sir, fuckin' on it."
+  "Sweet fuck-all to worry about, Sir."
+  "Bloody good, Sir."
+  "Right you fuckin' are, Sir."
 )
 
 ALL_PHRASES=("${POLITE_PHRASES[@]}" "${POTTY_PHRASES[@]}")
@@ -92,8 +112,10 @@ try:
     if d.get("cached"):
         print("fresh" if d.get("fresh") else "already")
     else:
-        print(f"failed:{d.get(\"error\",\"unknown\")}"[:60])
-except: print("failed:parse")' 2>/dev/null || echo "failed:parse")
+        err = d.get("error", "unknown")
+        print(("failed:" + str(err))[:60])
+except Exception:
+    print("failed:parse")' 2>/dev/null || echo "failed:parse")
 
   case "$STATUS" in
     fresh)

@@ -434,8 +434,13 @@ actor AudioQueueActor {
     /// get clipped. Returns nil only if envelope is empty.
     private func effectiveSpeechEnd(envelope: [Float], chunkMs: Int, fallback: Double?) -> Double? {
         guard !envelope.isEmpty else { return fallback }
-        let silenceThreshold: Float = 0.04
-        let tailMs = 180
+        // Bias hard toward NOT clipping: a touch of trailing silence is
+        // harmless, a guillotined final word is not. 0.04 was too high —
+        // soft word-endings (the trailing "r" of "Sir.", fricatives like
+        // "s"/"f"/"th") sit below it, so the cutoff landed mid-word; and
+        // 180ms of tail wasn't enough to cover them. Lower bar + longer tail.
+        let silenceThreshold: Float = 0.02
+        let tailMs = 400
         var lastLoud = -1
         for i in stride(from: envelope.count - 1, through: 0, by: -1) {
             if envelope[i] > silenceThreshold { lastLoud = i; break }

@@ -8,10 +8,14 @@ struct CaldwellDashboardApp: App {
         MenuBarExtra {
             PopoverRootView(viewModel: appDelegate.viewModel)
         } label: {
-            // Glyph reflects mute state so Sir can see at a glance
-            // from the menubar without opening the popover.
+            // Glyph reflects mute state so Sir can see at a glance from the
+            // menubar without opening the popover. Always the Caldwell bust
+            // so he stays recognisable — FILLED when active, OUTLINE when
+            // muted. (Previously muted swapped to speaker.slash.fill, which
+            // camouflaged him among the system audio icons and read as
+            // "gone" — the user couldn't find him to unmute.)
             Image(systemName: appDelegate.viewModel.isMuted
-                ? "speaker.slash.fill"
+                ? "person.bust"
                 : "person.bust.fill")
         }
         .menuBarExtraStyle(.window)

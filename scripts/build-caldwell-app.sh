@@ -52,7 +52,18 @@ cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/CaldwellDashboard"
 cp "$APP_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 printf 'APPL????' > "$APP_BUNDLE/Contents/PkgInfo"
 
-# Ad-hoc sign so Gatekeeper allows local launches without warnings
+# Bundle resources — the app icon (Info.plist sets CFBundleIconFile=AppIcon)
+# and the portrait PNGs. CI's package-dmg.yml copies these; the local build
+# previously skipped them, producing an icon-less /Applications bundle.
+mkdir -p "$APP_BUNDLE/Contents/Resources"
+cp "$APP_DIR/Sources/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+if [ -d "$REPO_ROOT/assets/portraits" ]; then
+  mkdir -p "$APP_BUNDLE/Contents/Resources/assets"
+  cp -R "$REPO_ROOT/assets/portraits" "$APP_BUNDLE/Contents/Resources/assets/portraits"
+fi
+
+# Ad-hoc sign so Gatekeeper allows local launches without warnings. Sign
+# AFTER the resources are in place so the signature seals them too.
 codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
 
 echo ""

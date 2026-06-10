@@ -26,7 +26,7 @@ jobs:
     outputs:
       should_run: ${{ steps.gate.outputs.should_run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - id: gate
@@ -49,10 +49,10 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: macos/CaldwellDashboard/.build
           key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/CaldwellDashboard/Package.swift', 'macos/CaldwellDashboard/Sources/**/*.swift') }}
@@ -184,7 +184,7 @@ jobs:
           ls -la dist/
 
       - name: Upload .dmg as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.dmg.outputs.dmg_name }}
           path: ${{ steps.dmg.outputs.dmg_path }}
@@ -261,7 +261,7 @@ jobs:
 
       - name: Update rolling 'latest' release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
           name: "Caldwell — latest dev build"
@@ -298,7 +298,7 @@ jobs:
 
       - name: Create tagged GitHub Release with .dmg + appcast
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             ${{ steps.dmg.outputs.dmg_path }}

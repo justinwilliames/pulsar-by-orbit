@@ -6,8 +6,8 @@
 # credits (one-time, ~10-30 chars). Pre-warming on first install means
 # every turn from day one is a free cached replay — no slow-start period.
 #
-# Total one-time cost: ~650 chars of the monthly free-tier 10,000 budget
-# (under 7%). All Polite phrases warm always. Potty phrases warm too so
+# Total one-time cost: ~2,000 chars of the monthly free-tier 10,000 budget
+# (~20%). All Polite phrases warm always. Potty phrases warm too so
 # the cache is ready regardless of which mode Sir picks later.
 #
 # Hits the daemon's /speak endpoint with cache_only=true, which fetches +
@@ -32,44 +32,113 @@ POLITE_PHRASES=(
   "Noted, Sir."
   "Right you are, Sir."
   "As you wish, Sir."
+  "Indeed, Sir."
+  "Very well, Sir."
+  "Of course, Sir."
   # start
   "Right then Sir."
   "Right then Sir, on it."
   "On it, Sir."
   "Onto it."
   "I'll have a look."
+  "Leave it with me, Sir."
+  "I'll see to it, Sir."
+  "At once, Sir."
   # done
   "Sorted, Sir."
   "Sorted."
   "Bit of a faff, that."
   "Job's a good 'un, Sir."
+  "Done and dusted, Sir."
+  "That's the lot, Sir."
+  "All squared away, Sir."
+  "Tidied up, Sir."
   # ack
   "Most kind, Sir."
+  "As you say, Sir."
+  "Just so, Sir."
   # fail
   "Most regrettable, Sir."
   "Cocked it up, Sir."
-  # push / tests / build / found
+  "That went poorly, Sir."
+  "A bind, Sir."
+  "Not my finest, Sir."
+  "Bit of a mess, Sir."
+  # reassure
+  "Nothing to fret over, Sir."
+  "All's well, Sir."
+  "No cause for alarm, Sir."
+  "Steady as she goes, Sir."
+  # push
   "Pushed, Sir."
   "Pushed."
+  "Up it goes, Sir."
+  "That's pushed, Sir."
+  "Sent up, Sir."
+  "Away it goes, Sir."
+  "Pushed and clean, Sir."
+  # tests
   "Tests passing."
   "All green, Sir."
+  "Green across the board, Sir."
+  "Suite's green, Sir."
+  "Tests hold, Sir."
+  "Every test passing, Sir."
+  # build
   "Build's clean."
   "Compiled clean, Sir."
+  "Builds clean, Sir."
+  "Compiles a treat, Sir."
+  "Clean build, Sir."
+  "Built without a murmur, Sir."
+  # found
   "Found it, Sir."
   "There it is, Sir."
+  "Got the blighter, Sir."
+  "There's our culprit, Sir."
+  "Ran it down, Sir."
+  "That's the one, Sir."
 )
 
 POTTY_PHRASES=(
+  # push
   "Fuckin' pushed."
+  "Pushed, the bastard."
+  "Up it bloody goes, Sir."
+  # tests
   "Tests fuckin' passing."
+  "All bloody green, Sir."
+  "Green as you like, Sir."
+  # build
+  "Build's fuckin' clean."
+  "Compiled, no bollocks, Sir."
+  # found
+  "Found the bastard."
+  "There's the fucker, Sir."
+  "Got the little shit, Sir."
+  # fail
   "Bollocks."
   "Bloody hell, Sir."
+  "Right royal fuck-up, Sir."
+  "That's fucked, Sir."
+  "Buggered it, Sir."
+  # done
   "Sorted, fuckin' done."
   "Bloody well done, that."
+  "Done, the bloody lot."
+  "All fuckin' sorted, Sir."
+  # start
   "Right then Sir, fuckin' on it."
+  "Leave the bugger with me, Sir."
+  # ack
+  "Quite fuckin' so, Sir."
+  # reassure
   "Sweet fuck-all to worry about, Sir."
+  "Not a bloody thing wrong, Sir."
+  # neutral
   "Bloody good, Sir."
   "Right you fuckin' are, Sir."
+  "Quite so, Sir."
 )
 
 ALL_PHRASES=("${POLITE_PHRASES[@]}" "${POTTY_PHRASES[@]}")
@@ -93,7 +162,7 @@ if [ "$API_KEY_SET" != "true" ]; then
   exit 1
 fi
 
-echo "Warming canonical phrase cache — $TOTAL phrases (~475 chars total)…"
+echo "Warming canonical phrase cache — $TOTAL phrases (~2,000 chars total)…"
 echo
 
 WARMED=0

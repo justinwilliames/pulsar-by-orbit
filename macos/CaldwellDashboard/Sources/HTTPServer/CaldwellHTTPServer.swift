@@ -633,44 +633,44 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     /// after literally any turn; specifics only fire on a confident match.
     nonisolated private static let canonContexts: [String: (polite: [String], potty: [String])] = [
         "push": (
-            polite: ["Pushed, Sir.", "Pushed."],
-            potty:  ["Fuckin' pushed."]
+            polite: ["Pushed, Sir.", "Pushed.", "Up it goes, Sir.", "That's pushed, Sir.", "Sent up, Sir.", "Away it goes, Sir.", "Pushed and clean, Sir."],
+            potty:  ["Fuckin' pushed.", "Pushed, the bastard.", "Up it bloody goes, Sir."]
         ),
         "tests-pass": (
-            polite: ["Tests passing.", "All green, Sir."],
-            potty:  ["Tests fuckin' passing."]
+            polite: ["Tests passing.", "All green, Sir.", "Green across the board, Sir.", "Suite's green, Sir.", "Tests hold, Sir.", "Every test passing, Sir."],
+            potty:  ["Tests fuckin' passing.", "All bloody green, Sir.", "Green as you like, Sir."]
         ),
         "build-pass": (
-            polite: ["Build's clean.", "Compiled clean, Sir."],
-            potty:  []
+            polite: ["Build's clean.", "Compiled clean, Sir.", "Builds clean, Sir.", "Compiles a treat, Sir.", "Clean build, Sir.", "Built without a murmur, Sir."],
+            potty:  ["Build's fuckin' clean.", "Compiled, no bollocks, Sir."]
         ),
         "found": (
-            polite: ["Found it, Sir.", "There it is, Sir."],
-            potty:  []
+            polite: ["Found it, Sir.", "There it is, Sir.", "Got the blighter, Sir.", "There's our culprit, Sir.", "Ran it down, Sir.", "That's the one, Sir."],
+            potty:  ["Found the bastard.", "There's the fucker, Sir.", "Got the little shit, Sir."]
         ),
         "fail": (
-            polite: ["Cocked it up, Sir.", "Most regrettable, Sir."],
-            potty:  ["Bollocks.", "Bloody hell, Sir.", "Cocked it up, Sir."]
+            polite: ["Cocked it up, Sir.", "Most regrettable, Sir.", "That went poorly, Sir.", "A bind, Sir.", "Not my finest, Sir.", "Bit of a mess, Sir."],
+            potty:  ["Bollocks.", "Bloody hell, Sir.", "Cocked it up, Sir.", "Right royal fuck-up, Sir.", "That's fucked, Sir.", "Buggered it, Sir."]
         ),
         "done": (
-            polite: ["Sorted, Sir.", "Sorted.", "Bit of a faff, that.", "Job's a good 'un, Sir."],
-            potty:  ["Sorted, fuckin' done.", "Bloody well done, that.", "Job's a good 'un, Sir."]
+            polite: ["Sorted, Sir.", "Sorted.", "Bit of a faff, that.", "Job's a good 'un, Sir.", "Done and dusted, Sir.", "That's the lot, Sir.", "All squared away, Sir.", "Tidied up, Sir."],
+            potty:  ["Sorted, fuckin' done.", "Bloody well done, that.", "Job's a good 'un, Sir.", "Done, the bloody lot.", "All fuckin' sorted, Sir."]
         ),
         "start": (
-            polite: ["Right then Sir.", "Right then Sir, on it.", "On it, Sir.", "Onto it.", "I'll have a look."],
-            potty:  ["Right then Sir, fuckin' on it."]
+            polite: ["Right then Sir.", "Right then Sir, on it.", "On it, Sir.", "Onto it.", "I'll have a look.", "Leave it with me, Sir.", "I'll see to it, Sir.", "At once, Sir."],
+            potty:  ["Right then Sir, fuckin' on it.", "On it, Sir.", "Leave the bugger with me, Sir."]
         ),
         "ack": (
-            polite: ["Quite, Sir.", "Most kind, Sir."],
-            potty:  []
+            polite: ["Quite, Sir.", "Most kind, Sir.", "Very good, Sir.", "As you say, Sir.", "Indeed, Sir.", "Just so, Sir."],
+            potty:  ["Quite fuckin' so, Sir."]
         ),
         "reassure": (
-            polite: [],
-            potty:  ["Sweet fuck-all to worry about, Sir."]
+            polite: ["Nothing to fret over, Sir.", "All's well, Sir.", "No cause for alarm, Sir.", "Steady as she goes, Sir."],
+            potty:  ["Sweet fuck-all to worry about, Sir.", "Not a bloody thing wrong, Sir."]
         ),
         "neutral": (
-            polite: ["Quite, Sir.", "Very good, Sir.", "Right then, Sir.", "Noted, Sir.", "Right you are, Sir.", "As you wish, Sir."],
-            potty:  ["Bloody good, Sir.", "Right you fuckin' are, Sir."]
+            polite: ["Quite, Sir.", "Very good, Sir.", "Right then, Sir.", "Noted, Sir.", "Right you are, Sir.", "As you wish, Sir.", "Indeed, Sir.", "Very well, Sir.", "Of course, Sir."],
+            potty:  ["Bloody good, Sir.", "Right you fuckin' are, Sir.", "Quite so, Sir."]
         ),
     ]
 

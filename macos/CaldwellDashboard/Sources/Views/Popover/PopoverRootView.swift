@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 import SwiftUI
 
 enum DashboardTab: String, CaseIterable {
@@ -46,6 +47,7 @@ struct CarouselTransition: Transition {
 
 struct PopoverRootView: View {
     let viewModel: DashboardViewModel
+    let updater: SPUUpdater
 
     @State private var selectedTab: DashboardTab = .history
     @State private var navigatingForward = true
@@ -165,7 +167,7 @@ struct PopoverRootView: View {
         case .history:
             HistoryPanelView(viewModel: viewModel)
         case .settings:
-            SettingsView(viewModel: viewModel)
+            SettingsView(viewModel: viewModel, updater: updater)
         }
     }
 }

@@ -6,7 +6,10 @@ struct CaldwellDashboardApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            PopoverRootView(viewModel: appDelegate.viewModel)
+            PopoverRootView(
+                viewModel: appDelegate.viewModel,
+                updater: appDelegate.updaterController.updater
+            )
         } label: {
             // Glyph reflects mute state so Sir can see at a glance from the
             // menubar without opening the popover. Always the Caldwell bust

@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 import SwiftUI
 
 @MainActor
@@ -6,6 +7,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingPanel: FloatingPanelController?
     private var httpServer: CaldwellHTTPServer?
     let viewModel = DashboardViewModel()
+
+    // Sparkle auto-update. `startingUpdater: true` begins the background
+    // scheduled check loop (interval governed by Sparkle defaults). Exposed
+    // so the popover's "Check for Updates" button can drive a manual check.
+    // The feed + EdDSA key live in Info.plist (SUFeedURL / SUPublicEDKey);
+    // CI signs each DMG with the matching private key.
+    let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     // Tail after audio finishes — short enough that Sir doesn't think the
     // app is hung, long enough that he registers the cached one-word pings.

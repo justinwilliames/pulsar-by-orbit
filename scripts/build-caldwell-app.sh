@@ -62,9 +62,36 @@ if [ -d "$REPO_ROOT/assets/portraits" ]; then
   cp -R "$REPO_ROOT/assets/portraits" "$APP_BUNDLE/Contents/Resources/assets/portraits"
 fi
 
-# Ad-hoc sign so Gatekeeper allows local launches without warnings. Sign
-# AFTER the resources are in place so the signature seals them too.
-codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+# Embed Sparkle.framework. The binary loads @rpath/Sparkle.framework/... and
+# carries an @executable_path/../Frameworks rpath (set in Package.swift), so
+# the framework must live at Contents/Frameworks. The 0.2.0 attempt linked
+# Sparkle but skipped this embed step and crashed at dyld before drawing a
+# pixel — keep this in lockstep with package-dmg.yml's identical block.
+FRAMEWORK_SRC="$(dirname "$BINARY")/Sparkle.framework"
+if [ ! -d "$FRAMEWORK_SRC" ]; then
+  echo "Error: Sparkle.framework not found next to the binary ($FRAMEWORK_SRC)." >&2
+  echo "Did 'swift build' resolve the Sparkle SPM dependency?" >&2
+  exit 1
+fi
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+rm -rf "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+# ditto preserves the framework's Versions/ symlink layout (cp -R mangles it).
+ditto "$FRAMEWORK_SRC" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+
+# Ad-hoc sign, inside-out: the embedded framework first (--deep catches its
+# nested XPC services + Updater.app + Autoupdate), then the whole app last so
+# its signature seals the framework and resources. Ad-hoc (`--sign -`) is
+# sufficient: Sparkle validates updates via the EdDSA signature
+# (SUPublicEDKey), not a Developer ID.
+codesign --force --deep --sign - "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+codesign --force --deep --sign - "$APP_BUNDLE"
+
+# Fail loudly on a broken signature — that is precisely the launch-time
+# regression Sparkle introduced last time.
+if ! codesign --verify --deep --strict "$APP_BUNDLE"; then
+  echo "Error: codesign verification failed on $APP_BUNDLE" >&2
+  exit 1
+fi
 
 echo ""
 echo "Built: $APP_BUNDLE"

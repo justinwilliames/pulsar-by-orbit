@@ -1,7 +1,9 @@
+import Sparkle
 import SwiftUI
 
 struct SettingsView: View {
     let viewModel: DashboardViewModel
+    let updater: SPUUpdater
 
     @State private var apiKey: String = ""
     @State private var voiceId: String = ""
@@ -27,6 +29,8 @@ struct SettingsView: View {
                 personaSection
                 Divider()
                 usageSection
+                Divider()
+                CheckForUpdatesView(updater: updater)
             }
             .padding(16)
         }

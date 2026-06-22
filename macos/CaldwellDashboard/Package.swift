@@ -14,12 +14,20 @@ let package = Package(
         // daemon. Keeping the HTTP surface preserves say.sh + Stop hook
         // compatibility while collapsing to a single binary.
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
+        // Sparkle — in-app auto-update. Re-added after the 0.2.0 removal:
+        // the prior attempt dyld-crashed because the framework was linked
+        // but never embedded at Contents/Frameworks with a matching rpath.
+        // build-caldwell-app.sh + package-dmg.yml now embed + sign it, and
+        // the -rpath linker flag below bakes @executable_path/../Frameworks
+        // into the binary so dyld resolves the embedded framework.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
     ],
     targets: [
         .executableTarget(
             name: "CaldwellDashboard",
             dependencies: [
                 .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources",
             resources: [
@@ -32,7 +40,11 @@ let package = Package(
                 .unsafeFlags(["-Xlinker", "-sectcreate",
                               "-Xlinker", "__TEXT",
                               "-Xlinker", "__info_plist",
-                              "-Xlinker", "\(packageDir)/Info.plist"])
+                              "-Xlinker", "\(packageDir)/Info.plist",
+                              // Resolve the embedded Sparkle.framework at runtime
+                              // from the .app bundle's Frameworks dir.
+                              "-Xlinker", "-rpath",
+                              "-Xlinker", "@executable_path/../Frameworks"])
             ]
         ),
     ]

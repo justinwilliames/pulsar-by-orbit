@@ -112,6 +112,20 @@ jobs:
             cp -R assets/portraits "$APP_PATH/Contents/Resources/assets/portraits"
           fi
 
+          # Embed Sparkle.framework. The binary loads @rpath/Sparkle.framework
+          # and carries an @executable_path/../Frameworks rpath (set in
+          # Package.swift), so the framework must live at Contents/Frameworks
+          # or the app dyld-crashes on launch. Mirrors build-caldwell-app.sh.
+          # ditto preserves the framework's Versions/ symlink layout.
+          FRAMEWORK_SRC="${{ steps.locate.outputs.release_dir }}/Sparkle.framework"
+          if [ ! -d "$FRAMEWORK_SRC" ]; then
+            echo "::error::Sparkle.framework not found at $FRAMEWORK_SRC"
+            find "${{ steps.locate.outputs.release_dir }}" -maxdepth 1 | sort
+            exit 1
+          fi
+          mkdir -p "$APP_PATH/Contents/Frameworks"
+          ditto "$FRAMEWORK_SRC" "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+
           chmod +x "$APP_PATH/Contents/MacOS/CaldwellDashboard"
 
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
@@ -149,6 +163,10 @@ jobs:
           # lands and we set up the full notarisation flow with
           # entitlements; for ad-hoc distribution it adds risk without
           # benefit because TCC doesn't require it.
+          # Inside-out: sign the embedded framework (deep, to catch its nested
+          # XPC services + Updater.app) first, then the whole app so the outer
+          # signature seals the framework.
+          codesign --force --deep --sign - "$APP_PATH/Contents/Frameworks/Sparkle.framework"
           codesign --force --deep --sign - "$APP_PATH"
 
           echo "After re-signing:"
@@ -157,6 +175,14 @@ jobs:
           # Sanity check: signature should be `adhoc` without `linker-signed`.
           if codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "linker-signed"; then
             echo "::error::Signature still flagged linker-signed after explicit codesign"
+            exit 1
+          fi
+
+          # Fail the build if the signature isn't valid — a broken sign ships a
+          # DMG that dyld-crashes or Gatekeeper blocks. This is the guard the
+          # 0.2.0 Sparkle attempt lacked.
+          if ! codesign --verify --deep --strict "$APP_PATH"; then
+            echo "::error::codesign --verify --deep --strict failed on $APP_PATH"
             exit 1
           fi
 

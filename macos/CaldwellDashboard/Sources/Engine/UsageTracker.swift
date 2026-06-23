@@ -36,12 +36,35 @@ final class UsageTracker: @unchecked Sendable {
     /// Remote `character_count` captured when we first observed this period —
     /// i.e. spend that predates our local tracking. `nil` until first seed.
     private var baselineRemote: Int?
+    /// The monthly `character_limit` from the subscription. Captured so the
+    /// adaptive spend gate can read the budget in-memory without a network
+    /// round-trip on every /speak. `nil` until first observed.
+    private var seededLimit: Int?
 
     /// Record a successful fetch's character cost. Called once per fetch from
     /// `ElevenLabsClient.fetchTTS`.
     func recordCharacters(_ count: Int) {
         guard count > 0 else { return }
         lock.withLock { sessionChars += count }
+    }
+
+    /// Capture the monthly character limit from a subscription reading.
+    func recordLimit(_ limit: Int) {
+        guard limit > 0 else { return }
+        lock.withLock { seededLimit = limit }
+    }
+
+    /// In-memory budget snapshot for the adaptive bespoke-spend gate — no
+    /// network. `used` is the live local floor (baseline + this session's
+    /// spend). Returns nil until both a baseline and a limit have been seen,
+    /// in which case the gate fails open (don't gag the voice on missing data).
+    func snapshot() -> (used: Int, limit: Int, reset: Int)? {
+        lock.withLock {
+            guard let reset = seededReset,
+                  let base = baselineRemote,
+                  let limit = seededLimit else { return nil }
+            return (used: base + sessionChars, limit: limit, reset: reset)
+        }
     }
 
     /// Seed the baseline from a remote reading taken before any fetch (e.g. at

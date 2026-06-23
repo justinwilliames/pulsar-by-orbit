@@ -781,6 +781,82 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         return pool
     }
 
+    // MARK: - Adaptive bespoke-spend gate
+
+    /// Decide whether a FRESH (non-cached) line should be generated now, or
+    /// downgraded to a free cached canon line to protect the monthly budget.
+    ///
+    /// Paces spend so credit lasts to the reset: spend freely while at or above
+    /// the even-burn line, throttle proportionally once burning faster than the
+    /// billing cycle allows. Stateless and self-correcting — reads only the live
+    /// in-memory usage snapshot, so it auto-adjusts to whatever credit remains.
+    ///
+    ///   health = (remaining / limit) / (secondsToReset / cycleLength)
+    ///     health ≥ 1  → at/ahead of the even-burn line → always bespoke
+    ///     health < 1  → burning too fast → bespoke with probability = health
+    ///
+    /// Fails open when there's no budget data yet (don't gag the voice).
+    nonisolated static func shouldSpeakBespoke() -> Bool {
+        guard let snap = UsageTracker.shared.snapshot(), snap.limit > 0 else {
+            return true
+        }
+        let remaining = max(0, snap.limit - snap.used)
+        // Hard floor: protect the last sliver so a fresh fetch can't half-fail
+        // mid-cycle and so the canon picker always has headroom.
+        if remaining < 150 { return false }
+
+        let now = Int(Date().timeIntervalSince1970)
+        let secondsToReset = max(1, snap.reset - now)
+        let cycleLength = 30 * 24 * 3600  // ElevenLabs monthly cycle ≈ 30 days
+        let expectedRemainingFrac = min(1.0, Double(secondsToReset) / Double(cycleLength))
+        let actualRemainingFrac = Double(remaining) / Double(snap.limit)
+        let health = actualRemainingFrac / max(0.01, expectedRemainingFrac)
+        let prob = min(1.0, max(0.0, health))
+        return Double.random(in: 0..<1) < prob
+    }
+
+    /// Play a free, already-cached canon line in place of a throttled bespoke
+    /// spend. Generic "neutral" pool — safe after any turn. Returns nil if no
+    /// canon is cached (caller then proceeds with the bespoke spend).
+    nonisolated private static func playCanonFallback(
+        audioQueue: AudioQueueActor,
+        cfg: CaldwellConfig
+    ) async throws -> Response? {
+        let voiceId = cfg.voiceId
+        guard !voiceId.isEmpty else { return nil }
+        let candidates = canonCandidates(for: "neutral", expletives: cfg.expletivesEnabled)
+        let cached = candidates.compactMap { text -> (String, URL)? in
+            guard let url = PhraseCache.shared.get(text: text, voiceId: voiceId) else { return nil }
+            return (text, url)
+        }
+        // Anti-repeat against the last canon line we played.
+        let lastPlayed = Self.canonLock.withLock { Self.lastCanonText }
+        var pickable = cached
+        if pickable.count > 1, let lastPlayed {
+            let fresh = pickable.filter { $0.0 != lastPlayed }
+            if !fresh.isEmpty { pickable = fresh }
+        }
+        guard let (text, sourceURL) = pickable.randomElement() else { return nil }
+        Self.canonLock.withLock { Self.lastCanonText = text }
+
+        let entryId = Self.nextEntryId()
+        guard let tmpURL = try? Self.copyCacheAudioToTemp(sourceURL: sourceURL, entryId: entryId) else { return nil }
+        let entry = AudioEntry(
+            id: entryId, text: text, voiceId: voiceId, voiceLabel: "Caldwell",
+            createdAt: Date(), channel: nil, priority: false,
+            fullText: text, isReplay: true, audioURL: tmpURL
+        )
+        let position = await audioQueue.enqueue(entry)
+        if position == nil {
+            try? FileManager.default.removeItem(at: tmpURL)
+            return nil
+        }
+        return try Self.json(SpeakResponse(
+            id: entryId, position: position, voice: voiceId,
+            text_preview: text, dropped: nil, reason: "budget-canon"
+        ))
+    }
+
     // MARK: - /speak handler
 
     nonisolated private static func handleSpeak(
@@ -848,6 +924,19 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             } catch {
                 return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
             }
+        }
+
+        // Adaptive budget gate: a genuine fresh spend (cache miss). If we're
+        // burning monthly credit faster than the billing cycle allows,
+        // downgrade to a free cached canon line instead — so bespoke volume
+        // tracks remaining credit and always lasts to the reset. Cacheable
+        // lines are exempt (a reusable line is worth its one-time spend);
+        // cache hits and cache_only warms never reach here.
+        if cachedURL == nil, !cacheable, !Self.shouldSpeakBespoke() {
+            if let resp = try await Self.playCanonFallback(audioQueue: audioQueue, cfg: cfg) {
+                return resp
+            }
+            // No canon cached to fall back to → proceed with the bespoke spend.
         }
 
         // Normal flow — validate credentials only on a cache miss
@@ -1094,6 +1183,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             remoteUsed: sub.character_count,
             remoteReset: sub.next_character_count_reset_unix
         )
+        UsageTracker.shared.recordLimit(sub.character_limit)
         return UsageResponse(
             characters_used: reconciledUsed,
             characters_limit: sub.character_limit,
@@ -1115,6 +1205,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             remoteUsed: sub.character_count,
             remoteReset: sub.next_character_count_reset_unix
         )
+        UsageTracker.shared.recordLimit(sub.character_limit)
     }
 }
 

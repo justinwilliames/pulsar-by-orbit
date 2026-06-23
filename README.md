@@ -68,6 +68,19 @@ ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak
 
 Then **restart Claude Code** so it discovers the skill. The shipped [`SKILL.md`](SKILL.md) tells Claude to fire Caldwell at the end of every turn.
 
+### 6. Install the hooks
+
+```bash
+~/code/caldwell-speak/scripts/install-hooks.sh
+```
+
+This wires two hooks into your `~/.claude/settings.json` (idempotent — it only adds them if absent and leaves your other hooks alone):
+
+- **`SessionStart` → `session-start-voice.sh`** — when the app is running, injects a directive so Claude composes a fresh, *bespoke* line each turn. This is model-side: it rides your own Claude Code session, so there's no extra API key. When the app is off, it injects nothing and the voice stays dormant.
+- **`Stop` → `stop-hook.sh`** — plays a cached canonical line as the fallback for any turn Claude doesn't speak on (debounced, so you never get double voice).
+
+**Start a new Claude Code session** after running it. From then on Caldwell composes a custom line each turn, with cached canon as the floor.
+
 ---
 
 ## What you get

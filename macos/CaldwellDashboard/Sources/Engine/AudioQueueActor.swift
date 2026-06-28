@@ -336,9 +336,55 @@ actor AudioQueueActor {
 
     // MARK: - Playback
 
+    /// Zero-cost voice fallback: speak `text` via the macOS `say` command in a
+    /// British voice when ElevenLabs synthesis is unavailable, so Caldwell never
+    /// goes silent on a failed fetch. Voice overridable via the
+    /// CALDWELL_FALLBACK_VOICE env var (default "Daniel"). Best-effort — launch
+    /// errors are logged and swallowed. Reuses `currentProcess` so --skip can
+    /// interrupt it like any premium line.
+    private func speakNative(_ text: String) async {
+        // Honour the global mute exactly like the premium voice. Mute is already
+        // enforced upstream at /speak (muted requests never enqueue), so muted
+        // lines normally never reach here — but this guard also catches the
+        // race where the user mutes mid-flight, after a line was queued. A mute
+        // silences Daniel, not just ElevenLabs.
+        guard !CaldwellConfig.shared.isMuted else {
+            NSLog("[AudioQueue] native say fallback suppressed — muted")
+            return
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let voice = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"] ?? "Daniel"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        process.arguments = ["-v", voice, trimmed]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        currentProcess = process
+        do {
+            try process.run()
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                Task.detached {
+                    process.waitUntilExit()
+                    cont.resume()
+                }
+            }
+        } catch {
+            NSLog("[AudioQueue] native say fallback failed: \(error)")
+        }
+        currentProcess = nil
+    }
+
     private func playEntry(_ entry: AudioEntry) async {
         guard !entry.fetchFailed, let audioURL = entry.audioURL else {
-            NSLog("[AudioQueue] Skipping \(entry.id) — fetch failed or no audio URL")
+            // ElevenLabs synthesis was unavailable (missing/invalid key,
+            // exhausted quota, or invalid audio). Rather than go mute, speak the
+            // line through the macOS `say` command in a British voice — free, no
+            // ElevenLabs spend. Mute is enforced upstream at /speak (muted
+            // requests never enqueue), so reaching here means the user wants to
+            // hear Caldwell and only the premium voice failed.
+            NSLog("[AudioQueue] fetch failed for \(entry.id) — native say fallback")
+            await speakNative(entry.text)
             await broadcaster.broadcast(event: "voice_active", json: jsonString(idlePayload(queued: queue.count)))
             let historyItem = recordHistory(entry: entry, duration: nil, failed: true)
             await broadcaster.broadcast(

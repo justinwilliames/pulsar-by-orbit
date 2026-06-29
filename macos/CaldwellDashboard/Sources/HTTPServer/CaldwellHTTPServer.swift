@@ -147,7 +147,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
         // POST /settings — update config + Keychain API key
         router.post("/settings") { request, _ -> Response in
-            return try await Self.handleSettingsPost(request: request)
+            return try await Self.handleSettingsPost(request: request, sseBroadcaster: sseBroadcaster)
         }
 
         // GET /usage — ElevenLabs subscription usage
@@ -548,7 +548,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     }
 
     nonisolated private static func handleSettingsPost(
-        request: Request
+        request: Request,
+        sseBroadcaster: SSEBroadcaster
     ) async throws -> Response {
         let update: SettingsUpdateRequest
         do {
@@ -589,7 +590,16 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
         }
 
-        return try Self.json(Self.currentSettings())
+        // Broadcast the new settings so connected UIs reflect the change at
+        // once. Without this, a config write via the API (say.sh --mute, the
+        // Stop hook, any external caller) never reaches the app, leaving the
+        // menubar mute glyph stale — the icon and the actual state disagree.
+        let settings = Self.currentSettings()
+        if let data = try? JSONEncoder().encode(settings),
+           let json = String(data: data, encoding: .utf8) {
+            await sseBroadcaster.broadcast(event: "settings", json: json)
+        }
+        return try Self.json(settings)
     }
 
     // MARK: - /usage handler

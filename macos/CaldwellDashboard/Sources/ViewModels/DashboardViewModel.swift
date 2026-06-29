@@ -81,9 +81,20 @@ final class DashboardViewModel {
             handlePauseStateEvent(data)
         case "history_update":
             handleHistoryUpdateEvent(data)
+        case "settings":
+            handleSettingsEvent(data)
         default:
             break
         }
+    }
+
+    /// A settings change pushed from the daemon (e.g. mute toggled via the API,
+    /// the Stop hook, or say.sh). Refreshes `settings` so `isMuted` — and the
+    /// menubar glyph that reads it — update immediately, not just on the next
+    /// popover toggle or reconnect.
+    private func handleSettingsEvent(_ data: Data) {
+        guard let updated = try? decoder.decode(DaemonSettings.self, from: data) else { return }
+        settings = updated
     }
 
     private func handleStateEvent(_ data: Data) {

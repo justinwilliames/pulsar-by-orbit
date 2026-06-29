@@ -90,7 +90,9 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 status: "ok",
                 version: "swift-2.0",
                 queue_size: 0,
-                source: "swift"
+                source: "swift",
+                native_voice: NativeVoiceClient.bestVoice(),
+                enhanced_installed: NativeVoiceClient.enhancedInstalled()
             ))
         }
 
@@ -561,7 +563,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         guard update.voice_id != nil ||
                 update.muted != nil ||
                 update.expletives_enabled != nil ||
-                update.api_key != nil
+                update.api_key != nil ||
+                update.voice_engine != nil
         else {
             return try Self.json(ErrorResponse("No fields to update"), status: .badRequest)
         }
@@ -585,6 +588,10 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             }
             if let expletives = update.expletives_enabled {
                 try config.set("CALDWELL_EXPLETIVES", value: expletives ? "1" : "0")
+            }
+            if let engine = update.voice_engine {
+                let normalized = engine.lowercased() == "native" ? "native" : "elevenlabs"
+                try config.set("CALDWELL_VOICE_ENGINE", value: normalized)
             }
         } catch {
             return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
@@ -972,6 +979,37 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let channel    = body["channel"]    as? String
         let priority   = body["priority"]   as? Bool ?? false
 
+        // Native engine: synthesise locally via macOS `say` to a temp AIFF, so
+        // it plays through the same envelope/lip-sync path. No cache, no budget
+        // gate, no API key, no spend — Caldwell's free, local, private voice.
+        if cfg.voiceEngine == "native" {
+            let entryId = Self.nextEntryId()
+            let entry = AudioEntry(
+                id: entryId, text: String(text.prefix(100)), voiceId: "native",
+                voiceLabel: "Caldwell", createdAt: Date(), channel: channel,
+                priority: priority, fullText: text, isReplay: false,
+                audioURL: nil, engine: "native")
+            guard let position = await audioQueue.enqueue(entry) else {
+                return try Self.json(SpeakResponse(
+                    id: entryId, position: nil, voice: "native",
+                    text_preview: String(text.prefix(100)), dropped: true, reason: "busy"))
+            }
+            let idCopy = entryId
+            let textCopy = text
+            Task.detached {
+                do {
+                    let url = try await NativeVoiceClient.synth(text: textCopy)
+                    await audioQueue.markReady(id: idCopy, url: url)
+                } catch {
+                    NSLog("[CaldwellHTTP] native synth failed for \(idCopy): \(error)")
+                    await audioQueue.markFailed(id: idCopy)
+                }
+            }
+            return try Self.json(SpeakResponse(
+                id: entryId, position: position, voice: "native",
+                text_preview: String(text.prefix(100)), dropped: nil, reason: "native"))
+        }
+
         // Resolve voice ID — needed for cache key.
         let voiceId = voiceRaw ?? cfg.voiceId
 
@@ -1087,8 +1125,17 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                     }
                     await audioQueue.markReady(id: entryIdCopy, url: url)
                 } catch {
-                    NSLog("[CaldwellHTTP] Background TTS fetch failed for \(entryIdCopy): \(error)")
-                    await audioQueue.markFailed(id: entryIdCopy)
+                    NSLog("[CaldwellHTTP] ElevenLabs fetch failed for \(entryIdCopy): \(error) — recovering via local voice")
+                    // Recover with the free local voice (to a file, so it still
+                    // lip-syncs) rather than going silent. Only truly fail if even
+                    // local synthesis dies.
+                    do {
+                        let nurl = try await NativeVoiceClient.synth(text: textCopy)
+                        await audioQueue.markReady(id: entryIdCopy, url: nurl)
+                    } catch {
+                        NSLog("[CaldwellHTTP] local-voice recovery also failed for \(entryIdCopy): \(error)")
+                        await audioQueue.markFailed(id: entryIdCopy)
+                    }
                 }
             }
         }
@@ -1142,7 +1189,10 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             voice_id: config.voiceId,
             api_key_set: !config.apiKey.isEmpty,
             muted: config.isMuted,
-            expletives_enabled: config.expletivesEnabled
+            expletives_enabled: config.expletivesEnabled,
+            voice_engine: config.voiceEngine,
+            native_voice: NativeVoiceClient.bestVoice(),
+            enhanced_installed: NativeVoiceClient.enhancedInstalled()
         )
     }
 
@@ -1305,6 +1355,8 @@ private struct HealthResponse: Encodable, Sendable {
     let version: String
     let queue_size: Int
     let source: String
+    let native_voice: String
+    let enhanced_installed: Bool
 }
 
 private struct ErrorResponse: Encodable, Sendable {
@@ -1471,6 +1523,9 @@ private struct SettingsResponse: Encodable, Sendable {
     let api_key_set: Bool
     let muted: Bool
     let expletives_enabled: Bool
+    let voice_engine: String
+    let native_voice: String
+    let enhanced_installed: Bool
 }
 
 private struct SettingsUpdateRequest: Decodable, Sendable {
@@ -1478,6 +1533,7 @@ private struct SettingsUpdateRequest: Decodable, Sendable {
     let muted: Bool?
     let expletives_enabled: Bool?
     let api_key: String?
+    let voice_engine: String?
 }
 
 private struct UsageResponse: Encodable, Sendable {

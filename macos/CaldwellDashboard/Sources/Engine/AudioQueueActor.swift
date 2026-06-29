@@ -90,6 +90,8 @@ struct AudioEntry: Sendable {
     let isReplay: Bool
     var audioURL: URL?
     var fetchFailed: Bool = false
+    /// Which engine produced/should produce the audio: "elevenlabs" or "native".
+    var engine: String = "elevenlabs"
 }
 
 struct HistoryItem: Sendable {
@@ -354,10 +356,11 @@ actor AudioQueueActor {
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let voice = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"] ?? "Daniel"
+        let voice = NativeVoiceClient.bestVoice()
+        NSLog("[AudioQueue] native say last-ditch voice=\(voice)")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-        process.arguments = ["-v", voice, trimmed]
+        process.arguments = ["-v", voice, "-r", String(NativeVoiceClient.defaultRate), trimmed]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         currentProcess = process

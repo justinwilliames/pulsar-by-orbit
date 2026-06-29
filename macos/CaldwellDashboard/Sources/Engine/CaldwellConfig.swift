@@ -103,6 +103,15 @@ final class CaldwellConfig: @unchecked Sendable {
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
+    /// Which engine speaks: "elevenlabs" (premium cloud) or "native" (free local
+    /// macOS voice). Default "elevenlabs" preserves today's behaviour.
+    var voiceEngine: String {
+        let val = (lock.withLock { _config["CALDWELL_VOICE_ENGINE"] }
+            ?? ProcessInfo.processInfo.environment["CALDWELL_VOICE_ENGINE"]
+            ?? "elevenlabs").lowercased()
+        return val == "native" ? "native" : "elevenlabs"
+    }
+
     // MARK: - Voice settings (mirrors SPEAK_VOICE_* env vars in server.py)
 
     var voiceStability: Double {
@@ -124,9 +133,17 @@ final class CaldwellConfig: @unchecked Sendable {
     /// Re-read config.json from disk. Call after any write.
     func reload() {
         guard let data = try? Data(contentsOf: configPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String]
-        else { return }
-        lock.withLock { _config = json }
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }   // unreadable/malformed → keep last-known, never blank
+        // Coerce per-key so one non-string value can't nuke the whole config
+        // (a bad hand-edit must not silently revert mute or persona).
+        var coerced: [String: String] = [:]
+        for (k, v) in raw {
+            if let s = v as? String { coerced[k] = s }
+            else if let b = v as? Bool { coerced[k] = b ? "1" : "0" }
+            else if let n = v as? NSNumber { coerced[k] = n.stringValue }
+        }
+        lock.withLock { _config = coerced }
     }
 
     /// Write a single key back to config.json and reload.

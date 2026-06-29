@@ -7,6 +7,12 @@ struct DaemonSettings: Codable, Sendable {
     let voiceLabel: String
     let expletivesEnabled: Bool?
     let muted: Bool?
+    /// "elevenlabs" (premium cloud) or "native" (free local macOS voice).
+    let voiceEngine: String?
+    /// The macOS voice the native path resolves to (e.g. "Daniel (Enhanced)").
+    let nativeVoice: String?
+    /// Whether the neural Enhanced Daniel is installed (drives the install nudge).
+    let enhancedInstalled: Bool?
 
     enum CodingKeys: String, CodingKey {
         case apiKeySet = "api_key_set"
@@ -15,6 +21,9 @@ struct DaemonSettings: Codable, Sendable {
         case voiceLabel = "voice_label"
         case expletivesEnabled = "expletives_enabled"
         case muted
+        case voiceEngine = "voice_engine"
+        case nativeVoice = "native_voice"
+        case enhancedInstalled = "enhanced_installed"
     }
 
     init(from decoder: Decoder) throws {
@@ -25,6 +34,9 @@ struct DaemonSettings: Codable, Sendable {
         self.voiceLabel = try container.decodeIfPresent(String.self, forKey: .voiceLabel) ?? self.voiceId
         self.expletivesEnabled = try container.decodeIfPresent(Bool.self, forKey: .expletivesEnabled)
         self.muted = try container.decodeIfPresent(Bool.self, forKey: .muted)
+        self.voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine)
+        self.nativeVoice = try container.decodeIfPresent(String.self, forKey: .nativeVoice)
+        self.enhancedInstalled = try container.decodeIfPresent(Bool.self, forKey: .enhancedInstalled)
     }
 }
 

@@ -13,7 +13,6 @@ final class DashboardViewModel {
     var queueItems: [QueueItem] = []
     var historyEntries: [HistoryEntry] = []
     var settings: DaemonSettings?
-    var usage: DaemonUsage?
     var cachedPhrases: [CachedPhrase] = []
     var cacheTotalBytes: Int = 0
     var cacheMaxBytes: Int = 0
@@ -206,12 +205,6 @@ final class DashboardViewModel {
         }
         // Refresh cached index so the new entry's cached-badge shows immediately.
         Task { await loadCachedPhrases() }
-        // A fresh (non-replay) line may have spent ElevenLabs characters.
-        // Refresh usage so the popover counter stays current while open,
-        // rather than only updating on Settings re-open.
-        if entry.type != "replay" {
-            Task { await loadUsage() }
-        }
     }
 
     // MARK: - Actions
@@ -275,10 +268,10 @@ final class DashboardViewModel {
         }
     }
 
-    // MARK: - Settings + Usage
+    // MARK: - Settings
 
     enum SaveResult {
-        case success(VoiceMetadata?)
+        case success
         case failure(String)
     }
 
@@ -290,41 +283,29 @@ final class DashboardViewModel {
         }
     }
 
-    func loadUsage() async {
-        usage = try? await api.fetchUsage()
-    }
-
-    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil, voiceEngine: String? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
+    func saveSettings(expletivesEnabled: Bool? = nil, muted: Bool? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled, muted: muted, voiceEngine: voiceEngine, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
+            let response = try await api.saveSettings(expletivesEnabled: expletivesEnabled, muted: muted, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }
             await loadSettings()
-            await loadUsage()
-            return .success(response.voiceMeta)
+            return .success
         } catch {
             return .failure("Network error: \(error.localizedDescription)")
         }
     }
 
-    /// Voice source (engine): "native" (free, local, private) or "elevenlabs"
-    /// (premium cloud, uses credits). Framed cost/privacy in the UI, never as a
-    /// quality tier — one Caldwell identity across both.
-    func setVoiceEngine(_ engine: String) async {
-        _ = await saveSettings(apiKey: nil, voiceId: nil, voiceEngine: engine)
-    }
-
     /// Message style: cached pings on (frequent, notification-style) vs off
-    /// (bespoke-only — richer, fewer, costs credit).
+    /// (bespoke-only — richer, fewer).
     func setCanonEnabled(_ on: Bool) async {
-        _ = await saveSettings(apiKey: nil, voiceId: nil, canonEnabled: on)
+        _ = await saveSettings(canonEnabled: on)
     }
 
     /// Free-mode local voice choice. Empty resets to auto (Daniel Enhanced else
     /// Daniel). Only installed voices are accepted by the daemon.
     func setNativeVoice(_ name: String) async {
-        _ = await saveSettings(apiKey: nil, voiceId: nil, nativeVoice: name)
+        _ = await saveSettings(nativeVoice: name)
     }
 
     /// Quick mute toggle for the popover header + menu-bar quick action.
@@ -333,7 +314,7 @@ final class DashboardViewModel {
     func toggleMute() async -> Bool {
         let current = settings?.muted ?? false
         let next = !current
-        _ = await saveSettings(apiKey: nil, voiceId: nil, expletivesEnabled: nil, muted: next)
+        _ = await saveSettings(muted: next)
         return next
     }
 

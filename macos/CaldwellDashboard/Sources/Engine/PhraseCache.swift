@@ -28,17 +28,26 @@ final class PhraseCache: @unchecked Sendable {
 
     // MARK: - Key
 
+    // Frozen ElevenLabs synthesis parameters the canon phrase cache was warmed
+    // under by warm-cache.sh. ElevenLabs is gone, but cached MP3s on disk are
+    // still keyed by this exact formula — the bytes must stay identical to the
+    // Python _phrase_cache_key() that produced them, or every lookup misses.
+    private static let canonModel = "eleven_multilingual_v2"
+    private static let canonStability = 0.35
+    private static let canonSimilarityBoost = 0.75
+    private static let canonStyle = 0.50
+    private static let canonSpeakerBoost = true
+
     /// Derive the 32-char cache key for (text, voiceId).
     /// Must produce the same bytes as Python's _phrase_cache_key().
     func key(text: String, voiceId: String) -> String {
-        let cfg = CaldwellConfig.shared
         let textJSON = jsonStringLiteral(text)
         let voiceJSON = jsonStringLiteral(voiceId)
-        let stability = formatDouble(cfg.voiceStability)
-        let simBoost = formatDouble(cfg.voiceSimilarityBoost)
-        let style = formatDouble(cfg.voiceStyle)
-        let speakerBoost = cfg.voiceSpeakerBoost ? "true" : "false"
-        let model = CaldwellConfig.defaultModel
+        let stability = formatDouble(Self.canonStability)
+        let simBoost = formatDouble(Self.canonSimilarityBoost)
+        let style = formatDouble(Self.canonStyle)
+        let speakerBoost = Self.canonSpeakerBoost ? "true" : "false"
+        let model = Self.canonModel
 
         let json = """
         {"model": "\(model)", "text": \(textJSON), "voice_id": \(voiceJSON), \

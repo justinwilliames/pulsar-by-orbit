@@ -552,11 +552,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse("Invalid JSON"), status: .badRequest)
         }
 
-        guard update.voice_id != nil ||
-                update.muted != nil ||
+        guard update.muted != nil ||
                 update.expletives_enabled != nil ||
-                update.api_key != nil ||
-                update.voice_engine != nil ||
                 update.canon_enabled != nil ||
                 update.native_voice != nil
         else {
@@ -566,26 +563,11 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let config = CaldwellConfig.shared
 
         do {
-            if let apiKey = update.api_key {
-                let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else {
-                    return try Self.json(ErrorResponse("api_key must not be empty"), status: .badRequest)
-                }
-                try config.setApiKey(trimmed)
-            }
-
-            if let voiceId = update.voice_id {
-                try config.set("ELEVENLABS_VOICE_ID", value: voiceId.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
             if let muted = update.muted {
                 try config.set("CALDWELL_MUTED", value: muted ? "1" : "0")
             }
             if let expletives = update.expletives_enabled {
                 try config.set("CALDWELL_EXPLETIVES", value: expletives ? "1" : "0")
-            }
-            if let engine = update.voice_engine {
-                let normalized = engine.lowercased() == "native" ? "native" : "elevenlabs"
-                try config.set("CALDWELL_VOICE_ENGINE", value: normalized)
             }
             if let canon = update.canon_enabled {
                 try config.set("CALDWELL_CANON_ENABLED", value: canon ? "1" : "0")
@@ -627,6 +609,10 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     /// behaviour is what made turn-end pings fire irrelevant specifics
     /// ("Tests passing." after a turn with no tests). Generic lines are safe
     /// after literally any turn; specifics only fire on a confident match.
+    /// Fixed cache key the canon phrase cache is warmed under by warm-cache.sh.
+    /// Lookups must use the same key or every cached-ping hit misses.
+    nonisolated private static let canonCacheVoiceId = "JBFqnCBsd6RMkjVDRZzb"
+
     nonisolated private static let canonContexts: [String: (polite: [String], potty: [String])] = [
         "push": (
             polite: ["Pushed, Sir.", "Pushed.", "Up it goes, Sir.", "That's pushed, Sir.", "Sent up, Sir.", "Away it goes, Sir.", "Pushed and clean, Sir."],
@@ -708,18 +694,15 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return Response(status: .noContent)
         }
 
-        // Filter to those actually cached for the current voice.
-        let voiceId = cfg.voiceId
-        guard !voiceId.isEmpty else {
-            return Response(status: .noContent)
-        }
+        // Filter to those actually cached on disk. The phrase cache is warmed
+        // by warm-cache.sh under a fixed key; match that key so lookups hit.
+        let voiceId = Self.canonCacheVoiceId
         let cached = candidates.compactMap { text -> (String, URL)? in
             guard let url = PhraseCache.shared.get(text: text, voiceId: voiceId) else { return nil }
             return (text, url)
         }
         guard !cached.isEmpty else {
-            // No cached canon for this context — stay silent rather than
-            // spend ElevenLabs credit on a guess.
+            // No cached canon for this context — stay silent.
             return Response(status: .noContent)
         }
 
@@ -950,11 +933,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     nonisolated private static func currentSettings() -> SettingsResponse {
         let config = CaldwellConfig.shared
         return SettingsResponse(
-            voice_id: config.voiceId,
-            api_key_set: config.apiKeyIsSet(),
             muted: config.isMuted,
             expletives_enabled: config.expletivesEnabled,
-            voice_engine: config.voiceEngine,
             native_voice: NativeVoiceClient.bestVoice(),
             enhanced_installed: NativeVoiceClient.enhancedInstalled(),
             canon_enabled: config.canonEnabled,
@@ -1027,16 +1007,6 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 }
 
 // MARK: - Response models
-
-private struct UsageFetchError: LocalizedError, Sendable {
-    let message: String
-
-    init(_ message: String) {
-        self.message = message
-    }
-
-    var errorDescription: String? { message }
-}
 
 private struct HealthResponse: Encodable, Sendable {
     let status: String
@@ -1207,11 +1177,8 @@ private struct CanonPickResponse: Encodable, Sendable {
 }
 
 private struct SettingsResponse: Encodable, Sendable {
-    let voice_id: String
-    let api_key_set: Bool
     let muted: Bool
     let expletives_enabled: Bool
-    let voice_engine: String
     let native_voice: String
     let enhanced_installed: Bool
     let canon_enabled: Bool
@@ -1219,29 +1186,8 @@ private struct SettingsResponse: Encodable, Sendable {
 }
 
 private struct SettingsUpdateRequest: Decodable, Sendable {
-    let voice_id: String?
     let muted: Bool?
     let expletives_enabled: Bool?
-    let api_key: String?
-    let voice_engine: String?
     let canon_enabled: Bool?
     let native_voice: String?
-}
-
-private struct UsageResponse: Encodable, Sendable {
-    let characters_used: Int?
-    let characters_limit: Int?
-    let next_reset_unix: Int?
-    let api_key_set: Bool
-    let error: String?
-}
-
-private struct ElevenLabsUserEnvelope: Decodable, Sendable {
-    let subscription: ElevenLabsSubscription
-}
-
-private struct ElevenLabsSubscription: Decodable, Sendable {
-    let character_count: Int
-    let character_limit: Int
-    let next_character_count_reset_unix: Int
 }

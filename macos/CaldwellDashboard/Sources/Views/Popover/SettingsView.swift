@@ -133,7 +133,7 @@ struct SettingsView: View {
             if viewModel.settings?.voiceEngine == "native",
                let voices = viewModel.settings?.availableVoices, !voices.isEmpty {
                 Picker("Local voice", selection: nativeVoiceBinding) {
-                    ForEach(voices, id: \.self) { v in Text(v).tag(v) }
+                    ForEach(voices, id: \.name) { v in Text(v.label).tag(v.name) }
                 }
                 .pickerStyle(.menu)
                 Text("Pick any installed voice. Download more under System Settings → Accessibility → Spoken Content. (Apple reserves the Siri voices for the system — they can't be used here.)")

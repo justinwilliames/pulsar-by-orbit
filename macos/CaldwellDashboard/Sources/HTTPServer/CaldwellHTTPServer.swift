@@ -1219,7 +1219,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             native_voice: NativeVoiceClient.bestVoice(),
             enhanced_installed: NativeVoiceClient.enhancedInstalled(),
             canon_enabled: config.canonEnabled,
-            available_voices: NativeVoiceClient.availableVoices()
+            available_voices: NativeVoiceClient.voiceOptions()
         )
     }
 
@@ -1554,7 +1554,7 @@ private struct SettingsResponse: Encodable, Sendable {
     let native_voice: String
     let enhanced_installed: Bool
     let canon_enabled: Bool
-    let available_voices: [String]
+    let available_voices: [NativeVoiceClient.VoiceOption]
 }
 
 private struct SettingsUpdateRequest: Decodable, Sendable {

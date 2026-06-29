@@ -15,8 +15,9 @@ struct DaemonSettings: Codable, Sendable {
     let enhancedInstalled: Bool?
     /// Whether cached "canon" pings are on (notification-style) vs bespoke-only.
     let canonEnabled: Bool?
-    /// Installed local voices usable in free mode (drives the voice picker).
-    let availableVoices: [String]?
+    /// Installed local voices usable in free mode (drives the voice picker),
+    /// each with a "Name (Language, Region)" label.
+    let availableVoices: [NativeVoiceClient.VoiceOption]?
 
     enum CodingKeys: String, CodingKey {
         case apiKeySet = "api_key_set"
@@ -44,7 +45,7 @@ struct DaemonSettings: Codable, Sendable {
         self.nativeVoice = try container.decodeIfPresent(String.self, forKey: .nativeVoice)
         self.enhancedInstalled = try container.decodeIfPresent(Bool.self, forKey: .enhancedInstalled)
         self.canonEnabled = try container.decodeIfPresent(Bool.self, forKey: .canonEnabled)
-        self.availableVoices = try container.decodeIfPresent([String].self, forKey: .availableVoices)
+        self.availableVoices = try container.decodeIfPresent([NativeVoiceClient.VoiceOption].self, forKey: .availableVoices)
     }
 }
 

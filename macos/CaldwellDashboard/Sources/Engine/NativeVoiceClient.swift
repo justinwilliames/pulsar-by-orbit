@@ -9,39 +9,58 @@ import Foundation
 /// IMPORTANT: the installed-voice probe (`say -v ?`) is a *blocking* Process +
 /// pipe read. It must NEVER run on the async HTTP handler path (it starves the
 /// Swift cooperative thread pool and wedges the server under concurrent polls).
-/// So the probe result is cached; `bestVoice()`/`enhancedInstalled()` only read
-/// the cache (self-priming in the background), and only `synth()` and `prime()`
-/// — both off the handler path — ever spawn `say`.
+/// So the probe result is cached; voice lookups only read the cache (self-
+/// priming in the background), and only `synth()` and `prime()` — both off the
+/// handler path — ever spawn `say`.
 enum NativeVoiceClient {
 
     /// Measured "butler" pace (words/min). Enhanced voices honour `-r`.
     static let defaultRate = 168
 
-    private static let lock = NSLock()
-    nonisolated(unsafe) private static var cachedNames: [String]?
-
-    /// Spawn `say -v ?` and cache the installed voice names. Blocking — call
-    /// only from a background task (it's auto-kicked lazily; safe to call at
-    /// startup too).
-    @discardableResult
-    static func prime() -> [String] {
-        let names = computeVoiceNames()
-        lock.withLock { cachedNames = names }
-        return names
+    /// A selectable voice for the free-mode picker: the `say`-usable name plus a
+    /// human label like "Daniel (English, UK)".
+    struct VoiceOption: Codable, Sendable {
+        let name: String
+        let label: String
     }
 
-    /// Cached voice names. If not yet primed, kick a background prime and return
-    /// empty for now (handlers fall back to "Daniel" until the probe lands —
-    /// ~0.3s — never blocking).
-    private static func names() -> [String] {
-        if let n = (lock.withLock { cachedNames }) { return n }
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var cachedVoices: [(name: String, locale: String)]?
+
+    /// Spawn `say -v ?` and cache (name, locale) pairs. Blocking — call only from
+    /// a background task (auto-kicked lazily; safe at startup too).
+    @discardableResult
+    static func prime() -> [(name: String, locale: String)] {
+        let voices = computeVoices()
+        lock.withLock { cachedVoices = voices }
+        return voices
+    }
+
+    private static func voices() -> [(name: String, locale: String)] {
+        if let v = (lock.withLock { cachedVoices }) { return v }
         Task.detached { _ = prime() }
         return []
     }
 
-    /// Preferred British voice, best-first: env override → "Daniel (Enhanced)"
-    /// (neural, closest to the Caldwell timbre) → "Daniel" (always present). If
-    /// Enhanced isn't installed we simply fall back to regular Daniel.
+    /// `say`-usable voice names. Cached; safe on the handler path.
+    static func names() -> [String] { voices().map(\.name) }
+
+    /// Voice names for validation (free-mode picker accepts only these).
+    static func availableVoices() -> [String] { names() }
+
+    /// Rich options for the picker: each name plus a "Name (Language, Region)"
+    /// label. English/British voices first, then the rest, alphabetical.
+    static func voiceOptions() -> [VoiceOption] {
+        let opts = voices().map { VoiceOption(name: $0.name, label: label(name: $0.name, locale: $0.locale)) }
+        return opts.sorted { a, b in
+            let aEN = a.label.contains("English"), bEN = b.label.contains("English")
+            if aEN != bEN { return aEN }      // English first
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+    }
+
+    /// Preferred voice, best-first: env override → user pick (if installed) →
+    /// "Daniel (Enhanced)" → "Daniel".
     static func bestVoice() -> String {
         if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -51,25 +70,19 @@ enum NativeVoiceClient {
         func has(_ wanted: String) -> String? {
             n.first { $0.caseInsensitiveCompare(wanted) == .orderedSame }
         }
-        // The user's explicit pick from the free-mode voice picker, if installed.
         let choice = CaldwellConfig.shared.nativeVoiceChoice
         if !choice.isEmpty, let picked = has(choice) { return picked }
         return has("Daniel (Enhanced)") ?? has("Daniel") ?? "Daniel"
     }
 
-    /// All `say`-usable installed voices, for the free-mode voice picker. Cached.
-    /// (Apple's true Siri voices are reserved by the system and never appear
-    /// here — they can't be driven by `say` or AVSpeechSynthesizer.)
-    static func availableVoices() -> [String] { names() }
-
-    /// Is the neural Enhanced Daniel installed? Drives the `/health` probe and
-    /// the Settings install-status nudge. Reads cache only.
     static func enhancedInstalled() -> Bool {
         names().contains { $0.caseInsensitiveCompare("Daniel (Enhanced)") == .orderedSame }
     }
 
-    /// `say -v ?` → the usable voice names (column before the locale). Blocking.
-    private static func computeVoiceNames() -> [String] {
+    // MARK: - Private
+
+    /// `say -v ?` → (name, locale) pairs. Blocking.
+    private static func computeVoices() -> [(name: String, locale: String)] {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/say")
         proc.arguments = ["-v", "?"]
@@ -80,20 +93,41 @@ enum NativeVoiceClient {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         proc.waitUntilExit()
         guard let out = String(data: data, encoding: .utf8) else { return [] }
-        var result: [String] = []
+        // Each line: "<name>   <lang>_<REGION>   # sample". The locale token is
+        // the anchor; the name is everything before it.
+        let re = try? NSRegularExpression(pattern: "\\b([a-z]{2,3})[-_]([A-Z]{2})\\b")
+        var result: [(String, String)] = []
         for line in out.split(separator: "\n") {
             let s = String(line)
-            if let r = s.range(of: "  ") {
-                let name = String(s[s.startIndex..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty { result.append(name) }
-            }
+            let ns = s as NSString
+            guard let re,
+                  let m = re.firstMatch(in: s, range: NSRange(location: 0, length: ns.length))
+            else { continue }
+            let locale = ns.substring(with: m.range)
+            let name = ns.substring(to: m.range.location).trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { result.append((name, locale)) }
         }
         return result
     }
 
+    /// "Daniel (English, UK)" from a name + "en_GB".
+    private static func label(name: String, locale: String) -> String {
+        let parts = locale.replacingOccurrences(of: "-", with: "_").split(separator: "_")
+        let langCode = parts.first.map(String.init) ?? ""
+        let regionCode = parts.count > 1 ? String(parts[1]) : ""
+        let lang = Locale.current.localizedString(forLanguageCode: langCode) ?? langCode
+        let region: String
+        switch regionCode {
+        case "GB": region = "UK"
+        case "US": region = "US"
+        default:   region = Locale.current.localizedString(forRegionCode: regionCode) ?? regionCode
+        }
+        if lang.isEmpty { return name }
+        if region.isEmpty { return "\(name) (\(lang))" }
+        return "\(name) (\(lang), \(region))"
+    }
+
     /// Synthesise `text` to a temp AIFF and return its URL. Caller owns the file.
-    /// Throws if `say` fails or produces no audio. Runs in a detached fetch task,
-    /// so the blocking wait never touches the handler path.
     static func synth(text: String, rate: Int = defaultRate) async throws -> URL {
         let voice = bestVoice()
         let out = URL(fileURLWithPath: NSTemporaryDirectory())

@@ -6,7 +6,7 @@
 
 [![Build Caldwell](https://github.com/justinwilliames/caldwell-speak/actions/workflows/package-dmg.yml/badge.svg)](https://github.com/justinwilliames/caldwell-speak/actions/workflows/package-dmg.yml)
 
-A macOS menu-bar app that gives Claude Code a voice. Alfred Pennyworth meets ElevenLabs — butler-formal RP, two registers (Polite or Potty Mouth), and a phrase cache that makes repeated lines free. Caldwell speaks at the end of every Claude Code turn so you know when it's done, without watching the screen.
+**Caldwell is a butler who lives in your terminal and tells you — out loud — the moment your code is done, so you stop babysitting the screen.** A macOS menu-bar companion for Claude Code: butler-formal RP with two registers (Polite or Potty Mouth). Out of the box he speaks with a free, fully-local Mac voice — no account, no API key, no per-word cost, and nothing leaving your machine. Add an [ElevenLabs](https://elevenlabs.io) key for a premium cloud voice, and Caldwell falls back to the local voice automatically when its credits run out.
 
 He has a set of signature lines — *"Pushed, Sir."*, *"All green, Sir."*, *"Sorted, Sir."* — **[Caldwell's canon](CANON.md)**, which play free at the end of a turn.
 

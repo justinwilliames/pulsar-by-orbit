@@ -1,3 +1,4 @@
+import AppKit
 import Sparkle
 import SwiftUI
 
@@ -15,18 +16,18 @@ struct SettingsView: View {
     @State private var statusKind: StatusKind = .info
     @State private var showingApiKey: Bool = false
     @State private var personaSaving: Bool = false
+    @State private var engineSaving: Bool = false
 
     enum StatusKind { case ok, error, info }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                apiKeySection
-                voiceIdSection
-                saveButton
-                statusBanner
-                Divider()
+                recoveryBanners
                 personaSection
+                Divider()
+                voiceSection
+                statusBanner
                 Divider()
                 usageSection
                 Divider()
@@ -103,6 +104,164 @@ struct SettingsView: View {
             statusMessage = "Mode change failed: \(error)"
             statusKind = .error
         }
+    }
+
+    // MARK: - Voice (source + message style + install nudge + credentials)
+
+    @ViewBuilder
+    private var voiceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("VOICE")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            // The engine choice is a COST/PRIVACY decision, never named or framed
+            // as quality — one Caldwell identity across both sources.
+            Picker("Voice source", selection: voiceEngineBinding) {
+                Text("Local & private (free)").tag("native")
+                Text("Premium (uses credits)").tag("elevenlabs")
+            }
+            .pickerStyle(.menu)
+            .disabled(engineSaving)
+
+            Text(voiceEngineHint)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if viewModel.settings?.enhancedInstalled == false {
+                installNudge
+            }
+
+            Toggle(isOn: canonEnabledBinding) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Quick cached pings")
+                        .font(.caption.weight(.medium))
+                    Text(canonHint)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 12) {
+                    apiKeySection
+                    voiceIdSection
+                    saveButton
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("PREMIUM VOICE CREDENTIALS")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.5)
+            }
+        }
+    }
+
+    private var voiceEngineBinding: Binding<String> {
+        Binding(
+            get: { viewModel.settings?.voiceEngine ?? "elevenlabs" },
+            set: { newValue in
+                Task { engineSaving = true; await viewModel.setVoiceEngine(newValue); engineSaving = false }
+            }
+        )
+    }
+
+    private var voiceEngineHint: String {
+        let native = viewModel.settings?.nativeVoice ?? "Daniel"
+        if viewModel.settings?.voiceEngine == "native" {
+            return "Speaks on your Mac (\(native)) — free, fully local, nothing leaves your machine."
+        }
+        return "Premium cloud voice — spends credits. Falls back to the free local voice automatically when credits run out."
+    }
+
+    private var canonEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.canonEnabled ?? true },
+            set: { newValue in Task { await viewModel.setCanonEnabled(newValue) } }
+        )
+    }
+
+    private var canonHint: String {
+        if viewModel.settings?.canonEnabled == false {
+            return "Off — bespoke only: richer, fewer lines (each costs credit on the premium voice)."
+        }
+        return "On — frequent short “Pushed, Sir.”-style pings at turn-end. Free."
+    }
+
+    @ViewBuilder
+    private var installNudge: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Tip: install Daniel (Enhanced) for a warmer local voice")
+                .font(.caption2.weight(.medium))
+            Text("System Settings → Accessibility → Spoken Content → System Voice → Manage Voices → English (UK). Until then Caldwell uses the basic Daniel.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open Spoken Content settings") { openSpokenContentSettings() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.blue.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func openSpokenContentSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    // MARK: - Recovery banners (every silent state gets a visible, actionable cue)
+
+    @ViewBuilder
+    private var recoveryBanners: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if viewModel.settings?.muted == true {
+                recoveryBanner(icon: "speaker.slash.fill",
+                               text: "Caldwell is muted — no voice will play.",
+                               actionLabel: "Unmute", tint: .secondary) {
+                    Task { await viewModel.toggleMute() }
+                }
+            }
+            if viewModel.settings?.voiceEngine != "native",
+               viewModel.usage?.elevenlabs?.status == .exhausted {
+                recoveryBanner(icon: "exclamationmark.triangle.fill",
+                               text: "Premium credits exhausted — switch to the free local voice to keep Caldwell talking.",
+                               actionLabel: "Switch to local", tint: .orange) {
+                    Task { await viewModel.setVoiceEngine("native") }
+                }
+            }
+            if viewModel.settings?.enhancedInstalled == false,
+               viewModel.settings?.voiceEngine == "native" {
+                recoveryBanner(icon: "arrow.down.circle",
+                               text: "Using basic Daniel — install Daniel (Enhanced) for a warmer voice.",
+                               actionLabel: "Install", tint: .blue) {
+                    openSpokenContentSettings()
+                }
+            }
+        }
+    }
+
+    private func recoveryBanner(icon: String, text: String, actionLabel: String,
+                                tint: Color, action: @escaping () -> Void) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(tint)
+            Text(text).font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+            Button(actionLabel, action: action)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(8)
+        .background(tint.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - API Key

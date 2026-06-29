@@ -294,9 +294,9 @@ final class DashboardViewModel {
         usage = try? await api.fetchUsage()
     }
 
-    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil) async -> SaveResult {
+    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil, voiceEngine: String? = nil, canonEnabled: Bool? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled, muted: muted)
+            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled, muted: muted, voiceEngine: voiceEngine, canonEnabled: canonEnabled)
             if let error = response.error {
                 return .failure(error)
             }
@@ -306,6 +306,19 @@ final class DashboardViewModel {
         } catch {
             return .failure("Network error: \(error.localizedDescription)")
         }
+    }
+
+    /// Voice source (engine): "native" (free, local, private) or "elevenlabs"
+    /// (premium cloud, uses credits). Framed cost/privacy in the UI, never as a
+    /// quality tier — one Caldwell identity across both.
+    func setVoiceEngine(_ engine: String) async {
+        _ = await saveSettings(apiKey: nil, voiceId: nil, voiceEngine: engine)
+    }
+
+    /// Message style: cached pings on (frequent, notification-style) vs off
+    /// (bespoke-only — richer, fewer, costs credit).
+    func setCanonEnabled(_ on: Bool) async {
+        _ = await saveSettings(apiKey: nil, voiceId: nil, canonEnabled: on)
     }
 
     /// Quick mute toggle for the popover header + menu-bar quick action.

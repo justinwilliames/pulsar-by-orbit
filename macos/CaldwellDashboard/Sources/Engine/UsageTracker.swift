@@ -5,59 +5,58 @@ import Foundation
 ///
 /// Why this exists: `/v1/user`'s `character_count` is eventually-consistent —
 /// after a confirmed TTS fetch it can sit unchanged for tens of seconds before
-/// catching up. Reproduced directly: a +43-char fetch left the remote counter
-/// flat at 287 for ~40s. Relaying that raw made `/usage` report stale numbers
-/// right after a fetch (the observed `characters_used:0` then later `287`).
+/// catching up. We know exactly how many characters every successful fetch cost
+/// (`text.count`, the single chokepoint being `ElevenLabsClient.fetchTTS`), so
+/// we keep a local floor and report `max(remote, baseline + sessionChars)`.
 ///
-/// We, however, know exactly how many characters every successful fetch cost
-/// (`text.count`, the single chokepoint being `ElevenLabsClient.fetchTTS`).
-/// So we keep a local floor and report `max(remote, baseline + sessionChars)`:
-///   • Right after a fetch the remote under-reports → the local floor wins →
-///     usage reflects spend immediately.
-///   • Once the remote catches up it meets/exceeds the floor → `max` tracks the
-///     remote again, which also captures spend from other clients on the key.
-///   • On a billing-period rollover (`next_reset_unix` advances) we re-baseline
-///     to the fresh remote and drop the prior period's session spend.
+/// Persistence (added per the team review — Han): the baseline/limit/reset and
+/// session spend are written to an Application Support sidecar and LOADED at
+/// init, so the adaptive spend gate is seeded the instant the process starts.
+/// Without this the gate's `snapshot()` returned nil on every cold launch and
+/// failed OPEN during the loud start-up ping burst — silent uncontrolled spend.
+/// A separate append-only ledger records every play decision (engine, chars,
+/// decision) so spend is auditable and the "free/local" claim is provable.
 ///
 /// Thread-safety: all state is guarded by an NSLock; methods are safe to call
 /// from any thread/actor.
 final class UsageTracker: @unchecked Sendable {
     static let shared = UsageTracker()
-    private init() {}
 
     private let lock = NSLock()
+    private let ledgerLock = NSLock()
 
-    /// Characters we've successfully fetched this process, within the current
-    /// billing period.
     private var sessionChars = 0
-    /// The `next_reset_unix` we've reconciled against. A change means the
-    /// billing period rolled over.
     private var seededReset: Int?
-    /// Remote `character_count` captured when we first observed this period —
-    /// i.e. spend that predates our local tracking. `nil` until first seed.
     private var baselineRemote: Int?
-    /// The monthly `character_limit` from the subscription. Captured so the
-    /// adaptive spend gate can read the budget in-memory without a network
-    /// round-trip on every /speak. `nil` until first observed.
     private var seededLimit: Int?
 
-    /// Record a successful fetch's character cost. Called once per fetch from
-    /// `ElevenLabsClient.fetchTTS`.
+    private static let supportDir: URL = {
+        let dir = (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory()))
+            .appendingPathComponent("caldwell-speak", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+    private let stateURL = supportDir.appendingPathComponent("usage-state.json")
+    private let ledgerURL = supportDir.appendingPathComponent("spend-ledger.jsonl")
+
+    private init() { load() }
+
+    // MARK: - Public
+
     func recordCharacters(_ count: Int) {
         guard count > 0 else { return }
-        lock.withLock { sessionChars += count }
+        lock.withLock { sessionChars += count; persistLocked() }
     }
 
-    /// Capture the monthly character limit from a subscription reading.
     func recordLimit(_ limit: Int) {
         guard limit > 0 else { return }
-        lock.withLock { seededLimit = limit }
+        lock.withLock { seededLimit = limit; persistLocked() }
     }
 
     /// In-memory budget snapshot for the adaptive bespoke-spend gate — no
-    /// network. `used` is the live local floor (baseline + this session's
-    /// spend). Returns nil until both a baseline and a limit have been seen,
-    /// in which case the gate fails open (don't gag the voice on missing data).
+    /// network. Now non-nil immediately after launch when a prior period was
+    /// persisted, so the gate no longer fails open on the cold-cache burst.
     func snapshot() -> (used: Int, limit: Int, reset: Int)? {
         lock.withLock {
             guard let reset = seededReset,
@@ -67,35 +66,87 @@ final class UsageTracker: @unchecked Sendable {
         }
     }
 
-    /// Seed the baseline from a remote reading taken before any fetch (e.g. at
-    /// startup), so `baseline + sessionChars` never double-counts. No-op once
-    /// seeded. Safe to call opportunistically.
     func seedIfNeeded(remoteUsed: Int, remoteReset: Int) {
         lock.withLock {
             guard seededReset == nil else { return }
             seededReset = remoteReset
             baselineRemote = remoteUsed
+            persistLocked()
         }
     }
 
-    /// Reconcile a fresh remote reading with local spend. Returns the figure to
-    /// report as `characters_used`.
     func reconcile(remoteUsed: Int, remoteReset: Int) -> Int {
         lock.withLock {
             if seededReset == nil {
-                // First observation this process. Adopt remote as the baseline
-                // but KEEP any session spend already recorded — during the
-                // upstream lag window the remote won't yet include it.
                 seededReset = remoteReset
                 baselineRemote = remoteUsed
             } else if seededReset != remoteReset {
-                // Billing period rolled over: re-baseline, drop prior spend.
                 seededReset = remoteReset
                 baselineRemote = remoteUsed
                 sessionChars = 0
             }
+            persistLocked()
             let floor = (baselineRemote ?? remoteUsed) + sessionChars
             return max(remoteUsed, floor)
         }
+    }
+
+    /// Append a play decision to the audit ledger (engine, char-cost, decision).
+    /// Best-effort, off the budget-lock-critical path. `chars` is the line's
+    /// length — only billed for the "bespoke" (ElevenLabs) decision.
+    func logSpend(engine: String, chars: Int, decision: String) {
+        let line: [String: Any] = [
+            "ts": Date().timeIntervalSince1970,
+            "engine": engine, "chars": chars, "decision": decision,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: line),
+              let s = String(data: data, encoding: .utf8) else { return }
+        let row = s + "\n"
+        ledgerLock.withLock {
+            if let fh = try? FileHandle(forWritingTo: ledgerURL) {
+                fh.seekToEndOfFile()
+                fh.write(Data(row.utf8))
+                try? fh.close()
+            } else {
+                try? row.write(to: ledgerURL, atomically: true, encoding: .utf8)
+            }
+            trimLedgerLocked()
+        }
+    }
+
+    // MARK: - Private
+
+    private func load() {
+        guard let data = try? Data(contentsOf: stateURL),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        lock.withLock {
+            sessionChars = (obj["sessionChars"] as? Int) ?? 0
+            seededReset = obj["seededReset"] as? Int
+            baselineRemote = obj["baselineRemote"] as? Int
+            seededLimit = obj["seededLimit"] as? Int
+        }
+    }
+
+    /// Caller MUST hold `lock`. Atomic write so a crash mid-save can't corrupt it.
+    private func persistLocked() {
+        var obj: [String: Any] = ["sessionChars": sessionChars]
+        if let r = seededReset { obj["seededReset"] = r }
+        if let b = baselineRemote { obj["baselineRemote"] = b }
+        if let l = seededLimit { obj["seededLimit"] = l }
+        if let data = try? JSONSerialization.data(withJSONObject: obj) {
+            try? data.write(to: stateURL, options: .atomic)
+        }
+    }
+
+    /// Caller MUST hold `ledgerLock`. Keep the ledger bounded — past ~2MB,
+    /// retain the last 4000 lines.
+    private func trimLedgerLocked() {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: ledgerURL.path),
+              let size = attrs[.size] as? Int, size > 2_000_000,
+              let content = try? String(contentsOf: ledgerURL, encoding: .utf8) else { return }
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: true)
+        guard lines.count > 4000 else { return }
+        let kept = lines.suffix(4000).joined(separator: "\n") + "\n"
+        try? kept.write(to: ledgerURL, atomically: true, encoding: .utf8)
     }
 }

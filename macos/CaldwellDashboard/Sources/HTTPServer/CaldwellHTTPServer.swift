@@ -866,6 +866,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
         guard let (text, sourceURL) = pickable.randomElement() else { return nil }
         Self.canonLock.withLock { Self.lastCanonText = text }
+        UsageTracker.shared.logSpend(engine: "elevenlabs", chars: 0, decision: "budget-canon")
 
         let entryId = Self.nextEntryId()
         guard let tmpURL = try? Self.copyCacheAudioToTemp(sourceURL: sourceURL, entryId: entryId) else { return nil }
@@ -1016,6 +1017,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                     await audioQueue.markFailed(id: idCopy)
                 }
             }
+            UsageTracker.shared.logSpend(engine: "native", chars: text.count, decision: "native")
             return try Self.json(SpeakResponse(
                 id: entryId, position: position, voice: "native",
                 text_preview: String(text.prefix(100)), dropped: nil, reason: "native"))
@@ -1135,6 +1137,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                         try? PhraseCache.shared.put(text: textCopy, voiceId: voiceIdCopy, sourceURL: url)
                     }
                     await audioQueue.markReady(id: entryIdCopy, url: url)
+                    UsageTracker.shared.logSpend(engine: "elevenlabs", chars: textCopy.count, decision: "bespoke")
                 } catch {
                     NSLog("[CaldwellHTTP] ElevenLabs fetch failed for \(entryIdCopy): \(error) — recovering via local voice")
                     // Recover with the free local voice (to a file, so it still
@@ -1143,6 +1146,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                     do {
                         let nurl = try await NativeVoiceClient.synth(text: textCopy)
                         await audioQueue.markReady(id: entryIdCopy, url: nurl)
+                        UsageTracker.shared.logSpend(engine: "native", chars: textCopy.count, decision: "native-fallback")
                     } catch {
                         NSLog("[CaldwellHTTP] local-voice recovery also failed for \(entryIdCopy): \(error)")
                         await audioQueue.markFailed(id: entryIdCopy)

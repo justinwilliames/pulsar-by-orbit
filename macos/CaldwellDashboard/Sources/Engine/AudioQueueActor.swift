@@ -90,8 +90,8 @@ struct AudioEntry: Sendable {
     let isReplay: Bool
     var audioURL: URL?
     var fetchFailed: Bool = false
-    /// Which engine produced/should produce the audio: "elevenlabs" or "native".
-    var engine: String = "elevenlabs"
+    /// Which engine produced the audio. Always "native" now — ElevenLabs removed.
+    var engine: String = "native"
 }
 
 struct HistoryItem: Sendable {

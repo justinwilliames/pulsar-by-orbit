@@ -104,7 +104,7 @@ struct PopoverRootView: View {
             .overlay(Capsule().strokeBorder(muted ? Color.red.opacity(0.4) : Color.green.opacity(0.4), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .help(muted ? "Caldwell is muted — click to unmute. No ElevenLabs calls while muted." : "Click to mute Caldwell — stops all ElevenLabs calls until unmuted.")
+        .help(muted ? "Caldwell is muted — click to unmute." : "Click to mute Caldwell.")
     }
 
     private var quitButton: some View {

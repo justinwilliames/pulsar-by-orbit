@@ -130,6 +130,18 @@ struct SettingsView: View {
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if viewModel.settings?.voiceEngine == "native",
+               let voices = viewModel.settings?.availableVoices, !voices.isEmpty {
+                Picker("Local voice", selection: nativeVoiceBinding) {
+                    ForEach(voices, id: \.self) { v in Text(v).tag(v) }
+                }
+                .pickerStyle(.menu)
+                Text("Pick any installed voice. Download more under System Settings → Accessibility → Spoken Content. (Apple reserves the Siri voices for the system — they can't be used here.)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if viewModel.settings?.enhancedInstalled == false {
                 installNudge
             }
@@ -169,6 +181,13 @@ struct SettingsView: View {
             set: { newValue in
                 Task { engineSaving = true; await viewModel.setVoiceEngine(newValue); engineSaving = false }
             }
+        )
+    }
+
+    private var nativeVoiceBinding: Binding<String> {
+        Binding(
+            get: { viewModel.settings?.nativeVoice ?? "Daniel" },
+            set: { newValue in Task { await viewModel.setNativeVoice(newValue) } }
         )
     }
 

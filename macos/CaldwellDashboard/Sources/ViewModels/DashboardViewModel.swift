@@ -294,9 +294,9 @@ final class DashboardViewModel {
         usage = try? await api.fetchUsage()
     }
 
-    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil, voiceEngine: String? = nil, canonEnabled: Bool? = nil) async -> SaveResult {
+    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil, voiceEngine: String? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled, muted: muted, voiceEngine: voiceEngine, canonEnabled: canonEnabled)
+            let response = try await api.saveSettings(apiKey: apiKey, voiceId: voiceId, expletivesEnabled: expletivesEnabled, muted: muted, voiceEngine: voiceEngine, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }
@@ -319,6 +319,12 @@ final class DashboardViewModel {
     /// (bespoke-only — richer, fewer, costs credit).
     func setCanonEnabled(_ on: Bool) async {
         _ = await saveSettings(apiKey: nil, voiceId: nil, canonEnabled: on)
+    }
+
+    /// Free-mode local voice choice. Empty resets to auto (Daniel Enhanced else
+    /// Daniel). Only installed voices are accepted by the daemon.
+    func setNativeVoice(_ name: String) async {
+        _ = await saveSettings(apiKey: nil, voiceId: nil, nativeVoice: name)
     }
 
     /// Quick mute toggle for the popover header + menu-bar quick action.

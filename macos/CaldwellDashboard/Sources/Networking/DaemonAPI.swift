@@ -92,7 +92,7 @@ struct DaemonAPI: Sendable {
         return try JSONDecoder().decode(DaemonUsage.self, from: data)
     }
 
-    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil, voiceEngine: String? = nil, canonEnabled: Bool? = nil) async throws -> SettingsSaveResponse {
+    func saveSettings(apiKey: String?, voiceId: String?, expletivesEnabled: Bool? = nil, muted: Bool? = nil, voiceEngine: String? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async throws -> SettingsSaveResponse {
         var body: [String: Any] = [:]
         if let apiKey { body["api_key"] = apiKey }
         if let voiceId { body["voice_id"] = voiceId }
@@ -100,6 +100,7 @@ struct DaemonAPI: Sendable {
         if let muted { body["muted"] = muted }
         if let voiceEngine { body["voice_engine"] = voiceEngine }
         if let canonEnabled { body["canon_enabled"] = canonEnabled }
+        if let nativeVoice { body["native_voice"] = nativeVoice }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("settings"))
         request.httpMethod = "POST"

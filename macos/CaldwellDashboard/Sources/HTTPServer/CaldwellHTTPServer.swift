@@ -565,7 +565,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 update.expletives_enabled != nil ||
                 update.api_key != nil ||
                 update.voice_engine != nil ||
-                update.canon_enabled != nil
+                update.canon_enabled != nil ||
+                update.native_voice != nil
         else {
             return try Self.json(ErrorResponse("No fields to update"), status: .badRequest)
         }
@@ -596,6 +597,15 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             }
             if let canon = update.canon_enabled {
                 try config.set("CALDWELL_CANON_ENABLED", value: canon ? "1" : "0")
+            }
+            if let nv = update.native_voice {
+                // Empty resets to auto; otherwise only accept an installed voice.
+                let trimmed = nv.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty || NativeVoiceClient.availableVoices().contains(where: {
+                    $0.caseInsensitiveCompare(trimmed) == .orderedSame
+                }) {
+                    try config.set("CALDWELL_NATIVE_VOICE", value: trimmed)
+                }
             }
         } catch {
             return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
@@ -1208,7 +1218,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             voice_engine: config.voiceEngine,
             native_voice: NativeVoiceClient.bestVoice(),
             enhanced_installed: NativeVoiceClient.enhancedInstalled(),
-            canon_enabled: config.canonEnabled
+            canon_enabled: config.canonEnabled,
+            available_voices: NativeVoiceClient.availableVoices()
         )
     }
 
@@ -1543,6 +1554,7 @@ private struct SettingsResponse: Encodable, Sendable {
     let native_voice: String
     let enhanced_installed: Bool
     let canon_enabled: Bool
+    let available_voices: [String]
 }
 
 private struct SettingsUpdateRequest: Decodable, Sendable {
@@ -1552,6 +1564,7 @@ private struct SettingsUpdateRequest: Decodable, Sendable {
     let api_key: String?
     let voice_engine: String?
     let canon_enabled: Bool?
+    let native_voice: String?
 }
 
 private struct UsageResponse: Encodable, Sendable {

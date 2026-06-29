@@ -135,6 +135,14 @@ final class CaldwellConfig: @unchecked Sendable {
         return val == "native" ? "native" : "elevenlabs"
     }
 
+    /// The user's chosen local (free-mode) voice. Empty = auto (Daniel Enhanced
+    /// when installed, else basic Daniel). Set via the Settings voice picker.
+    var nativeVoiceChoice: String {
+        (lock.withLock { _config["CALDWELL_NATIVE_VOICE"] }
+            ?? ProcessInfo.processInfo.environment["CALDWELL_NATIVE_VOICE"]
+            ?? "").trimmingCharacters(in: .whitespaces)
+    }
+
     /// Whether cached "canon" pings are allowed — the free notification-style
     /// turn-end lines plus the budget-saver downgrade. Off = bespoke-only: only
     /// the model's composed lines speak (richer, fewer, and they cost credit).

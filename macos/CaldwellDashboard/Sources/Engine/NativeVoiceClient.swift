@@ -51,8 +51,16 @@ enum NativeVoiceClient {
         func has(_ wanted: String) -> String? {
             n.first { $0.caseInsensitiveCompare(wanted) == .orderedSame }
         }
+        // The user's explicit pick from the free-mode voice picker, if installed.
+        let choice = CaldwellConfig.shared.nativeVoiceChoice
+        if !choice.isEmpty, let picked = has(choice) { return picked }
         return has("Daniel (Enhanced)") ?? has("Daniel") ?? "Daniel"
     }
+
+    /// All `say`-usable installed voices, for the free-mode voice picker. Cached.
+    /// (Apple's true Siri voices are reserved by the system and never appear
+    /// here — they can't be driven by `say` or AVSpeechSynthesizer.)
+    static func availableVoices() -> [String] { names() }
 
     /// Is the neural Enhanced Daniel installed? Drives the `/health` probe and
     /// the Settings install-status nudge. Reads cache only.

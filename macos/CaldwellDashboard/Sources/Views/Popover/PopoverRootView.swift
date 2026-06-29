@@ -1,6 +1,9 @@
 import AppKit
+import os
 import Sparkle
 import SwiftUI
+
+private let logger = Logger(subsystem: "team.yourorbit.Pulsar", category: "PopoverRootView")
 
 enum DashboardTab: String, CaseIterable {
     case history = "History"
@@ -57,16 +60,24 @@ struct PopoverRootView: View {
             header
             tabPicker
             tabContent
+            orbitFooter
         }
-        .frame(width: 360, height: 520)
+        .frame(width: 360, height: 540)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Text("Pulsar")
-                .font(.headline)
+        HStack(alignment: .center, spacing: 10) {
+            // Small Orbit-indigo squircle hosting the white waveform.path glyph —
+            // mirrors how Comet renders CometMark, gives the popover a clear
+            // brand anchor before the title.
+            PulsarMark(size: 34)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pulsar")
+                    .font(.title3.weight(.semibold))
+            }
 
             Spacer()
 
@@ -85,6 +96,52 @@ struct PopoverRootView: View {
             // unconditionally is what lets a stale toggle self-correct.
             await viewModel.loadSettings()
         }
+    }
+
+    // "by Orbit AI · yourorbit.team" — the Orbit company mark + link, marking
+    // Pulsar as an Orbit product. Mirrors Comet's orbitFooter placement.
+    private var orbitFooter: some View {
+        HStack(spacing: 5) {
+            Group {
+                if let nsImage = NSImage(named: "OrbitLogo") {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                } else {
+                    Image(systemName: "circle.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(Color.orbit)
+                }
+            }
+            .frame(width: 12, height: 12)
+            .foregroundStyle(.secondary)
+            Text("by Orbit AI")
+                .foregroundStyle(.secondary)
+            Text("·")
+                .foregroundStyle(.tertiary)
+            Link("yourorbit.team", destination: URL(string: "https://yourorbit.team")!)
+            Spacer()
+            Button("About") {
+                openAbout()
+            }
+            .buttonStyle(.plain)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .font(.caption2)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+    }
+
+    private func openAbout() {
+        guard let appDelegate = NSApp.delegate as? AppDelegate else {
+            logger.error("openAbout: could not cast NSApp.delegate to AppDelegate")
+            return
+        }
+        appDelegate.showAbout()
     }
 
     private var muteToggle: some View {
@@ -141,7 +198,7 @@ struct PopoverRootView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(isSelected ? .primary : .secondary)
-                .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
+                .background(isSelected ? Color.orbit.opacity(0.18) : Color.clear, in: Capsule())
                 .help(tab.rawValue)
             }
         }

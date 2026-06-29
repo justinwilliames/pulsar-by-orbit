@@ -32,6 +32,12 @@ let package = Package(
             path: "Sources",
             resources: [
                 .copy("Resources/AppIcon.icns"),
+                // OrbitLogo images — copied as plain PNGs to the resource bundle,
+                // then explicitly placed in Contents/Resources/ by build-caldwell-app.sh
+                // so Bundle.main can find them via NSImage(named:).
+                .copy("Resources/OrbitLogo.png"),
+                .copy("Resources/OrbitLogo@2x.png"),
+                .copy("Resources/OrbitLogo@3x.png"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

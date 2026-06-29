@@ -62,6 +62,21 @@ if [ -d "$REPO_ROOT/assets/portraits" ]; then
   cp -R "$REPO_ROOT/assets/portraits" "$APP_BUNDLE/Contents/Resources/assets/portraits"
 fi
 
+# OrbitLogo PNGs — copied by SPM into the build's resource bundle; extract
+# them into Contents/Resources/ so Bundle.main can find them via NSImage(named:).
+RESOURCE_BUNDLE="$(find "$APP_DIR/.build" -name "CaldwellDashboard_CaldwellDashboard.bundle" -path "*/release/*" 2>/dev/null | head -1)"
+if [ -n "$RESOURCE_BUNDLE" ] && [ -d "$RESOURCE_BUNDLE" ]; then
+  for f in OrbitLogo.png "OrbitLogo@2x.png" "OrbitLogo@3x.png"; do
+    src="$RESOURCE_BUNDLE/$f"
+    if [ -f "$src" ]; then
+      cp "$src" "$APP_BUNDLE/Contents/Resources/$f"
+    fi
+  done
+  echo "Copied OrbitLogo PNGs to Contents/Resources."
+else
+  echo "Warning: SPM resource bundle not found — OrbitLogo may not render." >&2
+fi
+
 # Embed Sparkle.framework. The binary loads @rpath/Sparkle.framework/... and
 # carries an @executable_path/../Frameworks rpath (set in Package.swift), so
 # the framework must live at Contents/Frameworks. The 0.2.0 attempt linked
@@ -97,3 +112,4 @@ echo ""
 echo "Built: $APP_BUNDLE"
 echo "To install:  $SCRIPT_DIR/install-caldwell-app.sh"
 echo "To run now:  open '$APP_BUNDLE'"
+echo "Build complete!"

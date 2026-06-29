@@ -28,7 +28,7 @@
 		<true/>
 	</dict>
 	<key>NSHumanReadableCopyright</key>
-	<string>MIT — forked from tomc98/speak</string>
+	<string>© 2026 Justin Williames. Forked from speak (MIT).</string>
 	<key>SUFeedURL</key>
 	<string>https://github.com/justinwilliames/pulsar-by-orbit/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>

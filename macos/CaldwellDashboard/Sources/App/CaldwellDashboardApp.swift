@@ -11,15 +11,14 @@ struct CaldwellDashboardApp: App {
                 updater: appDelegate.updaterController.updater
             )
         } label: {
-            // Glyph reflects mute state so Sir can see at a glance from the
-            // menubar without opening the popover. Always the Caldwell bust
-            // so he stays recognisable — FILLED when active, OUTLINE when
-            // muted. (Previously muted swapped to speaker.slash.fill, which
-            // camouflaged him among the system audio icons and read as
-            // "gone" — the user couldn't find him to unmute.)
+            // Pulsar's waveform mark, reflecting mute state at a glance from the
+            // menubar without opening the popover — FILLED when active, OUTLINE
+            // when muted. Deliberately NOT a "slash" variant: that camouflages
+            // among the system audio icons and reads as "gone", leaving the user
+            // unable to find it to unmute.
             Image(systemName: appDelegate.viewModel.isMuted
-                ? "person.bust"
-                : "person.bust.fill")
+                ? "waveform.circle"
+                : "waveform.circle.fill")
         }
         .menuBarExtraStyle(.window)
     }

@@ -8,6 +8,8 @@
 
 A macOS menu-bar app that gives Claude Code a voice. Alfred Pennyworth meets ElevenLabs — butler-formal RP, two registers (Polite or Potty Mouth), and a phrase cache that makes repeated lines free. Caldwell speaks at the end of every Claude Code turn so you know when it's done, without watching the screen.
 
+He has a set of signature lines — *"Pushed, Sir."*, *"All green, Sir."*, *"Sorted, Sir."* — **[Caldwell's canon](CANON.md)**, which play free at the end of a turn.
+
 A fork of [tomc98/speak](https://github.com/tomc98/speak) by Thomas Csere.
 
 **[→ Download the latest release](https://github.com/justinwilliames/caldwell-speak/releases/latest)**

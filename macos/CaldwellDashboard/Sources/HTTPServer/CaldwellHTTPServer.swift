@@ -867,6 +867,68 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         ))
     }
 
+    /// Polite-mode swear scrub. Replaces Caldwell's known expletive vocabulary
+    /// with clean RP equivalents so Polite differs from Potty Mouth ONLY in
+    /// swearing — same wit, same cadence, no profanity. Word-boundary aware
+    /// (handles apostrophe forms like "fuckin'"), preserves first-letter case,
+    /// and tidies the whitespace a dropped intensifier leaves behind. Bespoke
+    /// /speak text is otherwise unfiltered, so this is the single guard that
+    /// makes the Polite toggle authoritative regardless of what the caller sends.
+    nonisolated static func politeScrub(_ input: String) -> String {
+        let rules: [(String, String)] = [
+            ("motherfuck\\w*", "blighter"),
+            ("fuck(?:ing|in['’]?)", ""),
+            ("fucked", "knackered"),
+            ("fuck\\w*", "blast"),
+            ("dogshit", "dreadful"),
+            ("bullshit", "nonsense"),
+            ("shitshow", "shambles"),
+            ("shitty", "dreadful"),
+            ("shites?", "rubbish"),
+            ("shit\\w*", "rubbish"),
+            ("bastards", "blighters"),
+            ("bastard", "blighter"),
+            ("bollocks", "nonsense"),
+            ("bloody", ""),
+            ("buggered", "knackered"),
+            ("buggers", "blighters"),
+            ("bugger", "blighter"),
+            ("arseholes?", "blighter"),
+            ("arse", "backside"),
+            ("pissed", "livid"),
+            ("piss\\w*", "fuss"),
+            ("crap\\w*", "rubbish"),
+            ("goddamn\\w*", "blasted"),
+            ("damn(?:ed|it)?", "blasted"),
+            ("twats?", "fool"),
+            ("wankers?", "fool"),
+            ("tossers?", "fool"),
+        ]
+        var s = input
+        for (core, replacement) in rules {
+            let pattern = "(?i)(?<![\\p{L}'])(?:\(core))(?![\\p{L}])"
+            guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
+            let ns = s as NSString
+            let matches = re.matches(in: s, range: NSRange(location: 0, length: ns.length))
+            if matches.isEmpty { continue }
+            for m in matches.reversed() {
+                let matched = ns.substring(with: m.range)
+                var rep = replacement
+                if let first = matched.first, first.isUppercase, !rep.isEmpty {
+                    rep = rep.prefix(1).uppercased() + rep.dropFirst()
+                }
+                s = (s as NSString).replacingCharacters(in: m.range, with: rep)
+            }
+        }
+        s = s.replacingOccurrences(of: "[ \\t]{2,}", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\\s+([,.;:!?])", with: "$1", options: .regularExpression)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let first = s.first, first.isLowercase {
+            s = s.prefix(1).uppercased() + s.dropFirst()
+        }
+        return s
+    }
+
     // MARK: - /speak handler
 
     nonisolated private static func handleSpeak(
@@ -883,7 +945,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
 
         // Validate text
-        guard let text = body["text"] as? String, !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+        guard var text = body["text"] as? String, !text.trimmingCharacters(in: .whitespaces).isEmpty else {
             return try Self.json(ErrorResponse("No text provided"), status: .badRequest)
         }
         let maxLen = 5000
@@ -895,6 +957,13 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let cfg = CaldwellConfig.shared
         if cfg.isMuted {
             return try Self.json(MutedResponse(muted: true, text_preview: String(text.prefix(100))))
+        }
+
+        // Polite mode: launder Caldwell's swear vocabulary before the line is
+        // cached or spoken, so the toggle is authoritative — the persona differs
+        // from Potty Mouth ONLY in swearing, never depends on the caller behaving.
+        if !cfg.expletivesEnabled {
+            text = Self.politeScrub(text)
         }
 
         let voiceRaw = body["voice"] as? String

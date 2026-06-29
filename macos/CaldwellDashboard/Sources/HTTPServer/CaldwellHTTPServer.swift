@@ -995,184 +995,37 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             text = Self.politeScrub(text)
         }
 
-        let voiceRaw = body["voice"] as? String
-        let cacheable  = body["cacheable"]  as? Bool ?? false
-        let cacheOnly  = body["cache_only"] as? Bool ?? false
-        let channel    = body["channel"]    as? String
-        let priority   = body["priority"]   as? Bool ?? false
+        let channel  = body["channel"]  as? String
+        let priority = body["priority"] as? Bool ?? false
 
-        // Native engine: synthesise locally via macOS `say` to a temp AIFF, so
-        // it plays through the same envelope/lip-sync path. No cache, no budget
-        // gate, no API key, no spend — Caldwell's free, local, private voice.
-        if cfg.voiceEngine == "native" {
-            let entryId = Self.nextEntryId()
-            let entry = AudioEntry(
-                id: entryId, text: String(text.prefix(100)), voiceId: "native",
-                voiceLabel: "Caldwell", createdAt: Date(), channel: channel,
-                priority: priority, fullText: text, isReplay: false,
-                audioURL: nil, engine: "native")
-            guard let position = await audioQueue.enqueue(entry) else {
-                return try Self.json(SpeakResponse(
-                    id: entryId, position: nil, voice: "native",
-                    text_preview: String(text.prefix(100)), dropped: true, reason: "busy"))
-            }
-            let idCopy = entryId
-            let textCopy = text
-            Task.detached {
-                do {
-                    let url = try await NativeVoiceClient.synth(text: textCopy)
-                    await audioQueue.markReady(id: idCopy, url: url)
-                } catch {
-                    NSLog("[CaldwellHTTP] native synth failed for \(idCopy): \(error)")
-                    await audioQueue.markFailed(id: idCopy)
-                }
-            }
-            UsageTracker.shared.logSpend(engine: "native", chars: text.count, decision: "native")
-            return try Self.json(SpeakResponse(
-                id: entryId, position: position, voice: "native",
-                text_preview: String(text.prefix(100)), dropped: nil, reason: "native"))
-        }
-
-        // Resolve voice ID — needed for cache key.
-        let voiceId = voiceRaw ?? cfg.voiceId
-
-        // Phrase cache check.
-        // Cached phrases play from disk — no API key, no quota, no ElevenLabs call.
-        // This runs BEFORE credential validation so cached lines always succeed.
-        let cachedURL = voiceId.isEmpty ? nil : PhraseCache.shared.get(text: text, voiceId: voiceId)
-
-        // cache_only + hit → return immediately, nothing enqueued
-        if cacheOnly, cachedURL != nil {
-            let key = PhraseCache.shared.key(text: text, voiceId: voiceId)
-            return try Self.json(CacheOnlyResponse(cached: true, fresh: false, key: key, char_count: text.count))
-        }
-
-        // cache_only + miss → fetch, cache, return (no playback)
-        if cacheOnly {
-            guard !cfg.apiKey.isEmpty else {
-                return try Self.json(ErrorResponse("ELEVENLABS_API_KEY not set"), status: .internalServerError)
-            }
-            guard !voiceId.isEmpty else {
-                return try Self.json(ErrorResponse("No voice specified and ELEVENLABS_VOICE_ID not set"), status: .badRequest)
-            }
-            do {
-                let tmp = try await ElevenLabsClient.fetchTTS(text: text, voiceId: voiceId, apiKey: cfg.apiKey)
-                try PhraseCache.shared.put(text: text, voiceId: voiceId, sourceURL: tmp)
-                try? FileManager.default.removeItem(at: tmp)
-                let key = PhraseCache.shared.key(text: text, voiceId: voiceId)
-                return try Self.json(CacheOnlyResponse(cached: true, fresh: true, key: key, char_count: text.count))
-            } catch {
-                return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
-            }
-        }
-
-        // Adaptive budget gate: a genuine fresh spend (cache miss). If we're
-        // burning monthly credit faster than the billing cycle allows,
-        // downgrade to a free cached canon line instead — so bespoke volume
-        // tracks remaining credit and always lasts to the reset. Cacheable
-        // lines are exempt (a reusable line is worth its one-time spend);
-        // cache hits and cache_only warms never reach here.
-        if cachedURL == nil, !cacheable, !Self.shouldSpeakBespoke() {
-            if let resp = try await Self.playCanonFallback(audioQueue: audioQueue, cfg: cfg) {
-                return resp
-            }
-            // No canon cached to fall back to → proceed with the bespoke spend.
-        }
-
-        // Normal flow — validate credentials only on a cache miss
-        if cachedURL == nil {
-            guard !cfg.apiKey.isEmpty else {
-                return try Self.json(ErrorResponse("ELEVENLABS_API_KEY not set"), status: .internalServerError)
-            }
-            guard !voiceId.isEmpty else {
-                return try Self.json(ErrorResponse("No voice specified and ELEVENLABS_VOICE_ID not set"), status: .badRequest)
-            }
-        }
-
-        // Build the entry and enqueue.
+        // macOS local voice — synthesise via `say` to a temp AIFF so it plays
+        // through the same envelope/lip-sync path. No network, no API key, no
+        // spend. (ElevenLabs removed.)
         let entryId = Self.nextEntryId()
-        var entry = AudioEntry(
-            id: entryId,
-            text: String(text.prefix(100)),
-            voiceId: voiceId,
-            voiceLabel: "Caldwell",
-            createdAt: Date(),
-            channel: channel,
-            priority: priority,
-            fullText: text,
-            isReplay: false,
-            audioURL: cachedURL   // non-nil = cache hit, nil = fetch pending
-        )
-
-        // Cache hit: copy to temp so the queue worker can delete without
-        // nuking the phrase-cache file (mirrors Python daemon behaviour).
-        if let cached = cachedURL {
-            if let tmp = try? Self.copyCacheAudioToTemp(sourceURL: cached, entryId: entryId) {
-                entry.audioURL = tmp
-            }
-        }
-
-        let position = await audioQueue.enqueue(entry)
-
-        // Queue full → drop without firing the ElevenLabs fetch. Critical:
-        // skipping the fetch is what stops dropped lines from burning quota.
-        if position == nil {
+        let entry = AudioEntry(
+            id: entryId, text: String(text.prefix(100)), voiceId: "native",
+            voiceLabel: "Caldwell", createdAt: Date(), channel: channel,
+            priority: priority, fullText: text, isReplay: false,
+            audioURL: nil, engine: "native")
+        guard let position = await audioQueue.enqueue(entry) else {
             return try Self.json(SpeakResponse(
-                id: entryId,
-                position: nil,
-                voice: voiceId,
-                text_preview: String(text.prefix(100)),
-                dropped: true,
-                reason: "busy"
-            ))
+                id: entryId, position: nil, voice: "native",
+                text_preview: String(text.prefix(100)), dropped: true, reason: "busy"))
         }
-
-        // Cache miss: fetch in background, signal the worker when ready.
-        if cachedURL == nil {
-            let entryIdCopy = String(entryId)
-            let textCopy = text
-            let voiceIdCopy = voiceId
-            let apiKey = cfg.apiKey
-            // Cache eligibility: caller asked for it AND the text is short
-            // enough to plausibly recur. Anything longer is almost certainly
-            // session-specific (file paths, findings, one-shot prose) and
-            // will never replay — caching it just bloats the LRU.
-            let cacheEligible = cacheable && isCacheEligible(text: textCopy)
-            Task.detached {
-                do {
-                    let url = try await ElevenLabsClient.fetchTTS(
-                        text: textCopy, voiceId: voiceIdCopy, apiKey: apiKey
-                    )
-                    if cacheEligible {
-                        try? PhraseCache.shared.put(text: textCopy, voiceId: voiceIdCopy, sourceURL: url)
-                    }
-                    await audioQueue.markReady(id: entryIdCopy, url: url)
-                    UsageTracker.shared.logSpend(engine: "elevenlabs", chars: textCopy.count, decision: "bespoke")
-                } catch {
-                    NSLog("[CaldwellHTTP] ElevenLabs fetch failed for \(entryIdCopy): \(error) — recovering via local voice")
-                    // Recover with the free local voice (to a file, so it still
-                    // lip-syncs) rather than going silent. Only truly fail if even
-                    // local synthesis dies.
-                    do {
-                        let nurl = try await NativeVoiceClient.synth(text: textCopy)
-                        await audioQueue.markReady(id: entryIdCopy, url: nurl)
-                        UsageTracker.shared.logSpend(engine: "native", chars: textCopy.count, decision: "native-fallback")
-                    } catch {
-                        NSLog("[CaldwellHTTP] local-voice recovery also failed for \(entryIdCopy): \(error)")
-                        await audioQueue.markFailed(id: entryIdCopy)
-                    }
-                }
+        let idCopy = entryId
+        let textCopy = text
+        Task.detached {
+            do {
+                let url = try await NativeVoiceClient.synth(text: textCopy)
+                await audioQueue.markReady(id: idCopy, url: url)
+            } catch {
+                NSLog("[CaldwellHTTP] native synth failed for \(idCopy): \(error)")
+                await audioQueue.markFailed(id: idCopy)
             }
         }
-
         return try Self.json(SpeakResponse(
-            id: entryId,
-            position: position,
-            voice: voiceId,
-            text_preview: String(text.prefix(100)),
-            dropped: nil,
-            reason: nil
-        ))
+            id: entryId, position: position, voice: "native",
+            text_preview: String(text.prefix(100)), dropped: nil, reason: "native"))
     }
 
     // MARK: - JSON helper

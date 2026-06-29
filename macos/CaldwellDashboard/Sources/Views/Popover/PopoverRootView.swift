@@ -79,10 +79,11 @@ struct PopoverRootView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .task {
-            // Pull settings on first popover load so the mute state is accurate
-            if viewModel.settings == nil {
-                await viewModel.loadSettings()
-            }
+            // Refresh settings every time the popover opens so the mute state —
+            // and the toggle bound to it — always reflects the daemon's truth,
+            // never a value that drifted while the popover was closed. Loading
+            // unconditionally is what lets a stale toggle self-correct.
+            await viewModel.loadSettings()
         }
     }
 

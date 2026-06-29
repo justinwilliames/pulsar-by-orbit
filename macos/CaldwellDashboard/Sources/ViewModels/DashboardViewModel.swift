@@ -283,7 +283,11 @@ final class DashboardViewModel {
     }
 
     func loadSettings() async {
-        settings = try? await api.fetchSettings()
+        // Keep the last-known settings if a fetch momentarily fails, rather
+        // than blanking the UI — a transient daemon hiccup shouldn't wipe state.
+        if let fresh = try? await api.fetchSettings() {
+            settings = fresh
+        }
     }
 
     func loadUsage() async {

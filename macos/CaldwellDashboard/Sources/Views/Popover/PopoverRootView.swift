@@ -65,7 +65,7 @@ struct PopoverRootView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Caldwell")
+            Text("Pulsar")
                 .font(.headline)
 
             Spacer()
@@ -104,7 +104,7 @@ struct PopoverRootView: View {
             .overlay(Capsule().strokeBorder(muted ? Color.red.opacity(0.4) : Color.green.opacity(0.4), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .help(muted ? "Caldwell is muted — click to unmute." : "Click to mute Caldwell.")
+        .help(muted ? "Pulsar is muted — click to unmute." : "Click to mute Pulsar.")
     }
 
     private var quitButton: some View {
@@ -118,7 +118,7 @@ struct PopoverRootView: View {
                 .overlay(Circle().strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .help("Quit Caldwell")
+        .help("Quit Pulsar")
     }
 
     private var tabPicker: some View {

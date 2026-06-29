@@ -95,7 +95,7 @@ final class PhraseCache: @unchecked Sendable {
             "key": k,
             "text": text,
             "voice_id": voiceId,
-            "voice_label": "Caldwell",
+            "voice_label": "Pulsar",
             "created_at": now,
             "first_cached_at": now,
             "last_played_at": now,

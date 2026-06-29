@@ -17,7 +17,7 @@ struct HistoryPanelView: View {
                     Text("Nothing spoken yet")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text("Every line Caldwell speaks appears here.\nCached lines replay for free.")
+                    Text("Every line Pulsar speaks appears here.\nCached lines replay for free.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)

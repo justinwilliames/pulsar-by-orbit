@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# chime.sh — Caldwell's turn-end chime for Claude Code. Sound only, no voice.
+# chime.sh — Pulsar's turn-end chime for Claude Code. Sound only, no voice.
 #
-# DEFERS TO CALDWELL: if the daemon is up AND not muted, voice speaks this
+# DEFERS TO PULSAR: if the daemon is up AND not muted, voice speaks this
 # turn and IS the cue — the chime stays silent so the two never clash. The
 # chime only rings when voice won't: when muted, or the app is closed.
 # So you get exactly one turn-end cue, never both: unmuted -> voice;
@@ -17,7 +17,7 @@
 
 [ -f "$HOME/.claude/chime-off" ] && exit 0
 
-# Defer to Caldwell's voice. Daemon up AND not muted => he'll speak => no chime.
+# Defer to Pulsar's voice. Daemon up AND not muted => it'll speak => no chime.
 # Read .muted literally: only an explicit "false" (unmuted) defers. "true",
 # "null", or no daemon all fall through and ring. (Don't use `.muted // true` —
 # jq's // coalesces false to the fallback, which inverts the test.)

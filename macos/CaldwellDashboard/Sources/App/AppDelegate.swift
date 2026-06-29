@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        NSLog("[Caldwell] AppDelegate finished launching, floatingPanel=\(floatingPanel != nil), SSE connecting, httpServer on \(CaldwellHTTPServer.migrationPort)")
+        NSLog("[Pulsar] AppDelegate finished launching, floatingPanel=\(floatingPanel != nil), SSE connecting, httpServer on \(CaldwellHTTPServer.migrationPort)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -59,10 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateFloatingPanel(isActive: Bool) {
         guard let panel = floatingPanel else {
-            NSLog("[Caldwell] updateFloatingPanel called but panel is nil")
+            NSLog("[Pulsar] updateFloatingPanel called but panel is nil")
             return
         }
-        NSLog("[Caldwell] updateFloatingPanel isActive=\(isActive) wasVisible=\(panel.isVisible)")
+        NSLog("[Pulsar] updateFloatingPanel isActive=\(isActive) wasVisible=\(panel.isVisible)")
         if isActive {
             hideWorkItem?.cancel()
             hideWorkItem = nil
@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // rules for non-activating panels — orderFront alone can be
                 // ignored when the app has LSUIElement=true and no key window.
                 panel.orderFrontRegardless()
-                NSLog("[Caldwell] Panel ordered front at \(panel.frame)")
+                NSLog("[Pulsar] Panel ordered front at \(panel.frame)")
                 scheduleMaxVisible()
             }
         } else {
@@ -112,6 +112,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floatingPanel?.orderOut(nil)
         viewModel.playback.currentVoice = nil
         viewModel.playback.currentText = nil
-        NSLog("[Caldwell] Panel hidden (\(reason))")
+        NSLog("[Pulsar] Panel hidden (\(reason))")
     }
 }

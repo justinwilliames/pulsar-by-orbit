@@ -99,7 +99,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Tip: install Daniel (Enhanced) for a warmer local voice")
                 .font(.caption2.weight(.medium))
-            Text("System Settings → Accessibility → Spoken Content → System Voice → Manage Voices → English (UK). Until then Caldwell uses the basic Daniel.")
+            Text("System Settings → Accessibility → Spoken Content → System Voice → Manage Voices → English (UK). Until then Pulsar uses the basic Daniel.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -126,7 +126,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             if viewModel.settings?.muted == true {
                 recoveryBanner(icon: "speaker.slash.fill",
-                               text: "Caldwell is muted — no voice will play.",
+                               text: "Pulsar is muted — no voice will play.",
                                actionLabel: "Unmute", tint: .secondary) {
                     Task { await viewModel.toggleMute() }
                 }

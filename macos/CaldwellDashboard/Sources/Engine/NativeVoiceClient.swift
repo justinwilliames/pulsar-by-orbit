@@ -142,7 +142,7 @@ enum NativeVoiceClient {
     static func synth(text: String, rate: Int = defaultRate) async throws -> URL {
         let voice = bestVoice()
         let out = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("caldwell-native-\(UUID().uuidString).aiff")
+            .appendingPathComponent("pulsar-native-\(UUID().uuidString).aiff")
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/say")
         proc.arguments = ["-v", voice, "-r", String(rate), "-o", out.path, text]

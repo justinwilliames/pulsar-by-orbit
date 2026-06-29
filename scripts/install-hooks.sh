@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# install-hooks.sh — wire Caldwell's Claude Code hooks into the user's
+# install-hooks.sh — wire Pulsar's Claude Code hooks into the user's
 # ~/.claude/settings.json. Idempotent and non-destructive: it only ADDS the
-# two Caldwell hooks if absent and leaves every other hook untouched.
+# two Pulsar hooks if absent and leaves every other hook untouched.
 #
 #   • Stop            → stop-hook.sh           (cached-canon voice fallback)
 #   • Stop            → chime.sh               (free turn-end sound, no voice)
 #   • SessionStart    → session-start-voice.sh (bespoke turn-end voice directive)
 #   • UserPromptSubmit→ turn-start.sh          (stamps turn start for chime.sh)
-#   • statusLine      → statusline.sh          (Caldwell's persona-aware bar)
+#   • statusLine      → statusline.sh          (Pulsar's persona-aware bar)
 #
-# Together these make Caldwell speak model-side (the model composes a fresh
+# Together these make Pulsar speak model-side (the model composes a fresh
 # line each turn — no API key, it rides the user's own Claude Code session,
-# with cached canon as the floor) AND give the session a Caldwell-themed
+# with cached canon as the floor) AND give the session a Pulsar-themed
 # status line plus a free sound chime when a turn ends. Run once after
 # installing the app. Idempotent — safe to re-run.
 
@@ -102,6 +102,6 @@ PY
 
 echo
 echo "Done. Start a NEW Claude Code session (or open /hooks once) so the new"
-echo "hooks and status line load. Caldwell will compose a bespoke line each turn"
-echo "while the app is running, ring a chime when a turn ends, and fly his own"
+echo "hooks and status line load. Pulsar will compose a bespoke line each turn"
+echo "while the app is running, ring a chime when a turn ends, and fly its own"
 echo "status line up top."

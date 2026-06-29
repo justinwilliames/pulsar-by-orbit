@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Caldwell</string>
+	<string>Pulsar</string>
 	<key>CFBundleExecutable</key>
 	<string>CaldwellDashboard</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>team.yourorbit.CaldwellDashboard</string>
+	<string>team.yourorbit.Pulsar</string>
 	<key>CFBundleName</key>
-	<string>Caldwell</string>
+	<string>Pulsar</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -30,7 +30,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>MIT — forked from tomc98/speak</string>
 	<key>SUFeedURL</key>
-	<string>https://github.com/justinwilliames/caldwell-speak/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/justinwilliames/pulsar-by-orbit/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>4HZt8Wm9W7FCkufc4a8CneXFmCd9v3UM3dIa6ob2xXE=</string>
 </dict>

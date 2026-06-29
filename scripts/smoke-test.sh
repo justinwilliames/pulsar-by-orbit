@@ -8,7 +8,7 @@
 #      /v1/user counter lags by tens of seconds; the local counter + max()
 #      reconciliation should surface a fresh fetch's characters within seconds.
 #
-# Requires the Caldwell app running on 127.0.0.1:7865 with a valid API key.
+# Requires the Pulsar app running on 127.0.0.1:7865 with a valid API key.
 # Speaks two short lines aloud — that's expected for a TTS app's smoke test.
 #
 # Exit 0 = all pass; non-zero = a regression.
@@ -25,7 +25,7 @@ fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAILS=$((FAILS+1)); }
 json() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('$1',''))" 2>/dev/null; }
 
 if ! curl -sf --max-time 2 "$D/health" >/dev/null 2>&1; then
-  echo "Caldwell daemon not reachable at $D — start the app first." >&2
+  echo "Pulsar daemon not reachable at $D — start the app first." >&2
   exit 2
 fi
 

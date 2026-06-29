@@ -4,26 +4,26 @@
 Glass APIs and Swift 6.1+, both bundled with macOS 26 — no separate runtime to
 install.
 
-Caldwell is a SwiftUI menu-bar app. It serves the HTTP API on
+Pulsar is a SwiftUI menu-bar app. It serves the HTTP API on
 `127.0.0.1:7865` — it **is** the daemon. There is no Python process.
 
 ## Install
 
 ### Option A — signed release (recommended)
 
-1. Download the latest `Caldwell-*.dmg` from
-   [GitHub releases](https://github.com/justinwilliames/caldwell-speak/releases).
-2. Mount it and drag `Caldwell.app` into `/Applications`.
+1. Download the latest `Pulsar-*.dmg` from
+   [GitHub releases](https://github.com/justinwilliames/pulsar-by-orbit/releases).
+2. Mount it and drag `Pulsar.app` into `/Applications`.
 3. The build is ad-hoc signed (not notarised), so strip the quarantine flag or
    Gatekeeper will block it:
    ```bash
-   xattr -dr com.apple.quarantine /Applications/Caldwell.app
+   xattr -dr com.apple.quarantine /Applications/Pulsar.app
    ```
 
 ### Option B — build from source
 
 ```bash
-# Builds the Swift binary, assembles Caldwell.app, copies it to /Applications
+# Builds the Swift binary, assembles Pulsar.app, copies it to /Applications
 scripts/install-caldwell-app.sh
 ```
 
@@ -33,7 +33,7 @@ scripts/install-caldwell-app.sh
 scripts/install-caldwell-app-launchd.sh
 ```
 
-Registers the `team.yourorbit.CaldwellDashboard` LaunchAgent (RunAtLoad +
+Registers the `team.yourorbit.Pulsar` LaunchAgent (RunAtLoad +
 KeepAlive) and retires any legacy daemon agent.
 
 ## Configure the ElevenLabs API key
@@ -92,9 +92,9 @@ scripts/say.sh --unmute
 ## Troubleshooting
 
 ### Daemon not reachable on 7865
-The Caldwell app isn't running. Launch it and check the LaunchAgent:
+The Pulsar app isn't running. Launch it and check the LaunchAgent:
 ```bash
-open -a Caldwell
+open -a Pulsar
 launchctl list | grep CaldwellDashboard
 ```
 
@@ -109,7 +109,7 @@ curl -H "xi-api-key: sk_..." https://api.elevenlabs.io/v1/voices
 ### App won't launch / Gatekeeper blocks it
 The build is ad-hoc signed. Strip quarantine:
 ```bash
-xattr -dr com.apple.quarantine /Applications/Caldwell.app
+xattr -dr com.apple.quarantine /Applications/Pulsar.app
 ```
 
 ## Available Voices

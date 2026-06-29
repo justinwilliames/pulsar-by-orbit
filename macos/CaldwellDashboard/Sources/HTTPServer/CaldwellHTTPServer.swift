@@ -36,7 +36,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     func start() {
         guard serverTask == nil else {
-            NSLog("[CaldwellHTTP] start() called while already running — ignoring")
+            NSLog("[PulsarHTTP] start() called while already running — ignoring")
             return
         }
 
@@ -57,14 +57,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                     router: router,
                     configuration: .init(
                         address: .hostname("127.0.0.1", port: port),
-                        serverName: "caldwell-http"
+                        serverName: "pulsar-http"
                     )
                 )
 
-                NSLog("[CaldwellHTTP] starting on 127.0.0.1:\(port)")
+                NSLog("[PulsarHTTP] starting on 127.0.0.1:\(port)")
                 try await app.runService()
             } catch {
-                NSLog("[CaldwellHTTP] server crashed: \(error)")
+                NSLog("[PulsarHTTP] server crashed: \(error)")
             }
         }
     }
@@ -670,7 +670,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             id: entryId,
             text: String(text.prefix(100)),
             voiceId: "native",
-            voiceLabel: "Caldwell",
+            voiceLabel: "Pulsar",
             createdAt: Date(),
             channel: nil,
             priority: false,
@@ -691,7 +691,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 let url = try await NativeVoiceClient.synth(text: textCopy)
                 await audioQueue.markReady(id: idCopy, url: url)
             } catch {
-                NSLog("[CaldwellHTTP] canon native synth failed for \(idCopy): \(error)")
+                NSLog("[PulsarHTTP] canon native synth failed for \(idCopy): \(error)")
                 await audioQueue.markFailed(id: idCopy)
             }
         }
@@ -751,7 +751,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let entryId = Self.nextEntryId()
         let entry = AudioEntry(
             id: entryId, text: String(text.prefix(100)), voiceId: "native",
-            voiceLabel: "Caldwell", createdAt: Date(), channel: channel,
+            voiceLabel: "Pulsar", createdAt: Date(), channel: channel,
             priority: priority, fullText: text, isReplay: false,
             audioURL: nil, engine: "native")
         guard let position = await audioQueue.enqueue(entry) else {
@@ -766,7 +766,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 let url = try await NativeVoiceClient.synth(text: textCopy)
                 await audioQueue.markReady(id: idCopy, url: url)
             } catch {
-                NSLog("[CaldwellHTTP] native synth failed for \(idCopy): \(error)")
+                NSLog("[PulsarHTTP] native synth failed for \(idCopy): \(error)")
                 await audioQueue.markFailed(id: idCopy)
             }
         }
@@ -846,7 +846,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     nonisolated private static func copyCacheAudioToTemp(sourceURL: URL, entryId: String) throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("caldwell-tts-\(entryId)-\(UUID().uuidString).mp3")
+            .appendingPathComponent("pulsar-tts-\(entryId)-\(UUID().uuidString).mp3")
         try FileManager.default.copyItem(at: sourceURL, to: url)
         return url
     }

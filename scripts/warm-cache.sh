@@ -83,7 +83,7 @@ TOTAL=${#ALL_PHRASES[@]}
 # Daemon up?
 if ! curl -sf --connect-timeout 2 "$DAEMON/health" >/dev/null 2>&1; then
   echo "Error: daemon not reachable at $DAEMON" >&2
-  echo "Start the Caldwell app ('open -a Caldwell') or check the LaunchAgent, then re-run." >&2
+  echo "Start the Pulsar app ('open -a Pulsar') or check the LaunchAgent, then re-run." >&2
   exit 1
 fi
 

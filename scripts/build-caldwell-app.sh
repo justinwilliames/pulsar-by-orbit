@@ -1,6 +1,6 @@
 #!/bin/sh
 # build-caldwell-app.sh — compile the SwiftUI menu-bar app and assemble
-# a proper Caldwell.app bundle.
+# a proper Pulsar.app bundle.
 #
 # Requires macOS 26 (Tahoe) — the app uses Liquid Glass APIs that don't
 # exist on earlier macOS versions.
@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_DIR="$REPO_ROOT/macos/CaldwellDashboard"
 BUILD_DIR="$APP_DIR/build"
-APP_BUNDLE="$BUILD_DIR/Caldwell.app"
+APP_BUNDLE="$BUILD_DIR/Pulsar.app"
 
 # macOS version sanity check
 MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
@@ -45,7 +45,7 @@ if [ ! -f "$BINARY" ]; then
   exit 1
 fi
 
-echo "Assembling Caldwell.app..."
+echo "Assembling Pulsar.app..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/CaldwellDashboard"

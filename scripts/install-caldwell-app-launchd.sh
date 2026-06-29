@@ -1,15 +1,17 @@
 #!/bin/sh
-# install-caldwell-app-launchd.sh — register Caldwell.app with launchd so
+# install-caldwell-app-launchd.sh — register Pulsar.app with launchd so
 # it auto-starts at every login.
 
 set -e
 
-LABEL="team.yourorbit.CaldwellDashboard"
+LABEL="team.yourorbit.Pulsar"
 PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
+OLD_LABEL="team.yourorbit.CaldwellDashboard"
+OLD_PLIST_PATH="$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
 DAEMON_LABEL="team.yourorbit.caldwell-speak"
 DAEMON_PLIST_PATH="$HOME/Library/LaunchAgents/$DAEMON_LABEL.plist"
 GUI_DOMAIN="gui/$(id -u)"
-APP_PATH="/Applications/Caldwell.app"
+APP_PATH="/Applications/Pulsar.app"
 EXECUTABLE="$APP_PATH/Contents/MacOS/CaldwellDashboard"
 
 if [ ! -x "$EXECUTABLE" ]; then
@@ -19,6 +21,16 @@ if [ ! -x "$EXECUTABLE" ]; then
 fi
 
 mkdir -p "$HOME/Library/LaunchAgents"
+
+# Migrate away from the old CaldwellDashboard label so both labels are never
+# loaded simultaneously. bootout is the modern equivalent of unload.
+if launchctl list 2>/dev/null | grep -q "$OLD_LABEL"; then
+  echo "Unloading old label $OLD_LABEL..."
+  launchctl bootout "$GUI_DOMAIN/$OLD_LABEL" 2>/dev/null || launchctl unload "$OLD_PLIST_PATH" 2>/dev/null || true
+fi
+if [ -f "$OLD_PLIST_PATH" ]; then
+  rm -f "$OLD_PLIST_PATH"
+fi
 
 cat > "$PLIST_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -49,7 +61,7 @@ cat > "$PLIST_PATH" <<EOF
 EOF
 
 if pgrep -f "$EXECUTABLE" >/dev/null 2>&1; then
-  echo "Stopping existing Caldwell.app instance(s) so launchd can manage a single process..."
+  echo "Stopping existing Pulsar.app instance(s) so launchd can manage a single process..."
   pkill -f "$EXECUTABLE" 2>/dev/null || true
   sleep 1
 fi
@@ -65,7 +77,7 @@ launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 
 echo "Loaded $LABEL"
-echo "Caldwell.app will auto-launch at every login."
+echo "Pulsar.app will auto-launch at every login."
 echo ""
 echo "To stop and remove:"
 echo "  launchctl unload $PLIST_PATH"

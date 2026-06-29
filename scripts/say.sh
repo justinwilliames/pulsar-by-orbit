@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# say.sh — TTS via the Caldwell app's HTTP server on 127.0.0.1:7865.
+# say.sh — TTS via the Pulsar app's HTTP server on 127.0.0.1:7865.
 # No fallback: if the app (daemon) is down, say.sh stays silent. Voice fires
-# only when the Caldwell app is running.
+# only when the Pulsar app is running.
 
 set -euo pipefail
 

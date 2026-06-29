@@ -5,8 +5,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_BUNDLE="$REPO_ROOT/macos/CaldwellDashboard/build/Caldwell.app"
-TARGET="/Applications/Caldwell.app"
+APP_BUNDLE="$REPO_ROOT/macos/CaldwellDashboard/build/Pulsar.app"
+TARGET="/Applications/Pulsar.app"
 
 # Build first
 "$SCRIPT_DIR/build-caldwell-app.sh"
@@ -24,5 +24,5 @@ xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null || true
 echo ""
 echo "Installed: $TARGET"
 echo ""
-echo "To launch:    open -a Caldwell"
+echo "To launch:    open -a Pulsar"
 echo "Auto-launch:  $SCRIPT_DIR/install-caldwell-app-launchd.sh"

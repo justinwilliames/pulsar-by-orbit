@@ -1,12 +1,12 @@
-name: Build Caldwell
+name: Build Pulsar
 
-# Builds an unsigned Caldwell.app, wraps it in a .dmg, and (when
+# Builds an unsigned Pulsar.app, wraps it in a .dmg, and (when
 # triggered by a v*.*.* tag) attaches the .dmg + appcast.xml to a GitHub
 # Release. Modelled on the orion-by-orbit build workflow.
 #
 # No Apple Developer ID required for now. Output is unsigned — users see a
 # Gatekeeper prompt on first launch and bypass it once with
-# `xattr -dr com.apple.quarantine /Applications/Caldwell.app`
+# `xattr -dr com.apple.quarantine /Applications/Pulsar.app`
 # (documented in the README and in each release's body).
 
 on:
@@ -70,7 +70,7 @@ jobs:
           BUILD_NUMBER="${{ github.run_number }}"
           echo "marketing_version=$MARKETING_VERSION" >> "$GITHUB_OUTPUT"
           echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "Building Caldwell $MARKETING_VERSION (build $BUILD_NUMBER)"
+          echo "Building Pulsar $MARKETING_VERSION (build $BUILD_NUMBER)"
 
       - name: Build (unsigned, Release)
         run: |
@@ -96,11 +96,11 @@ jobs:
           echo "Release dir contents:"
           ls "$RELEASE_DIR" | head -20
 
-      - name: Assemble Caldwell.app bundle
+      - name: Assemble Pulsar.app bundle
         id: bundle
         run: |
           set -e
-          APP_PATH="$RUNNER_TEMP/Caldwell.app"
+          APP_PATH="$RUNNER_TEMP/Pulsar.app"
           mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 
           cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/CaldwellDashboard"
@@ -192,14 +192,14 @@ jobs:
           set -e
           APP_PATH="${{ steps.bundle.outputs.app_path }}"
           VERSION="${{ steps.version.outputs.marketing_version }}"
-          DMG_NAME="Caldwell-${VERSION}.dmg"
+          DMG_NAME="Pulsar-${VERSION}.dmg"
 
           mkdir -p dist dmg-staging
           cp -R "$APP_PATH" dmg-staging/
           ln -s /Applications dmg-staging/Applications
 
           hdiutil create \
-            -volname "Caldwell" \
+            -volname "Pulsar" \
             -srcfolder dmg-staging \
             -ov \
             -format UDZO \
@@ -264,12 +264,12 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
             <channel>
-              <title>Caldwell</title>
+              <title>Pulsar</title>
               <link>https://github.com/${GITHUB_REPOSITORY}/releases/latest</link>
-              <description>Caldwell — Alfred-Pennyworth butler voice for Claude Code.</description>
+              <description>Pulsar — spoken voice companion for Claude Code.</description>
               <language>en</language>
               <item>
-                <title>Caldwell ${SHORT_VERSION}</title>
+                <title>Pulsar ${SHORT_VERSION}</title>
                 <link>https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}</link>
                 <sparkle:version>${VERSION}</sparkle:version>
                 <sparkle:shortVersionString>${SHORT_VERSION}</sparkle:shortVersionString>
@@ -290,35 +290,35 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
-          name: "Caldwell — latest dev build"
+          name: "Pulsar — latest dev build"
           files: |
             ${{ steps.dmg.outputs.dmg_path }}
           prerelease: true
           make_latest: "false"
           body: |
-            **Caldwell — ElevenLabs TTS voice assistant for macOS.** Rolling latest dev build, refreshed on every push to `main`. For tagged stable releases see the [Releases list](https://github.com/justinwilliames/caldwell-speak/releases).
+            **Pulsar — TTS voice assistant for macOS.** Rolling latest dev build, refreshed on every push to `main`. For tagged stable releases see the [Releases list](https://github.com/justinwilliames/pulsar-by-orbit/releases).
 
-            Built from commit [`${{ github.sha }}`](https://github.com/justinwilliames/caldwell-speak/commit/${{ github.sha }}).
+            Built from commit [`${{ github.sha }}`](https://github.com/justinwilliames/pulsar-by-orbit/commit/${{ github.sha }}).
 
             > [!IMPORTANT]
             > **You MUST run a Terminal command before this app will open.**
-            > Caldwell is unsigned (no Apple Developer ID yet), so macOS Gatekeeper will refuse to launch it.
+            > Pulsar is unsigned (no Apple Developer ID yet), so macOS Gatekeeper will refuse to launch it.
 
             ## Install
 
             ### 1. Download the .dmg below
-            ### 2. Drag Caldwell into Applications
+            ### 2. Drag Pulsar into Applications
             ### 3. ⚠️ REQUIRED — run this in Terminal
 
             ```bash
-            xattr -dr com.apple.quarantine "/Applications/Caldwell.app"
+            xattr -dr com.apple.quarantine "/Applications/Pulsar.app"
             ```
 
             One-time per install. Right-click → **Open** also works.
 
             ### 4. Launch from Applications
 
-            Caldwell runs from Applications and checks this feed for updates.
+            Pulsar runs from Applications and checks this feed for updates.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -329,16 +329,16 @@ jobs:
           files: |
             ${{ steps.dmg.outputs.dmg_path }}
             dist/appcast.xml
-          name: Caldwell ${{ github.ref_name }}
+          name: Pulsar ${{ github.ref_name }}
           generate_release_notes: true
           prerelease: false
           make_latest: "true"
           body: |
-            **Caldwell — ElevenLabs TTS voice assistant for macOS.**
+            **Pulsar — TTS voice assistant for macOS.**
 
             > [!IMPORTANT]
             > **You MUST run a Terminal command before this app will open.**
-            > Caldwell is unsigned (no Apple Developer ID yet), so macOS Gatekeeper will refuse to launch it.
+            > Pulsar is unsigned (no Apple Developer ID yet), so macOS Gatekeeper will refuse to launch it.
 
             ## Install — three steps, do all of them
 
@@ -346,21 +346,21 @@ jobs:
 
             Click `${{ steps.dmg.outputs.dmg_name }}` below.
 
-            ### 2. Drag Caldwell into Applications
+            ### 2. Drag Pulsar into Applications
 
-            Open the `.dmg`, drag the **Caldwell** icon into the **Applications** shortcut.
+            Open the `.dmg`, drag the **Pulsar** icon into the **Applications** shortcut.
 
             ### 3. ⚠️ REQUIRED — run this in Terminal
 
             ```bash
-            xattr -dr com.apple.quarantine "/Applications/Caldwell.app"
+            xattr -dr com.apple.quarantine "/Applications/Pulsar.app"
             ```
 
             One-time per install. Right-click → **Open** also works, as does System Settings → Privacy & Security → "Open Anyway".
 
             ### 4. Launch from Applications
 
-            Caldwell runs from Applications and checks this feed for updates.
+            Pulsar runs from Applications and checks this feed for updates.
 
             ## What this is
 

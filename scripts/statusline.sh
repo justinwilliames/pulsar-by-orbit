@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# statusline.sh — Caldwell's status line for Claude Code.
+# statusline.sh — Pulsar's status line for Claude Code.
 #
-# Renders: Caldwell mark · model · project · diff · session cost · turn
+# Renders: Pulsar mark · model · project · diff · session cost · turn
 # duration · a rotating quip. Reads config.json for mute state so a muted
 # dial shows a hush marker (⊘). No network — instant and free.
 #
@@ -29,7 +29,7 @@ D=$'\033[2m'; R=$'\033[0m'
 A=$'\033[38;5;75m'; G=$'\033[38;5;108m'; Y=$'\033[38;5;179m'; M=$'\033[38;5;245m'; HAT=$'\033[38;5;180m'
 SEP="${D} · ${R}"
 
-if [ "$muted" = "1" ]; then mark="${HAT}⊘ Caldwell${R}"; else mark="${HAT}◆ Caldwell${R}"; fi
+if [ "$muted" = "1" ]; then mark="${HAT}⊘ Pulsar${R}"; else mark="${HAT}◆ Pulsar${R}"; fi
 out="${mark}${SEP}${A}${model}${R}${SEP}${base}"
 
 if [ -n "$add" ] && [ "$add" != "null" ]; then

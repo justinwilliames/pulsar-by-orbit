@@ -1,118 +1,129 @@
+import AVFoundation
 import Foundation
 
-/// Local macOS text-to-speech via the `say` CLI, synthesised to a temp AIFF so
-/// it flows through the SAME envelope + afplay path as ElevenLabs — real
-/// lip-sync, honest history, no special-casing. Free, fully local, no network:
-/// the privacy/cost alternative to the cloud voice, and the never-silent
-/// fallback when ElevenLabs fails.
+/// Local macOS text-to-speech. Synthesis runs via the `say` CLI to a temp AIFF
+/// (so it flows through the same envelope + afplay path — real lip-sync); the
+/// voice *catalogue* comes from `AVSpeechSynthesisVoice` (which carries gender +
+/// quality, unlike `say -v ?`). Free, fully local, no network, no API key.
 ///
-/// IMPORTANT: the installed-voice probe (`say -v ?`) is a *blocking* Process +
-/// pipe read. It must NEVER run on the async HTTP handler path (it starves the
-/// Swift cooperative thread pool and wedges the server under concurrent polls).
-/// So the probe result is cached; voice lookups only read the cache (self-
-/// priming in the background), and only `synth()` and `prime()` — both off the
-/// handler path — ever spawn `say`.
+/// The catalogue is filtered + deduped for the picker:
+///   • novelty voices (Bad News, Bells, Zarvox…) report `.unspecified` gender —
+///     dropped entirely.
+///   • a voice and its "(Enhanced)"/"(Premium)" variant collapse to ONE entry;
+///     the app resolves to the highest-quality installed variant automatically
+///     (so "Daniel" plays as "Daniel (Enhanced)" when that's downloaded).
 enum NativeVoiceClient {
 
     /// Measured "butler" pace (words/min). Enhanced voices honour `-r`.
     static let defaultRate = 168
 
-    /// A selectable voice for the free-mode picker: the `say`-usable name plus a
-    /// human label like "Daniel (English, UK)".
+    /// A selectable voice for the picker: the deduped base name + a human label
+    /// like "Daniel (English, UK)". `name` is the base; the daemon resolves it to
+    /// the best installed variant at speak time.
     struct VoiceOption: Codable, Sendable {
         let name: String
         let label: String
     }
 
+    private struct ResolvedVoice {
+        let display: String    // base name shown + stored, e.g. "Daniel"
+        let resolved: String   // actual say -v name, e.g. "Daniel (Enhanced)"
+        let label: String      // "Daniel (English, UK)"
+        let language: String   // "en-GB"
+    }
+
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var cachedVoices: [(name: String, locale: String)]?
+    nonisolated(unsafe) private static var cached: [ResolvedVoice]?
 
-    /// Spawn `say -v ?` and cache (name, locale) pairs. Blocking — call only from
-    /// a background task (auto-kicked lazily; safe at startup too).
     @discardableResult
-    static func prime() -> [(name: String, locale: String)] {
-        let voices = computeVoices()
-        lock.withLock { cachedVoices = voices }
-        return voices
+    private static func refresh() -> [ResolvedVoice] {
+        let v = compute()
+        lock.withLock { cached = v }
+        return v
     }
 
-    private static func voices() -> [(name: String, locale: String)] {
-        if let v = (lock.withLock { cachedVoices }) { return v }
-        Task.detached { _ = prime() }
-        return []
+    private static func voices() -> [ResolvedVoice] {
+        if let v = (lock.withLock { cached }) { return v }
+        return refresh()
     }
 
-    /// `say`-usable voice names. Cached; safe on the handler path.
-    static func names() -> [String] { voices().map(\.name) }
+    /// Deduped base names — for validating a chosen voice.
+    static func availableVoices() -> [String] { voices().map(\.display) }
 
-    /// Voice names for validation (free-mode picker accepts only these).
-    static func availableVoices() -> [String] { names() }
-
-    /// Rich options for the picker: each name plus a "Name (Language, Region)"
-    /// label. English/British voices first, then the rest, alphabetical.
+    /// Picker options: one per voice, base name + "Name (Language, Region)".
     static func voiceOptions() -> [VoiceOption] {
-        let opts = voices().map { VoiceOption(name: $0.name, label: label(name: $0.name, locale: $0.locale)) }
-        return opts.sorted { a, b in
-            let aEN = a.label.contains("English"), bEN = b.label.contains("English")
-            if aEN != bEN { return aEN }      // English first
-            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        voices().map { VoiceOption(name: $0.display, label: $0.label) }
+    }
+
+    /// Is the Enhanced Daniel installed? Drives the install nudge.
+    static func enhancedInstalled() -> Bool {
+        AVSpeechSynthesisVoice.speechVoices().contains {
+            $0.name.caseInsensitiveCompare("Daniel (Enhanced)") == .orderedSame
         }
     }
 
-    /// Preferred voice, best-first: env override → user pick (if installed) →
-    /// "Daniel (Enhanced)" → "Daniel".
+    /// The `say -v` name to actually speak with: env override → the user's pick
+    /// resolved to its best installed variant → Daniel → first available.
     static func bestVoice() -> String {
         if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }
-        let n = names()
-        func has(_ wanted: String) -> String? {
-            n.first { $0.caseInsensitiveCompare(wanted) == .orderedSame }
-        }
+        let vs = voices()
         let choice = CaldwellConfig.shared.nativeVoiceChoice
-        if !choice.isEmpty, let picked = has(choice) { return picked }
-        return has("Daniel (Enhanced)") ?? has("Daniel") ?? "Daniel"
-    }
-
-    static func enhancedInstalled() -> Bool {
-        names().contains { $0.caseInsensitiveCompare("Daniel (Enhanced)") == .orderedSame }
+        if !choice.isEmpty,
+           let v = vs.first(where: { $0.display.caseInsensitiveCompare(choice) == .orderedSame }) {
+            return v.resolved
+        }
+        if let daniel = vs.first(where: { $0.display.caseInsensitiveCompare("Daniel") == .orderedSame }) {
+            return daniel.resolved
+        }
+        return vs.first?.resolved ?? "Daniel"
     }
 
     // MARK: - Private
 
-    /// `say -v ?` → (name, locale) pairs. Blocking.
-    private static func computeVoices() -> [(name: String, locale: String)] {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-        proc.arguments = ["-v", "?"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-        guard (try? proc.run()) != nil else { return [] }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        proc.waitUntilExit()
-        guard let out = String(data: data, encoding: .utf8) else { return [] }
-        // Each line: "<name>   <lang>_<REGION>   # sample". The locale token is
-        // the anchor; the name is everything before it.
-        let re = try? NSRegularExpression(pattern: "\\b([a-z]{2,3})[-_]([A-Z]{2})\\b")
-        var result: [(String, String)] = []
-        for line in out.split(separator: "\n") {
-            let s = String(line)
-            let ns = s as NSString
-            guard let re,
-                  let m = re.firstMatch(in: s, range: NSRange(location: 0, length: ns.length))
-            else { continue }
-            let locale = ns.substring(with: m.range)
-            let name = ns.substring(to: m.range.location).trimmingCharacters(in: .whitespaces)
-            if !name.isEmpty { result.append((name, locale)) }
+    private static func compute() -> [ResolvedVoice] {
+        let all = AVSpeechSynthesisVoice.speechVoices()
+        // Real human voices only — macOS novelty voices report unspecified gender.
+        let human = all.filter { $0.gender == .male || $0.gender == .female }
+
+        func base(_ n: String) -> String {
+            n.replacingOccurrences(of: " (Enhanced)", with: "")
+             .replacingOccurrences(of: " (Premium)", with: "")
+             .trimmingCharacters(in: .whitespaces)
         }
-        return result
+        func rank(_ q: AVSpeechSynthesisVoiceQuality) -> Int {
+            switch q { case .premium: return 3; case .enhanced: return 2; default: return 1 }
+        }
+
+        struct Key: Hashable { let base: String; let lang: String }
+        var groups: [Key: AVSpeechSynthesisVoice] = [:]
+        for v in human {
+            let k = Key(base: base(v.name), lang: v.language)
+            if let ex = groups[k] {
+                if rank(v.quality) > rank(ex.quality) { groups[k] = v }
+            } else {
+                groups[k] = v
+            }
+        }
+
+        let resolved = groups.map { (k, v) in
+            ResolvedVoice(display: k.base, resolved: v.name,
+                          label: label(name: k.base, language: v.language), language: v.language)
+        }
+        // English first, then by language, then name.
+        return resolved.sorted { a, b in
+            let aEN = a.language.hasPrefix("en"), bEN = b.language.hasPrefix("en")
+            if aEN != bEN { return aEN }
+            if a.language != b.language { return a.language < b.language }
+            return a.display.localizedCaseInsensitiveCompare(b.display) == .orderedAscending
+        }
     }
 
-    /// "Daniel (English, UK)" from a name + "en_GB".
-    private static func label(name: String, locale: String) -> String {
-        let parts = locale.replacingOccurrences(of: "-", with: "_").split(separator: "_")
+    /// "Daniel (English, UK)" from a base name + "en-GB".
+    private static func label(name: String, language: String) -> String {
+        let parts = language.replacingOccurrences(of: "_", with: "-").split(separator: "-")
         let langCode = parts.first.map(String.init) ?? ""
         let regionCode = parts.count > 1 ? String(parts[1]) : ""
         let lang = Locale.current.localizedString(forLanguageCode: langCode) ?? langCode

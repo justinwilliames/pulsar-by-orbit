@@ -186,7 +186,13 @@ struct SettingsView: View {
 
     private var nativeVoiceBinding: Binding<String> {
         Binding(
-            get: { viewModel.settings?.nativeVoice ?? "Daniel" },
+            get: {
+                // native_voice is the resolved variant (e.g. "Daniel (Enhanced)");
+                // the picker tags are base names, so strip the quality suffix.
+                (viewModel.settings?.nativeVoice ?? "Daniel")
+                    .replacingOccurrences(of: " (Enhanced)", with: "")
+                    .replacingOccurrences(of: " (Premium)", with: "")
+            },
             set: { newValue in Task { await viewModel.setNativeVoice(newValue) } }
         )
     }

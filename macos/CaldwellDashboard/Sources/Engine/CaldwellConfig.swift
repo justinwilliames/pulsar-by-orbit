@@ -83,6 +83,29 @@ final class CaldwellConfig: @unchecked Sendable {
         return ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"] ?? ""
     }
 
+    // Cached "is a key present?" so /settings never blocks on the Keychain in the
+    // async handler path — a synchronous SecItemCopyMatching under concurrent
+    // polls starves the cooperative pool and wedges the server. Primed lazily in
+    // the background; refreshed on setApiKey.
+    nonisolated(unsafe) private static var cachedApiKeyPresent: Bool?
+    private static let apiKeyPresenceLock = NSLock()
+
+    /// Non-blocking key-presence check for hot paths (/settings). Reads cache; if
+    /// unprimed, kicks a background prime and answers from the env var for now.
+    func apiKeyIsSet() -> Bool {
+        if let c = (Self.apiKeyPresenceLock.withLock { Self.cachedApiKeyPresent }) { return c }
+        Task.detached { _ = CaldwellConfig.shared.refreshApiKeyPresence() }
+        return !(ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"] ?? "").isEmpty
+    }
+
+    /// Recompute presence from the Keychain (blocking) and cache it. Background only.
+    @discardableResult
+    func refreshApiKeyPresence() -> Bool {
+        let present = !apiKey.isEmpty
+        Self.apiKeyPresenceLock.withLock { Self.cachedApiKeyPresent = present }
+        return present
+    }
+
     var voiceId: String {
         let stored = lock.withLock { _config["ELEVENLABS_VOICE_ID"] }
             ?? ProcessInfo.processInfo.environment["ELEVENLABS_VOICE_ID"]
@@ -200,6 +223,7 @@ final class CaldwellConfig: @unchecked Sendable {
         default:
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
+        Self.apiKeyPresenceLock.withLock { Self.cachedApiKeyPresent = true }
     }
 
     // MARK: - Keychain

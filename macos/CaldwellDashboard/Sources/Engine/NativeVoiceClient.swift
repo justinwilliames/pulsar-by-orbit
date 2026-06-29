@@ -5,38 +5,63 @@ import Foundation
 /// lip-sync, honest history, no special-casing. Free, fully local, no network:
 /// the privacy/cost alternative to the cloud voice, and the never-silent
 /// fallback when ElevenLabs fails.
+///
+/// IMPORTANT: the installed-voice probe (`say -v ?`) is a *blocking* Process +
+/// pipe read. It must NEVER run on the async HTTP handler path (it starves the
+/// Swift cooperative thread pool and wedges the server under concurrent polls).
+/// So the probe result is cached; `bestVoice()`/`enhancedInstalled()` only read
+/// the cache (self-priming in the background), and only `synth()` and `prime()`
+/// — both off the handler path — ever spawn `say`.
 enum NativeVoiceClient {
 
     /// Measured "butler" pace (words/min). Enhanced voices honour `-r`.
     static let defaultRate = 168
 
-    /// Preferred British voice, best-first:
-    ///   1. CALDWELL_FALLBACK_VOICE env override (escape hatch)
-    ///   2. "Daniel (Enhanced)" — neural, closest to the Caldwell timbre
-    ///   3. "Daniel" — the basic compact voice (always present on macOS)
-    /// Re-resolved per call (cheap) so a freshly-installed Enhanced voice is
-    /// picked up without an app restart. If Enhanced isn't installed we simply
-    /// fall back to regular Daniel.
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var cachedNames: [String]?
+
+    /// Spawn `say -v ?` and cache the installed voice names. Blocking — call
+    /// only from a background task (it's auto-kicked lazily; safe to call at
+    /// startup too).
+    @discardableResult
+    static func prime() -> [String] {
+        let names = computeVoiceNames()
+        lock.withLock { cachedNames = names }
+        return names
+    }
+
+    /// Cached voice names. If not yet primed, kick a background prime and return
+    /// empty for now (handlers fall back to "Daniel" until the probe lands —
+    /// ~0.3s — never blocking).
+    private static func names() -> [String] {
+        if let n = (lock.withLock { cachedNames }) { return n }
+        Task.detached { _ = prime() }
+        return []
+    }
+
+    /// Preferred British voice, best-first: env override → "Daniel (Enhanced)"
+    /// (neural, closest to the Caldwell timbre) → "Daniel" (always present). If
+    /// Enhanced isn't installed we simply fall back to regular Daniel.
     static func bestVoice() -> String {
         if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }
-        let names = installedVoiceNames()
+        let n = names()
         func has(_ wanted: String) -> String? {
-            names.first { $0.caseInsensitiveCompare(wanted) == .orderedSame }
+            n.first { $0.caseInsensitiveCompare(wanted) == .orderedSame }
         }
         return has("Daniel (Enhanced)") ?? has("Daniel") ?? "Daniel"
     }
 
     /// Is the neural Enhanced Daniel installed? Drives the `/health` probe and
-    /// the Settings install-status nudge.
+    /// the Settings install-status nudge. Reads cache only.
     static func enhancedInstalled() -> Bool {
-        installedVoiceNames().contains { $0.caseInsensitiveCompare("Daniel (Enhanced)") == .orderedSame }
+        names().contains { $0.caseInsensitiveCompare("Daniel (Enhanced)") == .orderedSame }
     }
 
-    /// `say`-usable voice names (the column before the locale in `say -v ?`).
-    static func installedVoiceNames() -> [String] {
+    /// `say -v ?` → the usable voice names (column before the locale). Blocking.
+    private static func computeVoiceNames() -> [String] {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/say")
         proc.arguments = ["-v", "?"]
@@ -47,20 +72,20 @@ enum NativeVoiceClient {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         proc.waitUntilExit()
         guard let out = String(data: data, encoding: .utf8) else { return [] }
-        var names: [String] = []
+        var result: [String] = []
         for line in out.split(separator: "\n") {
             let s = String(line)
-            // The name runs up to the first run of 2+ spaces (then the locale).
             if let r = s.range(of: "  ") {
                 let name = String(s[s.startIndex..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty { names.append(name) }
+                if !name.isEmpty { result.append(name) }
             }
         }
-        return names
+        return result
     }
 
     /// Synthesise `text` to a temp AIFF and return its URL. Caller owns the file.
-    /// Throws if `say` fails or produces no audio (caller then markFailed/last-ditch).
+    /// Throws if `say` fails or produces no audio. Runs in a detached fetch task,
+    /// so the blocking wait never touches the handler path.
     static func synth(text: String, rate: Int = defaultRate) async throws -> URL {
         let voice = bestVoice()
         let out = URL(fileURLWithPath: NSTemporaryDirectory())

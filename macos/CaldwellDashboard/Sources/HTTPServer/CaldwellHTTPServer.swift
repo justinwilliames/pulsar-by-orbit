@@ -1198,7 +1198,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let config = CaldwellConfig.shared
         return SettingsResponse(
             voice_id: config.voiceId,
-            api_key_set: !config.apiKey.isEmpty,
+            api_key_set: config.apiKeyIsSet(),
             muted: config.isMuted,
             expletives_enabled: config.expletivesEnabled,
             voice_engine: config.voiceEngine,

@@ -4,7 +4,7 @@
 # Makes the spoken voice MODEL-SIDE and reliable for any install, without
 # depending on the user's personal CLAUDE.md or on the skill auto-surfacing.
 #
-# When the Caldwell daemon is up, it injects a directive (via the SessionStart
+# When the Pulsar daemon is up, it injects a directive (via the SessionStart
 # `additionalContext` channel) telling the model to compose + fire a neutral
 # say.sh line at the end of every turn. The model is already generating text,
 # so composing a line adds no latency and no API key — it rides the user's

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# turn-start.sh — Caldwell plumbing. Stamps when a turn starts, per session,
+# turn-start.sh — Pulsar plumbing. Stamps when a turn starts, per session,
 # so chime.sh can tell a long task from a quick reply and ring the right bell.
 # Tiny and silent. Wired in by install-hooks.sh as a UserPromptSubmit hook.
 

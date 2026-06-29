@@ -73,7 +73,7 @@ added_chime = ensure("Stop", chime_cmd, 5)
 added_turnstart = ensure("UserPromptSubmit", turnstart_cmd, 5)
 
 # statusLine is a top-level object, not a hook. Set it only if absent or if it
-# already points at a Caldwell statusline script — never clobber a custom one.
+# already points at a Pulsar statusline script — never clobber a custom one.
 sl = data.get("statusLine")
 if not sl:
     data["statusLine"] = {"type": "command", "command": statusline_cmd,

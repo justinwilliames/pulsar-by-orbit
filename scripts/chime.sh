@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
-# chime.sh — Caldwell's turn-end chime for Claude Code. Sound only, no voice,
-# no ElevenLabs. The butler's little "that's done, Sir" bell.
+# chime.sh — Caldwell's turn-end chime for Claude Code. Sound only, no voice.
+#
+# DEFERS TO CALDWELL: if the daemon is up AND not muted, Caldwell speaks this
+# turn and IS the cue — the chime stays silent so the two never clash. The
+# chime only rings when his voice won't: when he's muted, or the app is closed.
+# So you get exactly one turn-end cue, never both: unmuted -> the butler;
+# muted/closed -> a chime.
 #
 #   • quick reply  -> soft Tink
-#   • long task    -> Hero flourish (paired with turn-start.sh, which stamps
-#                     the turn's start so we can tell long from short)
+#   • long task    -> Hero flourish (paired with turn-start.sh, which stamps the
+#                     turn's start so we can tell long from short)
 #
-# Deliberately INDEPENDENT of the voice mute: chimes are the free, always-on
-# cue that still works when you've muted the expensive voice. Silence them on
-# their own with:  touch ~/.claude/chime-off   (rm to bring them back).
+# Silence the chime on its own too:  touch ~/.claude/chime-off   (rm to restore).
 #
 # Wired in by install-hooks.sh as a Stop hook.
 
 [ -f "$HOME/.claude/chime-off" ] && exit 0
+
+# Defer to Caldwell's voice. Daemon up AND not muted => he'll speak => no chime.
+# Read .muted literally: only an explicit "false" (unmuted) defers. "true",
+# "null", or no daemon all fall through and ring. (Don't use `.muted // true` —
+# jq's // coalesces false to the fallback, which inverts the test.)
+s=$(curl -sf --max-time 1 http://127.0.0.1:7865/settings 2>/dev/null)
+if [ -n "$s" ]; then
+  m=$(printf '%s' "$s" | /usr/bin/jq -r '.muted' 2>/dev/null)
+  [ "$m" = "false" ] && exit 0
+fi
 
 input=$(cat 2>/dev/null)
 sid=$(printf '%s' "$input" | /usr/bin/jq -r '.session_id // "default"' 2>/dev/null)

@@ -179,7 +179,7 @@ struct PopoverRootView: View {
     }
 
     private var tabPicker: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(DashboardTab.allCases, id: \.self) { tab in
                 let isSelected = selectedTab == tab
                 Button {
@@ -198,11 +198,12 @@ struct PopoverRootView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(isSelected ? .primary : .secondary)
-                .background(isSelected ? Color.orbit.opacity(0.18) : Color.clear, in: Capsule())
+                .background(isSelected ? Color.orbit.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .help(tab.rawValue)
             }
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(3)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }

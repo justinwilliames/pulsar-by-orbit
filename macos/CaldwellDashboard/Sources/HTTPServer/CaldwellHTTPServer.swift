@@ -601,18 +601,12 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     /// Context → list of candidate canon phrases. The first list is the
     /// always-on Polite pool; Potty mode adds the second list on top.
-    /// Phrases here must match (byte-for-byte) what `warm-cache.sh` warms,
-    /// otherwise the cache lookup misses.
     ///
     /// "neutral" is a FIRST-CLASS context with its own generic-acknowledgement
     /// pool — it is NOT the union of every other context. The old union
     /// behaviour is what made turn-end pings fire irrelevant specifics
     /// ("Tests passing." after a turn with no tests). Generic lines are safe
     /// after literally any turn; specifics only fire on a confident match.
-    /// Fixed cache key the canon phrase cache is warmed under by warm-cache.sh.
-    /// Lookups must use the same key or every cached-ping hit misses.
-    nonisolated private static let canonCacheVoiceId = "JBFqnCBsd6RMkjVDRZzb"
-
     nonisolated private static let canonContexts: [String: (polite: [String], potty: [String])] = [
         "push": (
             polite: ["Pushed, Sir.", "Pushed.", "Up it goes, Sir.", "That's pushed, Sir.", "Sent up, Sir.", "Away it goes, Sir.", "Pushed and clean, Sir."],
@@ -694,56 +688,49 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return Response(status: .noContent)
         }
 
-        // Filter to those actually cached on disk. The phrase cache is warmed
-        // by warm-cache.sh under a fixed key; match that key so lookups hit.
-        let voiceId = Self.canonCacheVoiceId
-        let cached = candidates.compactMap { text -> (String, URL)? in
-            guard let url = PhraseCache.shared.get(text: text, voiceId: voiceId) else { return nil }
-            return (text, url)
-        }
-        guard !cached.isEmpty else {
-            // No cached canon for this context — stay silent.
-            return Response(status: .noContent)
-        }
-
         // Anti-repeat: if the pool has alternatives, never replay the exact
         // line we played last time. Falls back to the full pool when the
-        // last line is the only cached option.
+        // last line is the only option.
         let lastPlayed = Self.canonLock.withLock { Self.lastCanonText }
-        var pickable = cached
+        var pickable = candidates
         if pickable.count > 1, let lastPlayed {
-            let fresh = pickable.filter { $0.0 != lastPlayed }
+            let fresh = pickable.filter { $0 != lastPlayed }
             if !fresh.isEmpty { pickable = fresh }
         }
-        let (text, sourceURL) = pickable.randomElement()!
+        let text = pickable.randomElement()!
         Self.canonLock.withLock { Self.lastCanonText = text }
-        let entryId = Self.nextEntryId()
-        let tmpURL: URL
-        do {
-            tmpURL = try Self.copyCacheAudioToTemp(sourceURL: sourceURL, entryId: entryId)
-        } catch {
-            return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
-        }
 
+        // Synthesise locally via macOS native voice — mirrors the /speak path.
+        // No network, no API key, no spend.
+        let entryId = Self.nextEntryId()
         let entry = AudioEntry(
             id: entryId,
-            text: text,
-            voiceId: voiceId,
+            text: String(text.prefix(100)),
+            voiceId: "native",
             voiceLabel: "Caldwell",
             createdAt: Date(),
             channel: nil,
             priority: false,
             fullText: text,
-            isReplay: true,
-            audioURL: tmpURL
+            isReplay: false,
+            audioURL: nil,
+            engine: "native"
         )
 
-        let position = await audioQueue.enqueue(entry)
-        if position == nil {
-            // Canon is fire-and-forget — stay silent on drop. 204 is the
-            // same shape Sir's stop-hook already tolerates.
-            try? FileManager.default.removeItem(at: tmpURL)
+        guard let position = await audioQueue.enqueue(entry) else {
+            // Canon is fire-and-forget — stay silent on drop.
             return Response(status: .noContent)
+        }
+        let idCopy = entryId
+        let textCopy = text
+        Task.detached {
+            do {
+                let url = try await NativeVoiceClient.synth(text: textCopy)
+                await audioQueue.markReady(id: idCopy, url: url)
+            } catch {
+                NSLog("[CaldwellHTTP] canon native synth failed for \(idCopy): \(error)")
+                await audioQueue.markFailed(id: idCopy)
+            }
         }
         return try Self.json(CanonPickResponse(
             id: entryId,

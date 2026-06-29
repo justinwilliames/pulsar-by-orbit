@@ -13,6 +13,8 @@ struct DaemonSettings: Codable, Sendable {
     let nativeVoice: String?
     /// Whether the neural Enhanced Daniel is installed (drives the install nudge).
     let enhancedInstalled: Bool?
+    /// Whether cached "canon" pings are on (notification-style) vs bespoke-only.
+    let canonEnabled: Bool?
 
     enum CodingKeys: String, CodingKey {
         case apiKeySet = "api_key_set"
@@ -24,6 +26,7 @@ struct DaemonSettings: Codable, Sendable {
         case voiceEngine = "voice_engine"
         case nativeVoice = "native_voice"
         case enhancedInstalled = "enhanced_installed"
+        case canonEnabled = "canon_enabled"
     }
 
     init(from decoder: Decoder) throws {
@@ -37,6 +40,7 @@ struct DaemonSettings: Codable, Sendable {
         self.voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine)
         self.nativeVoice = try container.decodeIfPresent(String.self, forKey: .nativeVoice)
         self.enhancedInstalled = try container.decodeIfPresent(Bool.self, forKey: .enhancedInstalled)
+        self.canonEnabled = try container.decodeIfPresent(Bool.self, forKey: .canonEnabled)
     }
 }
 

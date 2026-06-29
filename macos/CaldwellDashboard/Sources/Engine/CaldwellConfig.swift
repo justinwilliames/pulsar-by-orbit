@@ -112,6 +112,15 @@ final class CaldwellConfig: @unchecked Sendable {
         return val == "native" ? "native" : "elevenlabs"
     }
 
+    /// Whether cached "canon" pings are allowed — the free notification-style
+    /// turn-end lines plus the budget-saver downgrade. Off = bespoke-only: only
+    /// the model's composed lines speak (richer, fewer, and they cost credit).
+    /// Default on preserves today's behaviour.
+    var canonEnabled: Bool {
+        let val = lock.withLock { _config["CALDWELL_CANON_ENABLED"] } ?? "1"
+        return !["0", "false", "no", "off", ""].contains(val.lowercased())
+    }
+
     // MARK: - Voice settings (mirrors SPEAK_VOICE_* env vars in server.py)
 
     var voiceStability: Double {

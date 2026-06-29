@@ -16,8 +16,8 @@ A fork of [tomc98/speak](https://github.com/tomc98/speak) by Thomas Csere.
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later
-- An [ElevenLabs](https://elevenlabs.io) account and API key
+- macOS 26 (Tahoe) or later
+- Optional: an [ElevenLabs](https://elevenlabs.io) account and API key for the premium cloud voice — out of the box Caldwell speaks with a free, local macOS voice (Daniel), no account or key required
 - [Claude Code](https://claude.ai/code) with this skill installed
 
 ---

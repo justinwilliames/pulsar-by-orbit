@@ -564,7 +564,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 update.muted != nil ||
                 update.expletives_enabled != nil ||
                 update.api_key != nil ||
-                update.voice_engine != nil
+                update.voice_engine != nil ||
+                update.canon_enabled != nil
         else {
             return try Self.json(ErrorResponse("No fields to update"), status: .badRequest)
         }
@@ -592,6 +593,9 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             if let engine = update.voice_engine {
                 let normalized = engine.lowercased() == "native" ? "native" : "elevenlabs"
                 try config.set("CALDWELL_VOICE_ENGINE", value: normalized)
+            }
+            if let canon = update.canon_enabled {
+                try config.set("CALDWELL_CANON_ENABLED", value: canon ? "1" : "0")
             }
         } catch {
             return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
@@ -718,6 +722,11 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return Response(status: .noContent)
         }
 
+        // Message-style: cached pings off → bespoke-only, no canon turn-end ping.
+        if !cfg.canonEnabled {
+            return Response(status: .noContent)
+        }
+
         // Build the candidate pool for this context.
         let candidates = canonCandidates(for: requestedContext, expletives: cfg.expletivesEnabled)
         guard !candidates.isEmpty else {
@@ -839,6 +848,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         audioQueue: AudioQueueActor,
         cfg: CaldwellConfig
     ) async throws -> Response? {
+        // Bespoke-only mode: no canon downgrade — let the bespoke line spend.
+        guard cfg.canonEnabled else { return nil }
         let voiceId = cfg.voiceId
         guard !voiceId.isEmpty else { return nil }
         let candidates = canonCandidates(for: "neutral", expletives: cfg.expletivesEnabled)
@@ -1192,7 +1203,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             expletives_enabled: config.expletivesEnabled,
             voice_engine: config.voiceEngine,
             native_voice: NativeVoiceClient.bestVoice(),
-            enhanced_installed: NativeVoiceClient.enhancedInstalled()
+            enhanced_installed: NativeVoiceClient.enhancedInstalled(),
+            canon_enabled: config.canonEnabled
         )
     }
 
@@ -1526,6 +1538,7 @@ private struct SettingsResponse: Encodable, Sendable {
     let voice_engine: String
     let native_voice: String
     let enhanced_installed: Bool
+    let canon_enabled: Bool
 }
 
 private struct SettingsUpdateRequest: Decodable, Sendable {
@@ -1534,6 +1547,7 @@ private struct SettingsUpdateRequest: Decodable, Sendable {
     let expletives_enabled: Bool?
     let api_key: String?
     let voice_engine: String?
+    let canon_enabled: Bool?
 }
 
 private struct UsageResponse: Encodable, Sendable {

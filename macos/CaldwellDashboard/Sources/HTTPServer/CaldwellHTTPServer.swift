@@ -32,9 +32,6 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // History lives in memory and starts empty, so any retained replay
         // audio on disk is orphaned from a prior run — clear it.
         await audioQueue.purgeHistoryAudioStore()
-        // Seed the usage baseline before any fetch can run, so the local
-        // character floor reconciles cleanly against ElevenLabs' laggy counter.
-        await Self.primeUsageBaseline()
     }
 
     func start() {
@@ -150,11 +147,6 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // POST /settings — update config + Keychain API key
         router.post("/settings") { request, _ -> Response in
             return try await Self.handleSettingsPost(request: request, sseBroadcaster: sseBroadcaster)
-        }
-
-        // GET /usage — ElevenLabs subscription usage
-        router.get("/usage") { _, _ -> Response in
-            return try await Self.handleUsage()
         }
 
         // GET /portraits/:name/:frame — serve portrait assets to the app UI
@@ -623,33 +615,6 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         return try Self.json(settings)
     }
 
-    // MARK: - /usage handler
-
-    nonisolated private static func handleUsage() async throws -> Response {
-        let apiKey = CaldwellConfig.shared.apiKey
-        guard !apiKey.isEmpty else {
-            return try Self.json(UsageResponse(
-                characters_used: nil,
-                characters_limit: nil,
-                next_reset_unix: nil,
-                api_key_set: false,
-                error: "ELEVENLABS_API_KEY not set"
-            ))
-        }
-
-        do {
-            return try Self.json(try await Self.fetchUsage(apiKey: apiKey))
-        } catch {
-            return try Self.json(UsageResponse(
-                characters_used: nil,
-                characters_limit: nil,
-                next_reset_unix: nil,
-                api_key_set: true,
-                error: error.localizedDescription
-            ))
-        }
-    }
-
     // MARK: - /canon/pick handler
 
     /// Context → list of candidate canon phrases. The first list is the
@@ -815,85 +780,6 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         var pool = lists.polite
         if expletives { pool.append(contentsOf: lists.potty) }
         return pool
-    }
-
-    // MARK: - Adaptive bespoke-spend gate
-
-    /// Decide whether a FRESH (non-cached) line should be generated now, or
-    /// downgraded to a free cached canon line to protect the monthly budget.
-    ///
-    /// Paces spend so credit lasts to the reset: spend freely while at or above
-    /// the even-burn line, throttle proportionally once burning faster than the
-    /// billing cycle allows. Stateless and self-correcting — reads only the live
-    /// in-memory usage snapshot, so it auto-adjusts to whatever credit remains.
-    ///
-    ///   health = (remaining / limit) / (secondsToReset / cycleLength)
-    ///     health ≥ 1  → at/ahead of the even-burn line → always bespoke
-    ///     health < 1  → burning too fast → bespoke with probability = health
-    ///
-    /// Fails open when there's no budget data yet (don't gag the voice).
-    nonisolated static func shouldSpeakBespoke() -> Bool {
-        guard let snap = UsageTracker.shared.snapshot(), snap.limit > 0 else {
-            return true
-        }
-        let remaining = max(0, snap.limit - snap.used)
-        // Hard floor: protect the last sliver so a fresh fetch can't half-fail
-        // mid-cycle and so the canon picker always has headroom.
-        if remaining < 150 { return false }
-
-        let now = Int(Date().timeIntervalSince1970)
-        let secondsToReset = max(1, snap.reset - now)
-        let cycleLength = 30 * 24 * 3600  // ElevenLabs monthly cycle ≈ 30 days
-        let expectedRemainingFrac = min(1.0, Double(secondsToReset) / Double(cycleLength))
-        let actualRemainingFrac = Double(remaining) / Double(snap.limit)
-        let health = actualRemainingFrac / max(0.01, expectedRemainingFrac)
-        let prob = min(1.0, max(0.0, health))
-        return Double.random(in: 0..<1) < prob
-    }
-
-    /// Play a free, already-cached canon line in place of a throttled bespoke
-    /// spend. Generic "neutral" pool — safe after any turn. Returns nil if no
-    /// canon is cached (caller then proceeds with the bespoke spend).
-    nonisolated private static func playCanonFallback(
-        audioQueue: AudioQueueActor,
-        cfg: CaldwellConfig
-    ) async throws -> Response? {
-        // Bespoke-only mode: no canon downgrade — let the bespoke line spend.
-        guard cfg.canonEnabled else { return nil }
-        let voiceId = cfg.voiceId
-        guard !voiceId.isEmpty else { return nil }
-        let candidates = canonCandidates(for: "neutral", expletives: cfg.expletivesEnabled)
-        let cached = candidates.compactMap { text -> (String, URL)? in
-            guard let url = PhraseCache.shared.get(text: text, voiceId: voiceId) else { return nil }
-            return (text, url)
-        }
-        // Anti-repeat against the last canon line we played.
-        let lastPlayed = Self.canonLock.withLock { Self.lastCanonText }
-        var pickable = cached
-        if pickable.count > 1, let lastPlayed {
-            let fresh = pickable.filter { $0.0 != lastPlayed }
-            if !fresh.isEmpty { pickable = fresh }
-        }
-        guard let (text, sourceURL) = pickable.randomElement() else { return nil }
-        Self.canonLock.withLock { Self.lastCanonText = text }
-        UsageTracker.shared.logSpend(engine: "elevenlabs", chars: 0, decision: "budget-canon")
-
-        let entryId = Self.nextEntryId()
-        guard let tmpURL = try? Self.copyCacheAudioToTemp(sourceURL: sourceURL, entryId: entryId) else { return nil }
-        let entry = AudioEntry(
-            id: entryId, text: text, voiceId: voiceId, voiceLabel: "Caldwell",
-            createdAt: Date(), channel: nil, priority: false,
-            fullText: text, isReplay: true, audioURL: tmpURL
-        )
-        let position = await audioQueue.enqueue(entry)
-        if position == nil {
-            try? FileManager.default.removeItem(at: tmpURL)
-            return nil
-        }
-        return try Self.json(SpeakResponse(
-            id: entryId, position: position, voice: voiceId,
-            text_preview: text, dropped: nil, reason: "budget-canon"
-        ))
     }
 
     /// Polite-mode swear scrub. Replaces Caldwell's known expletive vocabulary
@@ -1084,25 +970,6 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         !key.isEmpty && key.count <= 64 && key.allSatisfy { $0.isHexDigit }
     }
 
-    /// Phrase-cache admission policy. Caller-set `cacheable: true` is a hint,
-    /// not a command — the daemon refuses to cache text that's obviously
-    /// one-shot. Generic short canon ("Pushed, Sir.", "Build's clean.")
-    /// passes; detailed Tier 3 lines do not.
-    nonisolated static func isCacheEligible(text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count > 60 { return false }
-        if trimmed.contains("://") { return false }
-        // Em-dash is the dead giveaway of a Tier 3 detailed alert.
-        if trimmed.contains("—") { return false }
-        // File extensions, PR/issue refs — session-specific by definition.
-        let oneShotSubstrings = [".swift", ".ts", ".tsx", ".js", ".py", ".json",
-                                 ".md", ".sh", ".plist", "PR #", "issue #"]
-        for marker in oneShotSubstrings where trimmed.contains(marker) {
-            return false
-        }
-        return true
-    }
-
     nonisolated private static func loadPhraseSidecar(from url: URL) -> PhraseSidecar? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(PhraseSidecar.self, from: data)
@@ -1157,65 +1024,6 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
     }
 
-    /// Raw read of ElevenLabs' subscription usage — no reconciliation.
-    nonisolated private static func fetchSubscription(apiKey: String) async throws -> ElevenLabsSubscription {
-        guard let url = URL(string: "\(CaldwellConfig.apiBase)/user") else {
-            throw UsageFetchError("Invalid ElevenLabs URL")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw UsageFetchError("Invalid response from ElevenLabs")
-        }
-        guard http.statusCode == 200 else {
-            let body = String(data: data.prefix(500), encoding: .utf8) ?? "(binary)"
-            throw UsageFetchError("ElevenLabs HTTP \(http.statusCode): \(body)")
-        }
-
-        do {
-            return try JSONDecoder().decode(ElevenLabsUserEnvelope.self, from: data).subscription
-        } catch {
-            throw UsageFetchError("Invalid ElevenLabs response: \(error.localizedDescription)")
-        }
-    }
-
-    nonisolated private static func fetchUsage(apiKey: String) async throws -> UsageResponse {
-        let sub = try await fetchSubscription(apiKey: apiKey)
-        // ElevenLabs' character_count lags real consumption by tens of seconds.
-        // Reconcile against our local floor so usage reflects spend promptly
-        // (see UsageTracker).
-        let reconciledUsed = UsageTracker.shared.reconcile(
-            remoteUsed: sub.character_count,
-            remoteReset: sub.next_character_count_reset_unix
-        )
-        UsageTracker.shared.recordLimit(sub.character_limit)
-        return UsageResponse(
-            characters_used: reconciledUsed,
-            characters_limit: sub.character_limit,
-            next_reset_unix: sub.next_character_count_reset_unix,
-            api_key_set: true,
-            error: nil
-        )
-    }
-
-    /// Prime the usage baseline at startup with a remote reading taken before
-    /// any fetch this process, so the local floor can't double-count spend the
-    /// remote already includes. Best-effort — lazy seeding in reconcile()
-    /// covers a failed/absent reading.
-    nonisolated private static func primeUsageBaseline() async {
-        let apiKey = CaldwellConfig.shared.apiKey
-        guard !apiKey.isEmpty else { return }
-        guard let sub = try? await fetchSubscription(apiKey: apiKey) else { return }
-        UsageTracker.shared.seedIfNeeded(
-            remoteUsed: sub.character_count,
-            remoteReset: sub.next_character_count_reset_unix
-        )
-        UsageTracker.shared.recordLimit(sub.character_limit)
-    }
 }
 
 // MARK: - Response models

@@ -2,36 +2,36 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundleName</key>
-    <string>Caldwell</string>
-    <key>CFBundleDisplayName</key>
-    <string>Caldwell</string>
-    <key>CFBundleIdentifier</key>
-    <string>team.yourorbit.CaldwellDashboard</string>
-    <key>CFBundleExecutable</key>
-    <string>CaldwellDashboard</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.6.11</string>
-    <key>CFBundleVersion</key>
-    <string>11</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>SUFeedURL</key>
-    <string>https://github.com/justinwilliames/caldwell-speak/releases/latest/download/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>4HZt8Wm9W7FCkufc4a8CneXFmCd9v3UM3dIa6ob2xXE=</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsLocalNetworking</key>
-        <true/>
-    </dict>
-    <key>NSHumanReadableCopyright</key>
-    <string>MIT — forked from tomc98/speak</string>
+	<key>CFBundleDisplayName</key>
+	<string>Caldwell</string>
+	<key>CFBundleExecutable</key>
+	<string>CaldwellDashboard</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>team.yourorbit.CaldwellDashboard</string>
+	<key>CFBundleName</key>
+	<string>Caldwell</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.6.12</string>
+	<key>CFBundleVersion</key>
+	<string>12</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT — forked from tomc98/speak</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/justinwilliames/caldwell-speak/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>4HZt8Wm9W7FCkufc4a8CneXFmCd9v3UM3dIa6ob2xXE=</string>
 </dict>
 </plist>

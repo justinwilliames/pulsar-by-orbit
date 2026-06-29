@@ -8,7 +8,6 @@ struct SettingsView: View {
 
     @State private var statusMessage: String?
     @State private var statusKind: StatusKind = .info
-    @State private var personaSaving: Bool = false
 
     enum StatusKind { case ok, error, info }
 
@@ -16,8 +15,6 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 recoveryBanners
-                personaSection
-                Divider()
                 voiceSection
                 statusBanner
                 Divider()
@@ -27,62 +24,6 @@ struct SettingsView: View {
         }
         .task {
             await viewModel.loadSettings()
-        }
-    }
-
-    // MARK: - Persona Mode
-
-    @ViewBuilder
-    private var personaSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("CALDWELL'S MODE")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.5)
-
-            let mode = personaModeBinding
-            Picker("Mode", selection: mode) {
-                Text("Polite").tag(false)
-                Text("Potty Mouth").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .disabled(personaSaving)
-
-            HStack(spacing: 6) {
-                if personaSaving {
-                    ProgressView().scaleEffect(0.5)
-                }
-                Text(personaModeHint)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
-        }
-    }
-
-    private var personaModeBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.settings?.expletivesEnabled ?? true },
-            set: { newValue in
-                Task { await savePersona(expletivesEnabled: newValue) }
-            }
-        )
-    }
-
-    private var personaModeHint: String {
-        if viewModel.settings?.expletivesEnabled == false {
-            return "Polite — butler-formal RP, no expletives, no rough language."
-        }
-        return "Potty Mouth — RP precision with unflinching expletives where the moment earns it."
-    }
-
-    private func savePersona(expletivesEnabled: Bool) async {
-        personaSaving = true
-        defer { personaSaving = false }
-        let result = await viewModel.saveSettings(expletivesEnabled: expletivesEnabled)
-        if case .failure(let error) = result {
-            statusMessage = "Mode change failed: \(error)"
-            statusKind = .error
         }
     }
 
@@ -148,9 +89,9 @@ struct SettingsView: View {
 
     private var canonHint: String {
         if viewModel.settings?.canonEnabled == false {
-            return "Off — bespoke only: richer, fewer lines."
+            return "Off -- bespoke only: model-composed lines each turn."
         }
-        return "On — frequent short “Pushed, Sir.”-style pings at turn-end."
+        return "On -- short cached status pings at turn-end (e.g. \"Done.\", \"Pushed.\")."
     }
 
     @ViewBuilder

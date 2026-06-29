@@ -2,13 +2,8 @@
 # statusline.sh — Caldwell's status line for Claude Code.
 #
 # Renders: Caldwell mark · model · project · diff · session cost · turn
-# duration · a rotating quip. Persona-aware — reads the app's config.json for
-# mute + expletive mode, so the register matches the butler's mood and a muted
-# dial shows a hush marker (⊘). No network, no ElevenLabs — instant and free.
-#
-# Note: quips stay screen-safe even in Potty Mouth mode. The status line is
-# persistent and visible on a shared screen; the spoken voice is where the
-# expletives live, not here.
+# duration · a rotating quip. Reads config.json for mute state so a muted
+# dial shows a hush marker (⊘). No network — instant and free.
 #
 # Wired in by install-hooks.sh as settings.json -> statusLine.command.
 
@@ -29,7 +24,6 @@ cost=$(J '.cost.total_cost_usd')
 durms=$(J '.cost.total_duration_ms')
 
 muted=$(C '.CALDWELL_MUTED')
-potty=$(C '.CALDWELL_EXPLETIVES')
 
 D=$'\033[2m'; R=$'\033[0m'
 A=$'\033[38;5;75m'; G=$'\033[38;5;108m'; Y=$'\033[38;5;179m'; M=$'\033[38;5;245m'; HAT=$'\033[38;5;180m'
@@ -53,16 +47,11 @@ if [ -n "$durms" ] && [ "$durms" != "null" ]; then
   if [ "$mins" -ge 1 ]; then out="${out}${SEP}${mins}m"; else out="${out}${SEP}${secs}s"; fi
 fi
 
-polite=(
-  "Right then, Sir." "Tidy work, Sir." "At your service." "Mind the edge cases."
-  "Carrying on, Sir." "Quietly competent." "The usual standard, Sir."
-  "Steady as she goes." "All in hand, Sir." "Rather good, this."
+quips=(
+  "Ready." "In progress." "Mind the edge cases." "Carrying on."
+  "Quietly working." "Steady." "On task." "In hand." "Running."
+  "Active." "Working." "Processing."
 )
-cheeky=(
-  "Do try to keep up, Sir." "Bold choice, Sir." "I shan't say I told you so."
-  "Marvellous. Probably." "Onward, regardless, Sir."
-)
-if [ "$potty" = "1" ]; then quips=( "${polite[@]}" "${cheeky[@]}" ); else quips=( "${polite[@]}" ); fi
 idx=$(( 10#$(date +%M) % ${#quips[@]} ))
 out="${out}${SEP}${M}${quips[$idx]}${R}"
 

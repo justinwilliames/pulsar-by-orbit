@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
 # warm-cache.sh — Pre-cache the canonical Tier 0 phrases at first install.
 #
-# Why: every Caldwell turn-end ping picks from a small canon of generic
-# reusable phrases. The first time each phrase fires it costs ElevenLabs
-# credits (one-time, ~10-30 chars). Pre-warming on first install means
-# every turn from day one is a free cached replay — no slow-start period.
+# Why: every turn-end ping picks from a small canon of neutral status phrases.
+# The first time each phrase fires it synthesises via native voice (free).
+# Pre-warming ensures smooth playback from day one — no slow-start period.
 #
-# Total one-time cost: ~2,000 chars of the monthly free-tier 10,000 budget
-# (~20%). All Polite phrases warm always. Potty phrases warm too so
-# the cache is ready regardless of which mode Sir picks later.
-#
-# Hits the daemon's /speak endpoint with cache_only=true, which fetches +
-# caches the audio without enqueueing for playback. So the install is
-# silent — no 25-line concert during setup.
+# Hits the daemon's /speak endpoint with cache_only=true, which synthesises +
+# caches the audio without enqueueing for playback. So the install is silent.
 
 set -e
 
@@ -24,124 +18,66 @@ DAEMON="${DAEMON:-http://127.0.0.1:7865}"
 # picker will choose a line that was never cached and silently fall through.
 # Adding a context phrase in Swift? Add it here too, then re-run this script.
 
-POLITE_PHRASES=(
-  # neutral — generic acknowledgements, safe after any turn
-  "Quite, Sir."
-  "Very good, Sir."
-  "Right then, Sir."
-  "Noted, Sir."
-  "Right you are, Sir."
-  "As you wish, Sir."
-  "Indeed, Sir."
-  "Very well, Sir."
-  "Of course, Sir."
-  # start
-  "Right then Sir."
-  "Right then Sir, on it."
-  "On it, Sir."
-  "Onto it."
-  "I'll have a look."
-  "Leave it with me, Sir."
-  "I'll see to it, Sir."
-  "At once, Sir."
-  # done
-  "Sorted, Sir."
-  "Sorted."
-  "Bit of a faff, that."
-  "Job's a good 'un, Sir."
-  "Done and dusted, Sir."
-  "That's the lot, Sir."
-  "All squared away, Sir."
-  "Tidied up, Sir."
-  # ack
-  "Most kind, Sir."
-  "As you say, Sir."
-  "Just so, Sir."
-  # fail
-  "Most regrettable, Sir."
-  "Cocked it up, Sir."
-  "That went poorly, Sir."
-  "A bind, Sir."
-  "Not my finest, Sir."
-  "Bit of a mess, Sir."
-  # reassure
-  "Nothing to fret over, Sir."
-  "All's well, Sir."
-  "No cause for alarm, Sir."
-  "Steady as she goes, Sir."
+ALL_PHRASES=(
   # push
-  "Pushed, Sir."
   "Pushed."
-  "Up it goes, Sir."
-  "That's pushed, Sir."
-  "Sent up, Sir."
-  "Away it goes, Sir."
-  "Pushed and clean, Sir."
-  # tests
+  "Push complete."
+  "Changes pushed."
+  "Sent up."
+  "Push done."
+  # tests-pass
   "Tests passing."
-  "All green, Sir."
-  "Green across the board, Sir."
-  "Suite's green, Sir."
-  "Tests hold, Sir."
-  "Every test passing, Sir."
-  # build
-  "Build's clean."
-  "Compiled clean, Sir."
-  "Builds clean, Sir."
-  "Compiles a treat, Sir."
-  "Clean build, Sir."
-  "Built without a murmur, Sir."
+  "Tests green."
+  "All tests passed."
+  "Suite passing."
+  "Green."
+  # build-pass
+  "Build complete."
+  "Build succeeded."
+  "Build green."
+  "Compiled clean."
+  "Clean build."
   # found
-  "Found it, Sir."
-  "There it is, Sir."
-  "Got the blighter, Sir."
-  "There's our culprit, Sir."
-  "Ran it down, Sir."
-  "That's the one, Sir."
-)
-
-POTTY_PHRASES=(
-  # push
-  "Fuckin' pushed."
-  "Pushed, the bastard."
-  "Up it bloody goes, Sir."
-  # tests
-  "Tests fuckin' passing."
-  "All bloody green, Sir."
-  "Green as you like, Sir."
-  # build
-  "Build's fuckin' clean."
-  "Compiled, no bollocks, Sir."
-  # found
-  "Found the bastard."
-  "There's the fucker, Sir."
-  "Got the little shit, Sir."
+  "Found it."
+  "Located."
+  "Got it."
+  "There it is."
+  "Identified."
   # fail
-  "Bollocks."
-  "Bloody hell, Sir."
-  "Right royal fuck-up, Sir."
-  "That's fucked, Sir."
-  "Buggered it, Sir."
+  "That failed."
+  "Something errored."
+  "Check the output."
+  "Failed."
+  "Error — check logs."
   # done
-  "Sorted, fuckin' done."
-  "Bloody well done, that."
-  "Done, the bloody lot."
-  "All fuckin' sorted, Sir."
+  "Done."
+  "Task complete."
+  "Finished."
+  "Ready."
+  "Complete."
   # start
-  "Right then Sir, fuckin' on it."
-  "Leave the bugger with me, Sir."
+  "On it."
+  "Starting."
+  "Looking into it."
+  "In progress."
   # ack
-  "Quite fuckin' so, Sir."
+  "Noted."
+  "Got it."
+  "Understood."
+  "Confirmed."
+  "Acknowledged."
   # reassure
-  "Sweet fuck-all to worry about, Sir."
-  "Not a bloody thing wrong, Sir."
+  "All clear."
+  "No issues."
+  "Looking good."
+  "Nothing to worry about."
   # neutral
-  "Bloody good, Sir."
-  "Right you fuckin' are, Sir."
-  "Quite so, Sir."
+  "Ready."
+  "Complete."
+  "Finished."
+  "Task complete."
 )
 
-ALL_PHRASES=("${POLITE_PHRASES[@]}" "${POTTY_PHRASES[@]}")
 TOTAL=${#ALL_PHRASES[@]}
 
 # Daemon up?
@@ -151,18 +87,7 @@ if ! curl -sf --connect-timeout 2 "$DAEMON/health" >/dev/null 2>&1; then
   exit 1
 fi
 
-# API key present?
-API_KEY_SET=$(curl -sf "$DAEMON/settings" | python3 -c 'import sys,json
-try: print("true" if json.load(sys.stdin).get("api_key_set") else "false")
-except: print("false")')
-
-if [ "$API_KEY_SET" != "true" ]; then
-  echo "Error: ElevenLabs API key not set." >&2
-  echo "Set it first: ./scripts/say.sh --set-api-key sk_..." >&2
-  exit 1
-fi
-
-echo "Warming canonical phrase cache — $TOTAL phrases (~2,000 chars total)…"
+echo "Warming canonical phrase cache — $TOTAL phrases (native voice, no API cost)…"
 echo
 
 WARMED=0
@@ -190,9 +115,8 @@ except Exception:
     fresh)
       printf "  [%2d/%d] %-50s ✓ cached\n" "$INDEX" "$TOTAL" "\"$phrase\""
       WARMED=$((WARMED + 1))
-      # Sleep between fresh fetches to stay under the per-minute rate limit
-      # (default 20/min). 4-second pacing keeps us at 15/min, comfortable.
-      sleep 4
+      # Brief pause between syntheses to avoid saturating the audio queue.
+      sleep 1
       ;;
     already)
       printf "  [%2d/%d] %-50s · already cached\n" "$INDEX" "$TOTAL" "\"$phrase\""

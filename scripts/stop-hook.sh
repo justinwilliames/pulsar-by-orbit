@@ -34,7 +34,7 @@ fi
 # 1. Daemon up?
 curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1 || exit 0
 
-# 2. Pull /settings once — check muted AND persona mode in one trip
+# 2. Pull /settings once — check muted state
 SETTINGS=$(curl -sf --connect-timeout 1 "$DAEMON/settings" 2>/dev/null || echo "{}")
 MUTED=$(echo "$SETTINGS" | python3 -c 'import sys,json
 try: print("true" if json.load(sys.stdin).get("muted") else "false")
@@ -107,8 +107,8 @@ print(last.lower()[-4000:])
   # High precision, low recall: only fire a SPECIFIC context when the closing
   # message clearly signals it. Everything else falls through to "neutral" —
   # which the daemon now treats as a dedicated generic-acknowledgement pool,
-  # not the union of every context. So a missed match costs a safe butler
-  # line ("Quite, Sir."), never an irrelevant specific ("Tests passing.").
+  # not the union of every context. So a missed match costs a safe neutral
+  # line ("Done."), never an irrelevant specific ("Tests passing.").
   #
   # Success is matched BEFORE failure so "fixed the failed test" reads as
   # done, not a fresh cock-up. Failure tells are deliberately strict — a

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Singleton config store. Reads from:
-///   1. REPO_ROOT/config.json — muted state, expletives toggle, native voice.
+///   1. REPO_ROOT/config.json — muted state, native voice.
 ///   2. Environment variables — overrides for the native-voice choice + canon.
 ///
 /// Thread-safe: all mutations go through an NSLock. Call `reload()` after
@@ -57,11 +57,6 @@ final class CaldwellConfig: @unchecked Sendable {
     var isMuted: Bool {
         let val = lock.withLock { _config["CALDWELL_MUTED"] } ?? "0"
         return ["1", "true", "yes", "on"].contains(val.lowercased())
-    }
-
-    var expletivesEnabled: Bool {
-        let val = lock.withLock { _config["CALDWELL_EXPLETIVES"] } ?? "1"
-        return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
     /// The user's chosen local (free-mode) voice. Empty = auto (Daniel Enhanced

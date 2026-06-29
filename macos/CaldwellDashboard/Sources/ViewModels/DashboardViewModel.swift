@@ -283,9 +283,9 @@ final class DashboardViewModel {
         }
     }
 
-    func saveSettings(expletivesEnabled: Bool? = nil, muted: Bool? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
+    func saveSettings(muted: Bool? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(expletivesEnabled: expletivesEnabled, muted: muted, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
+            let response = try await api.saveSettings(muted: muted, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }

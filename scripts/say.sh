@@ -59,8 +59,6 @@ while [[ $# -gt 0 ]]; do
     --set-voice-id)  ACTION="set-voice-id"; SETUP_VALUE="$2"; shift 2 ;;
     --mute)          ACTION="set-muted"; SETUP_VALUE="true"; shift ;;
     --unmute)        ACTION="set-muted"; SETUP_VALUE="false"; shift ;;
-    --polite)        ACTION="set-mode"; SETUP_VALUE="false"; shift ;;
-    --potty)         ACTION="set-mode"; SETUP_VALUE="true"; shift ;;
     -*)              echo "Unknown option: $1" >&2; exit 1 ;;
     *)               TEXT="$1"; shift ;;
   esac
@@ -126,10 +124,6 @@ case "${ACTION:-speak}" in
     BODY=$(python3 -c "import json, sys; print(json.dumps({'muted': sys.argv[1] == 'true'}))" "$SETUP_VALUE")
     curl -sf -X POST -H "Content-Type: application/json" -d "$BODY" "$DAEMON/settings" | python3 -m json.tool
     ;;
-  set-mode)
-    BODY=$(python3 -c "import json, sys; print(json.dumps({'expletives_enabled': sys.argv[1] == 'true'}))" "$SETUP_VALUE")
-    curl -sf -X POST -H "Content-Type: application/json" -d "$BODY" "$DAEMON/settings" | python3 -m json.tool
-    ;;
   canon)
     # Context-aware cached-canon pick. Daemon picks a phrase tagged with the
     # given context that's actually in cache, then enqueues it. Cache-only —
@@ -155,7 +149,6 @@ case "${ACTION:-speak}" in
       echo "       say.sh --usage | --settings" >&2
       echo "       say.sh --set-api-key sk_... | --set-voice-id <20-char-id>" >&2
       echo "       say.sh --mute | --unmute" >&2
-      echo "       say.sh --polite | --potty" >&2
       echo "" >&2
       echo "Add --cacheable for any line generic enough to fire again" >&2
       echo "on a different turn (\"Pushed.\", \"Sorted Sir.\", \"Tests passing.\")." >&2

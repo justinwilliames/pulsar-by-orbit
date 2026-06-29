@@ -1,7 +1,6 @@
 import Foundation
 
 struct DaemonSettings: Codable, Sendable {
-    let expletivesEnabled: Bool?
     let muted: Bool?
     /// The macOS voice the native path resolves to (e.g. "Daniel (Enhanced)").
     let nativeVoice: String?
@@ -14,7 +13,6 @@ struct DaemonSettings: Codable, Sendable {
     let availableVoices: [NativeVoiceClient.VoiceOption]?
 
     enum CodingKeys: String, CodingKey {
-        case expletivesEnabled = "expletives_enabled"
         case muted
         case nativeVoice = "native_voice"
         case enhancedInstalled = "enhanced_installed"
@@ -24,7 +22,6 @@ struct DaemonSettings: Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.expletivesEnabled = try container.decodeIfPresent(Bool.self, forKey: .expletivesEnabled)
         self.muted = try container.decodeIfPresent(Bool.self, forKey: .muted)
         self.nativeVoice = try container.decodeIfPresent(String.self, forKey: .nativeVoice)
         self.enhancedInstalled = try container.decodeIfPresent(Bool.self, forKey: .enhancedInstalled)
@@ -35,14 +32,12 @@ struct DaemonSettings: Codable, Sendable {
 
 struct SettingsSaveResponse: Codable, Sendable {
     let saved: Bool?
-    let expletivesEnabled: Bool?
     let muted: Bool?
     let error: String?
     let field: String?
 
     enum CodingKeys: String, CodingKey {
         case saved
-        case expletivesEnabled = "expletives_enabled"
         case muted
         case error
         case field
@@ -50,12 +45,11 @@ struct SettingsSaveResponse: Codable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.expletivesEnabled = try container.decodeIfPresent(Bool.self, forKey: .expletivesEnabled)
         self.muted = try container.decodeIfPresent(Bool.self, forKey: .muted)
         self.error = try container.decodeIfPresent(String.self, forKey: .error)
         self.field = try container.decodeIfPresent(String.self, forKey: .field)
 
-        let hasSettingsPayload = expletivesEnabled != nil || muted != nil
+        let hasSettingsPayload = muted != nil
         self.saved = try container.decodeIfPresent(Bool.self, forKey: .saved)
             ?? (error == nil && hasSettingsPayload ? true : nil)
     }

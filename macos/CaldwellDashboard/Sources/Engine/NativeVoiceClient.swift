@@ -14,7 +14,7 @@ import Foundation
 ///     (so "Daniel" plays as "Daniel (Enhanced)" when that's downloaded).
 enum NativeVoiceClient {
 
-    /// Measured "butler" pace (words/min). Enhanced voices honour `-r`.
+    /// Default speaking pace (words/min). Enhanced voices honour `-r`.
     static let defaultRate = 168
 
     /// A selectable voice for the picker: the deduped base name + a human label

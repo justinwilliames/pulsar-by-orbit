@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # chime.sh — Caldwell's turn-end chime for Claude Code. Sound only, no voice.
 #
-# DEFERS TO CALDWELL: if the daemon is up AND not muted, Caldwell speaks this
+# DEFERS TO CALDWELL: if the daemon is up AND not muted, voice speaks this
 # turn and IS the cue — the chime stays silent so the two never clash. The
-# chime only rings when his voice won't: when he's muted, or the app is closed.
-# So you get exactly one turn-end cue, never both: unmuted -> the butler;
+# chime only rings when voice won't: when muted, or the app is closed.
+# So you get exactly one turn-end cue, never both: unmuted -> voice;
 # muted/closed -> a chime.
 #
 #   • quick reply  -> soft Tink

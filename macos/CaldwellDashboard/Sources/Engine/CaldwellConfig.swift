@@ -129,10 +129,10 @@ final class CaldwellConfig: @unchecked Sendable {
     /// Which engine speaks: "elevenlabs" (premium cloud) or "native" (free local
     /// macOS voice). Default "elevenlabs" preserves today's behaviour.
     var voiceEngine: String {
-        let val = (lock.withLock { _config["CALDWELL_VOICE_ENGINE"] }
-            ?? ProcessInfo.processInfo.environment["CALDWELL_VOICE_ENGINE"]
-            ?? "elevenlabs").lowercased()
-        return val == "native" ? "native" : "elevenlabs"
+        // ElevenLabs removed — Pulsar speaks with the local macOS voice only.
+        // The cloud path in handleSpeak is now unreachable and is deleted in a
+        // follow-up; this is the single switch that makes it native-only.
+        return "native"
     }
 
     /// The user's chosen local (free-mode) voice. Empty = auto (Daniel Enhanced

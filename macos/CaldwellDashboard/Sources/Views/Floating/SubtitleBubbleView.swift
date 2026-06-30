@@ -33,6 +33,7 @@ struct SubtitleBubbleView: View {
     var maxHeight: CGFloat = .greatestFiniteMagnitude
 
     static let maxWidth: CGFloat = 280
+    private let tailHeight: CGFloat = 8
 
     private var core: Color { .orbit }        // #6366F1 — matches the head
     private var light: Color { .orbitLight }  // #818CF8 — the head's rim glow tint
@@ -68,9 +69,6 @@ struct SubtitleBubbleView: View {
             content(revealed(at: timeline.date))
                 .background(bubbleBackground)
                 .overlay { rimGlow(pulse: pulse) }
-                .overlay(alignment: tailEdge == .top ? .top : .bottom) {
-                    tail(pulse: pulse)
-                }
                 // Same soft indigo core shadow as the head, pulsing in step.
                 .shadow(color: core.opacity(0.18 + pulse * 0.22),
                         radius: 6 + pulse * 5)
@@ -89,6 +87,7 @@ struct SubtitleBubbleView: View {
         captionText(revealed)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
+            .padding(tailEdge == .top ? .top : .bottom, tailHeight)  // room for the tail
             .frame(maxWidth: Self.maxWidth)
         // NO maxHeight frame: that let the bubble EXPAND to fill offered space
         // (the container proposes ~infinite height), stranding the text in a
@@ -109,14 +108,17 @@ struct SubtitleBubbleView: View {
     // MARK: - Glass + glow (matched to the head)
 
     private var bubbleBackground: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(core.opacity(0.28))
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.black.opacity(0.35))
-        }
+        // ONE shape for box + tail so the tail is genuinely part of the bubble.
+        // OPAQUE indigo (not translucent material): a glass tail over the head's
+        // bright glow read brighter than the box body over the dark desktop —
+        // opaque makes box and tail identical.
+        let shape = SpeechBubbleShape(tailOnTop: tailEdge == .top, tailHeight: tailHeight)
+        return shape
+            .fill(LinearGradient(
+                colors: [Color(.sRGB, red: 0.20, green: 0.20, blue: 0.37, opacity: 1),
+                         Color(.sRGB, red: 0.11, green: 0.11, blue: 0.22, opacity: 1)],
+                startPoint: .top, endPoint: .bottom))
+            .overlay { shape.fill(core.opacity(0.16)) }  // subtle on-brand indigo wash
     }
 
     /// Identical recipe to `FloatingPortraitView.rimGlow`: a soft, bright indigo
@@ -126,41 +128,41 @@ struct SubtitleBubbleView: View {
     @ViewBuilder
     private func rimGlow(pulse: Double) -> some View {
         let intensity = 0.30 + pulse * 0.30
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
+        SpeechBubbleShape(tailOnTop: tailEdge == .top, tailHeight: tailHeight)
             .stroke(light.opacity(intensity), lineWidth: 3.5 + pulse * 2.0)
             .blur(radius: 4 + pulse * 2)
             .blendMode(.plusLighter)
             .allowsHitTesting(false)
     }
 
-    @ViewBuilder
-    private func tail(pulse: Double) -> some View {
-        // EXACT same fill stack as `bubbleBackground` so the tail is the same
-        // colour as the box and blends into it — no glow rim (that made it stand
-        // out as a separate triangle).
-        let up = tailEdge == .top
-        CaptionTail(pointingUp: up)
-            .fill(.ultraThinMaterial)
-            .overlay { CaptionTail(pointingUp: up).fill(core.opacity(0.28)) }
-            .overlay { CaptionTail(pointingUp: up).fill(Color.black.opacity(0.35)) }
-            .frame(width: 16, height: 8)
-            .offset(y: up ? -7 : 7)
-    }
 }
 
-/// A triangle tail for the bubble — points up (toward a head above) or down.
-private struct CaptionTail: Shape {
-    var pointingUp: Bool
+/// The whole bubble as ONE shape: a rounded rectangle with a triangular tail
+/// protruding from the top (head above) or bottom (head below). Filled once, the
+/// tail is genuinely part of the box; stroked, the glow rim flows around the tail.
+private struct SpeechBubbleShape: Shape {
+    var tailOnTop: Bool
+    var cornerRadius: CGFloat = 14
+    var tailWidth: CGFloat = 18
+    var tailHeight: CGFloat = 8
+
     func path(in rect: CGRect) -> Path {
-        var p = Path()
-        if pointingUp {
-            p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        let bodyRect = tailOnTop
+            ? CGRect(x: rect.minX, y: rect.minY + tailHeight,
+                     width: rect.width, height: rect.height - tailHeight)
+            : CGRect(x: rect.minX, y: rect.minY,
+                     width: rect.width, height: rect.height - tailHeight)
+        var p = Path(roundedRect: bodyRect, cornerRadius: cornerRadius, style: .continuous)
+        let midX = rect.midX
+        let half = tailWidth / 2
+        if tailOnTop {
+            p.move(to: CGPoint(x: midX - half, y: bodyRect.minY + 1))
+            p.addLine(to: CGPoint(x: midX, y: rect.minY))
+            p.addLine(to: CGPoint(x: midX + half, y: bodyRect.minY + 1))
         } else {
-            p.move(to: CGPoint(x: rect.midX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+            p.move(to: CGPoint(x: midX - half, y: bodyRect.maxY - 1))
+            p.addLine(to: CGPoint(x: midX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: midX + half, y: bodyRect.maxY - 1))
         }
         p.closeSubpath()
         return p

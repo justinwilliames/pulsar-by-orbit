@@ -20,13 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         userDriverDelegate: nil
     )
 
-    // Tail after audio finishes — short enough that Sir doesn't think the
-    // app is hung, long enough that he registers the cached one-word pings.
-    private static let tailAfterIdle: TimeInterval = 2.0
+    // Tail after audio finishes — kept long enough to read the final caption
+    // line in full before the head + bubble fade out together. Matches the
+    // caption linger in FloatingHeadsView so head and subtitle leave in sync.
+    private static let tailAfterIdle: TimeInterval = 10.0
     // Absolute ceiling on visibility, measured from when the panel was
     // first shown. Hard belt-and-braces against a dropped/missed idle SSE
-    // event leaving the portrait stuck on screen forever.
-    private static let maxVisibleDuration: TimeInterval = 30.0
+    // event leaving the portrait stuck on screen forever. Generous enough to
+    // cover a long line + the 10s read tail.
+    private static let maxVisibleDuration: TimeInterval = 45.0
     private var hideWorkItem: DispatchWorkItem?
     private var maxVisibleWorkItem: DispatchWorkItem?
 

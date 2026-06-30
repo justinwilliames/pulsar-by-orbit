@@ -2,10 +2,12 @@ import SwiftUI
 
 struct FloatingHeadsView: View {
     let viewModel: DashboardViewModel
+    /// Shared geometry: which side the caption renders on + its horizontal nudge.
+    let layout: FloatingLayoutModel
 
-    /// Reports the view's desired total height (head zone + caption, when shown)
-    /// up to the panel controller so it can grow/shrink the window downward.
-    var onContentHeightChange: ((CGFloat) -> Void)?
+    /// Reports the caption's measured height (0 when hidden) up to the panel
+    /// controller so it can grow the window on the correct side and shrink back.
+    var onCaptionHeightChange: ((CGFloat) -> Void)?
 
     private let orbitRadius: CGFloat = 70
     private let thumbnailSize: CGFloat = 40
@@ -13,58 +15,51 @@ struct FloatingHeadsView: View {
     private let arcStart: Double = 30
     private let arcEnd: Double = 150
 
-    /// Fixed head zone — the original 240×260 panel footprint. The head and its
-    /// orbiting queue thumbnails live here; the caption grows BELOW it.
-    private let headZoneWidth: CGFloat = 240
-    private let headZoneHeight: CGFloat = 260
-    /// Gap between the bottom of the head zone and the top of the caption.
-    private let captionTopGap: CGFloat = 2
-    private let captionBottomPadding: CGFloat = 10
+    /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
+    /// live here; the caption grows ABOVE or BELOW it. Tightened from the old
+    /// 240×260 so the caption hugs the VISIBLE head rather than floating below a
+    /// tall empty zone. Kept in sync with `FloatingPanelController.headZoneSize`.
+    static let headZoneWidth: CGFloat = 240
+    static let headZoneHeight: CGFloat = 200
+
+    /// Small overlap so the caption visually attaches to the head instead of
+    /// leaving an air gap. The head's glow tail fades within the zone, so a
+    /// slight negative gap reads as "attached".
+    private let captionAttachGap: CGFloat = -4
+    private let captionEdgePadding: CGFloat = 6
 
     // MARK: - Caption lifecycle state
-    //
-    // currentText is HELD by PlaybackState after audio ends (see PlaybackState),
-    // so we can linger on the last line, then fade out and clear it. A new line
-    // arriving while one is showing cross-fades via the .id-keyed transition.
 
-    /// The caption text currently being displayed (nil = hidden).
     @State private var displayedCaption: String?
-    /// Pending linger timer — cancelled if a new line arrives during the linger.
     @State private var lingerTask: Task<Void, Never>?
 
-    private static let lingerAfterIdle: TimeInterval = 1.5
+    /// Linger ~10s after a line completes so there's time to finish reading.
+    static let lingerAfterIdle: TimeInterval = 10.0
 
     var body: some View {
-        VStack(spacing: captionTopGap) {
-            headZone
-                .frame(width: headZoneWidth, height: headZoneHeight)
-
-            captionZone
-        }
-        .frame(width: headZoneWidth)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(
-            // Measure total laid-out height and report it up to the panel.
-            GeometryReader { proxy in
-                Color.clear
-                    .preference(key: ContentHeightKey.self, value: proxy.size.height)
+        VStack(spacing: captionAttachGap) {
+            if layout.captionEdge == .above {
+                captionZone
+                headZone
+            } else {
+                headZone
+                captionZone
             }
-        )
-        .onPreferenceChange(ContentHeightKey.self) { height in
-            onContentHeightChange?(height)
         }
+        .frame(width: Self.headZoneWidth)
+        .frame(maxHeight: .infinity, alignment: layout.captionEdge == .above ? .bottom : .top)
         .onChange(of: captionSource) { _, _ in updateCaption() }
+        .onChange(of: viewModel.playback.isPlaying) { _, _ in updateCaption() }
         .onChange(of: subtitlesActive) { _, _ in updateCaption() }
         .onAppear { updateCaption() }
     }
 
-    // MARK: - Head zone (unchanged behaviour)
+    // MARK: - Head zone
 
     @ViewBuilder
     private var headZone: some View {
         ZStack {
             if let voice = viewModel.playback.currentVoice {
-                // Active speaker — Caldwell is the only voice, no label needed
                 FloatingPortraitView(
                     voiceName: voice,
                     amplitude: viewModel.lipSync.amplitude,
@@ -72,14 +67,10 @@ struct FloatingHeadsView: View {
                     portraitManager: viewModel.portraitManager
                 )
                 .id(voice)
-                // Clean on-brand entrance: scale up + fade in. The head's own
-                // Pulsar pulse (FloatingPortraitView) fires immediately on
-                // appear, so the indigo "ping" reads as the arrival beat.
                 .transition(.opacity.combined(with: .scale(scale: 0.88)))
-                .offset(y: -16)
+                .offset(y: -8)
                 .zIndex(10)
 
-                // Orbiting queue thumbnails
                 let queued = Array(viewModel.queueItems.filter { !$0.isPlaying }.prefix(5))
                 ForEach(Array(queued.enumerated()), id: \.element.id) { index, item in
                     QueueBubbleView(
@@ -97,46 +88,54 @@ struct FloatingHeadsView: View {
                 }
             }
         }
+        .frame(width: Self.headZoneWidth, height: Self.headZoneHeight)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: viewModel.queueItems.map(\.id))
         .animation(.spring(response: 0.42, dampingFraction: 0.72), value: viewModel.playback.currentVoice)
     }
 
-    // MARK: - Caption zone (grows below the head)
+    // MARK: - Caption zone
 
     @ViewBuilder
     private var captionZone: some View {
         Group {
             if let caption = displayedCaption {
-                SubtitleBubbleView(text: caption)
-                    .id(caption)               // new text => cross-fade transition
-                    .padding(.bottom, captionBottomPadding)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                SubtitleBubbleView(text: caption,
+                                   tailEdge: layout.captionEdge == .above ? .bottom : .top)
+                    .id(caption)
+                    .offset(x: layout.captionXOffset)
+                    .padding(.horizontal, captionEdgePadding)
+                    .padding(layout.captionEdge == .above ? .top : .bottom, captionEdgePadding)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: CaptionHeightKey.self, value: proxy.size.height)
+                        }
+                    )
+                    .transition(.opacity.combined(
+                        with: .move(edge: layout.captionEdge == .above ? .bottom : .top)))
             }
         }
+        .frame(maxWidth: .infinity)
         .animation(.easeInOut(duration: 0.35), value: displayedCaption)
+        .animation(.easeInOut(duration: 0.35), value: layout.captionEdge)
+        .onPreferenceChange(CaptionHeightKey.self) { height in
+            onCaptionHeightChange?(displayedCaption == nil ? 0 : height)
+        }
+        .onChange(of: displayedCaption) { _, new in
+            if new == nil { onCaptionHeightChange?(0) }
+        }
     }
 
     // MARK: - Caption lifecycle driver
 
-    /// The raw line PlaybackState currently holds (held through the idle tail).
-    private var captionSource: String? {
-        viewModel.playback.currentText
-    }
+    private var captionSource: String? { viewModel.playback.currentText }
 
-    /// Whether subtitles should be shown at all: setting on AND head on. The
-    /// head being off means the panel never appears, but guard anyway.
     private var subtitlesActive: Bool {
         viewModel.isSubtitlesEnabled && viewModel.isFloatingHeadEnabled
     }
 
-    /// Reconciles the displayed caption against the live source + speaking state.
-    /// - While speaking with text: show it immediately (cross-fades on change).
-    /// - When speech ends (text still held): linger, then fade out and clear.
-    /// - Subtitles off / head off: clear at once.
     private func updateCaption() {
         guard subtitlesActive else {
-            lingerTask?.cancel()
-            lingerTask = nil
+            lingerTask?.cancel(); lingerTask = nil
             displayedCaption = nil
             return
         }
@@ -145,19 +144,13 @@ struct FloatingHeadsView: View {
         let speaking = viewModel.playback.isPlaying
 
         if speaking, let text = source, !text.isEmpty {
-            // Live line — cancel any linger and show it now.
-            lingerTask?.cancel()
-            lingerTask = nil
+            lingerTask?.cancel(); lingerTask = nil
             displayedCaption = text
         } else if let text = source, !text.isEmpty, displayedCaption != nil {
-            // Audio finished but text is still held — keep the last line on
-            // screen for the linger window, then fade out and clear.
             displayedCaption = text
             scheduleLinger()
         } else if source == nil || source?.isEmpty == true {
-            // Source cleared (panel hidden / fully reset) — drop the caption.
-            lingerTask?.cancel()
-            lingerTask = nil
+            lingerTask?.cancel(); lingerTask = nil
             displayedCaption = nil
         }
     }
@@ -167,7 +160,6 @@ struct FloatingHeadsView: View {
         lingerTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(Self.lingerAfterIdle * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            // Only clear if still idle (a new line may have started).
             if !viewModel.playback.isPlaying {
                 displayedCaption = nil
             }
@@ -176,9 +168,7 @@ struct FloatingHeadsView: View {
 
     private func orbitAngle(index: Int, total: Int) -> Double {
         guard total > 0 else { return 0 }
-        if total == 1 {
-            return ((arcStart + arcEnd) / 2) * .pi / 180
-        }
+        if total == 1 { return ((arcStart + arcEnd) / 2) * .pi / 180 }
         let span = arcEnd - arcStart
         let step = span / Double(total - 1)
         let degrees = arcStart + step * Double(index)
@@ -186,9 +176,9 @@ struct FloatingHeadsView: View {
     }
 }
 
-/// Carries the laid-out content height up to the panel controller.
-private struct ContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 260
+/// Carries the caption's laid-out height up to the panel controller.
+private struct CaptionHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
     }

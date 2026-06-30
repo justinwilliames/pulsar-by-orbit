@@ -16,11 +16,19 @@ struct FloatingHeadsView: View {
     /// long captions at ~3 lines.
     var onCaptionText: ((String) -> Void)?
 
-    private let orbitRadius: CGFloat = 82
+    private let orbitRadius: CGFloat = 76
     private let thumbnailSize: CGFloat = 40
-    private let orbitYOffset: CGFloat = 24
-    private let arcStart: Double = 20
-    private let arcEnd: Double = 160
+    /// Lift the whole orbit UP so the drones ring the TOP/sides of the central
+    /// head, leaving the below-head zone clear for the name pill + subtitle.
+    /// (Was +24, which pushed the arc down into the chin/caption zone.) Kept
+    /// modest so the top drone (radius 76 + this lift + thumb half ≈ 108pt)
+    /// clears the 120pt half-height without clipping.
+    private let orbitYOffset: CGFloat = -12
+    /// Upper arc, in SwiftUI screen degrees (y down): 200°→340° sweeps across the
+    /// TOP and upper sides of the head (sin negative = above centre), instead of
+    /// the old 20°→160° bottom arc that crowded the area under the chin.
+    private let arcStart: Double = 200
+    private let arcEnd: Double = 340
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
@@ -138,8 +146,9 @@ struct FloatingHeadsView: View {
                 droneName: p.category ?? "pulsar",
                 glowColor: p.color
             )
-            // Name card BELOW the central portrait squircle (P4).
-            .overlay(alignment: .bottom) { centreNameCard(for: p) }
+            // The speaker's name lives as a header pill on the subtitle bubble
+            // (see `nameHeaderPill`), NOT under the chin — that zone is where the
+            // orbit drones + the bubble sit and the card was getting occluded.
             .transition(.asymmetric(
                 insertion: .offset(home)
                     .combined(with: .scale(scale: 0.72))   // steps forward from depth
@@ -177,25 +186,27 @@ struct FloatingHeadsView: View {
                       height: sin(angle) * orbitRadius + orbitYOffset)
     }
 
-    /// The name card BELOW the centre portrait: "NAME · ROLE", drone-tinted.
-    /// Shown only when a drone holds the centre; Pulsar shows nothing (P4).
+    /// The speaker's identity as a tinted pill HEADER attached to the TOP edge of
+    /// the subtitle bubble — "NAME · ROLE", themed to the speaker's colour, drawn
+    /// above the orbit z-order. Co-locating it with the speech keeps the name
+    /// legible and clear of the orbit drones that crowd the below-head zone.
+    /// Shown only when a drone holds the line; Pulsar shows nothing.
     @ViewBuilder
-    private func centreNameCard(for p: Participant) -> some View {
-        if let category = p.category {
-            let color = p.color
+    private var nameHeaderPill: some View {
+        if let category = activeDroneCategory {
+            let color = droneColor(for: category)
             let role = droneRole(for: category).uppercased()
             Text(role.isEmpty ? category.uppercased() : "\(category.uppercased()) · \(role)")
                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                 .tracking(1.2)
                 .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(color.opacity(0.85)))
-                // strokeBorder draws INSIDE the edge so a crisp 1pt line survives
-                // (the old stroke+blur(1.5) dissolved the line into nothing).
-                .overlay(Capsule().strokeBorder(color.opacity(0.6), lineWidth: 1))
-                .shadow(color: color.opacity(0.5), radius: 8)
-                .offset(y: 14)                              // below the squircle
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3.5)
+                .background(Capsule().fill(color.opacity(0.92)))
+                // strokeBorder draws INSIDE the edge so a crisp 1pt line survives.
+                .overlay(Capsule().strokeBorder(.white.opacity(0.7), lineWidth: 1))
+                .shadow(color: color.opacity(0.6), radius: 8)
+                .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
                 .transition(.opacity.combined(with: .scale(scale: 0.7)))
                 .allowsHitTesting(false)
         }
@@ -319,6 +330,13 @@ struct FloatingHeadsView: View {
                                    tailEdge: layout.captionEdge == .above ? .bottom : .top,
                                    maxHeight: captionMaxHeight,
                                    activeColor: speaker?.color ?? .orbitLight)   // P3 single source
+                    // Speaker name pill straddling the bubble's TOP edge, above
+                    // the orbit z-order so it's never occluded by a drone.
+                    .overlay(alignment: .top) {
+                        nameHeaderPill
+                            .offset(y: layout.captionEdge == .above ? 6 : -10)
+                            .zIndex(40)
+                    }
                     .id(caption)
                     .offset(x: layout.captionXOffset)
                     .padding(.horizontal, captionEdgePadding)

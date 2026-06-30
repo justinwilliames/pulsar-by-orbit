@@ -118,27 +118,35 @@ struct SubtitleBubbleView: View {
 
     private var bubbleBackground: some View {
         // ONE shape for box + tail so the tail is genuinely part of the bubble.
-        // OPAQUE indigo (not translucent material): a glass tail over the head's
-        // bright glow read brighter than the box body over the dark desktop —
-        // opaque makes box and tail identical.
+        // The base stays a dark gradient for TEXT LEGIBILITY, but the bottom stop
+        // is pulled toward the speaker's colour and a stronger colour wash sits on
+        // top — so the bubble OBVIOUSLY reads as the active speaker's hue at a
+        // glance (azure for Sentinel, indigo for Pulsar) rather than a faint tint.
         let shape = SpeechBubbleShape(tailOnTop: tailEdge == .top, tailHeight: tailHeight)
         return shape
+            // Dark base for text legibility…
             .fill(LinearGradient(
-                colors: [Color(.sRGB, red: 0.20, green: 0.20, blue: 0.37, opacity: 1),
-                         Color(.sRGB, red: 0.11, green: 0.11, blue: 0.22, opacity: 1)],
+                colors: [Color(.sRGB, red: 0.14, green: 0.14, blue: 0.26, opacity: 1),
+                         Color(.sRGB, red: 0.09, green: 0.09, blue: 0.18, opacity: 1)],
                 startPoint: .top, endPoint: .bottom))
-            .overlay { shape.fill(core.opacity(0.16)) }  // subtle on-brand indigo wash
+            // …then a strong speaker-colour wash so the hue reads at a glance:
+            // a flat tint plus a brighter top-down gradient of the same colour.
+            .overlay { shape.fill(core.opacity(0.30)) }
+            .overlay {
+                shape.fill(LinearGradient(
+                    colors: [core.opacity(0.30), core.opacity(0.12)],
+                    startPoint: .top, endPoint: .bottom))
+            }
     }
 
-    /// Identical recipe to `FloatingPortraitView.rimGlow`: a soft, bright indigo
-    /// rim hugging the edge, brightening on each beat. The head has an amplitude
-    /// term too; the caption has no audio amplitude, so it uses the head's
-    /// resting baseline + the same pulse term.
+    /// Identical recipe to `FloatingPortraitView.rimGlow`: a soft, bright rim
+    /// hugging the edge, brightening on each beat — tinted to the active speaker.
+    /// Stronger than before so the speaker colour reads clearly around the bubble.
     @ViewBuilder
     private func rimGlow(pulse: Double) -> some View {
-        let intensity = 0.30 + pulse * 0.30
+        let intensity = 0.55 + pulse * 0.35
         SpeechBubbleShape(tailOnTop: tailEdge == .top, tailHeight: tailHeight)
-            .stroke(light.opacity(intensity), lineWidth: 3.5 + pulse * 2.0)
+            .stroke(light.opacity(intensity), lineWidth: 4.0 + pulse * 2.0)
             .blur(radius: 4 + pulse * 2)
             .blendMode(.plusLighter)
             .allowsHitTesting(false)

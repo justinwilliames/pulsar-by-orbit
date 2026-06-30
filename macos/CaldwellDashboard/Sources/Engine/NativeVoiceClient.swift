@@ -86,11 +86,11 @@ enum NativeVoiceClient {
            let v = vs.first(where: { $0.display.caseInsensitiveCompare(choice) == .orderedSame }) {
             return v.resolved
         }
-        // Out-of-box default (no saved choice): Zarvox — Pulsar opens robotic.
+        // Out-of-box default (no saved choice): Trinoids — Pulsar opens robotic.
         // A user's saved pick is never overridden because `choice` is non-empty
         // once they choose. Fall through to Daniel, then anything installed.
-        if let zarvox = vs.first(where: { $0.display.caseInsensitiveCompare("Zarvox") == .orderedSame }) {
-            return zarvox.resolved
+        if let trinoids = vs.first(where: { $0.display.caseInsensitiveCompare("Trinoids") == .orderedSame }) {
+            return trinoids.resolved
         }
         if let daniel = vs.first(where: { $0.display.caseInsensitiveCompare("Daniel") == .orderedSame }) {
             return daniel.resolved

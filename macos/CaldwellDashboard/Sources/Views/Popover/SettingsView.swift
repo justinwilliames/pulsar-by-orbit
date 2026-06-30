@@ -101,7 +101,7 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
                 .disabled(filtered.isEmpty)
                 Text(voiceCategory == .robotic
-                    ? "Robotic — macOS novelty voices (Zarvox, Trinoids, Fred…). Pulsar's out-of-box default is Zarvox."
+                    ? "Robotic — macOS novelty voices (Zarvox, Trinoids, Fred…). Pulsar's out-of-box default is Trinoids."
                     : "Humanoid — natural macOS voices. Download more under System Settings → Accessibility → Spoken Content. (Apple reserves the Siri voices for the system — they can't be used here.)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -188,7 +188,7 @@ struct SettingsView: View {
     }
 
     /// Reconcile the segment + apply the out-of-box default exactly once, when
-    /// settings first load. If no voice is saved yet, default to Zarvox on the
+    /// settings first load. If no voice is saved yet, default to Trinoids on the
     /// Robotic segment; otherwise open on whichever category the saved voice
     /// belongs to. Never overrides a voice the user already chose.
     private func initVoiceCategoryIfNeeded() {
@@ -201,7 +201,7 @@ struct SettingsView: View {
         // resolves to a real installed voice. The daemon always reports a
         // resolved fallback (Daniel) even when CALDWELL_NATIVE_VOICE is blank, so
         // we can't distinguish blank-config here — instead we trust the saved
-        // value and just open on its category. The blank → Zarvox default is
+        // value and just open on its category. The blank → Trinoids default is
         // enforced server-side by leaving config untouched until the user picks.
         let current = nativeVoiceBinding.wrappedValue
         voiceCategory = VoiceCategory.category(for: current)

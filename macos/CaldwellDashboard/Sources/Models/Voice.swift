@@ -23,11 +23,11 @@ enum VoiceCategory: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// The default voice for each category. Out-of-box, Pulsar opens on Robotic
-    /// with Zarvox selected (native rate, no tuning); the Humanoid default is
+    /// with Trinoids selected (native rate, no tuning); the Humanoid default is
     /// Daniel.
     var defaultVoiceName: String {
         switch self {
-        case .robotic: return "Zarvox"
+        case .robotic: return "Trinoids"
         case .humanoid: return "Daniel"
         }
     }

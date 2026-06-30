@@ -53,6 +53,10 @@ struct FloatingHeadsView: View {
     @State private var lingerTask: Task<Void, Never>?
     /// When the current caption first appeared — drives the typewriter's local clock.
     @State private var captionStartedAt: Date?
+    /// Which speaker produced the currently-displayed caption. A caption belongs
+    /// to ONE speaker; if the active speaker changes (or goes idle), the old
+    /// caption is cleared rather than lingered under a different/idle speaker.
+    @State private var captionOwner: String?
 
     /// Linger ~10s after a line completes so there's time to finish reading.
     static let lingerAfterIdle: TimeInterval = 10.0
@@ -71,6 +75,7 @@ struct FloatingHeadsView: View {
         .frame(maxHeight: .infinity, alignment: layout.captionEdge == .above ? .bottom : .top)
         .onChange(of: captionSource) { _, _ in updateCaption() }
         .onChange(of: viewModel.playback.isPlaying) { _, _ in updateCaption() }
+        .onChange(of: currentSpeakerKey) { _, _ in updateCaption() }
         .onChange(of: subtitlesActive) { _, _ in updateCaption() }
         .onAppear { updateCaption() }
     }
@@ -148,8 +153,6 @@ struct FloatingHeadsView: View {
                 droneName: p.category ?? "pulsar",
                 glowColor: p.color
             )
-            // The active type's count (×N) still reads in the centre slot.
-            .overlay(alignment: .bottomTrailing) { countBadge(p.count, color: p.color, big: true) }
             // The speaker's name lives as a header pill on the subtitle bubble
             // (see `nameHeaderPill`), NOT under the chin — that zone is where the
             // orbit drones + the bubble sit and the card was getting occluded.
@@ -174,26 +177,8 @@ struct FloatingHeadsView: View {
                 angle: orbitAngle(index: p.orbitIndex, total: orbitTypeSlots.count),
                 index: p.orbitIndex,
                 reduceMotion: reduceMotion,
-                countBadge: p.count,
                 portraitManager: viewModel.portraitManager
             )
-        }
-    }
-
-    /// A small "×N" count badge for a character-type slot running N>1 drones.
-    /// N==1 → nothing. Tinted to the type colour; legible on the dark desktop.
-    @ViewBuilder
-    private func countBadge(_ count: Int, color: Color, big: Bool) -> some View {
-        if count > 1 {
-            Text("×\(count)")
-                .font(.system(size: big ? 12 : 10, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, big ? 6 : 5)
-                .padding(.vertical, big ? 2.5 : 1.5)
-                .background(Capsule().fill(color.opacity(0.95)))
-                .overlay(Capsule().strokeBorder(.white.opacity(0.85), lineWidth: 1))
-                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                .allowsHitTesting(false)
         }
     }
 
@@ -256,16 +241,15 @@ struct FloatingHeadsView: View {
     // MARK: - Participant model (one slot per distinct character TYPE)
 
     /// One participant on screen: Pulsar or a character-TYPE slot (one per
-    /// distinct in-flight category, however many drones of that type are
-    /// running). Identity is stable — Pulsar = "pulsar", a type slot = its
-    /// category name — so SwiftUI animates the SAME view between centre and orbit
-    /// as the speaker swaps. `count` is how many drones of this type are in
-    /// flight (>1 → a "×N" badge).
+    /// distinct in-flight category — the drones are CHARACTERS, so multiple
+    /// sub-agents of a type still show as ONE busy character, never a count).
+    /// Identity is stable — Pulsar = "pulsar", a type slot = its category name —
+    /// so SwiftUI animates the SAME view between centre and orbit as the speaker
+    /// swaps.
     private struct Participant: Identifiable {
         let id: String          // "pulsar" or the category name
         let category: String?   // nil = Pulsar
         let color: Color
-        let count: Int          // in-flight drones of this type (1 = no badge)
         let isCentre: Bool
         let orbitIndex: Int     // valid only when !isCentre
     }
@@ -275,23 +259,20 @@ struct FloatingHeadsView: View {
     private var participants: [Participant] {
         var out: [Participant] = []
         let active = activeDroneCategory
-        let counts = inFlightCountsByCategory
 
         // Centre occupant. When a drone is the ACTIVE SPEAKER its OWN face must
         // show — its frames + colour — even if that category is no longer in the
         // in-flight set (a sub-agent can finish, then the session narrates its
         // result tagged --agent <cat>). The centre is keyed by category so it's
-        // continuous with that type's orbit slot through the swap. The count
-        // still reflects how many of that type are running.
+        // continuous with that type's orbit slot through the swap.
         if let active {
             out.append(Participant(id: active, category: active,
                                    color: droneColor(for: active),
-                                   count: counts[active] ?? 1,
                                    isCentre: true, orbitIndex: 0))
         } else {
             out.append(Participant(id: "pulsar", category: nil,
                                    color: droneColor(for: nil),
-                                   count: 1, isCentre: true, orbitIndex: 0))
+                                   isCentre: true, orbitIndex: 0))
         }
 
         // Orbit slots: one per distinct in-flight type (minus the centre type),
@@ -299,7 +280,6 @@ struct FloatingHeadsView: View {
         for (i, slot) in orbitTypeSlots.enumerated() {
             out.append(Participant(id: slot.id, category: slot.category,
                                    color: droneColor(for: slot.categoryKey),
-                                   count: slot.count,
                                    isCentre: false, orbitIndex: i))
         }
         return out
@@ -309,7 +289,6 @@ struct FloatingHeadsView: View {
     private struct OrbitTypeSlot: Identifiable {
         let id: String          // "pulsar" or the category name
         let category: String?   // nil = Pulsar
-        let count: Int
         /// Colour/category key — "pulsar" for the Pulsar slot, else the category.
         var categoryKey: String { category ?? "pulsar" }
     }
@@ -317,32 +296,29 @@ struct FloatingHeadsView: View {
     /// The orbit roster, grouped by TYPE: one slot per distinct in-flight
     /// category (excluding the one at centre), plus Pulsar pinned first when a
     /// drone holds the centre. Stable canonical order so slots don't reshuffle.
+    /// Presence = "that type is working"; how many of that type run is invisible
+    /// by design (one character per type).
     private var orbitTypeSlots: [OrbitTypeSlot] {
-        let counts = inFlightCountsByCategory
+        let present = inFlightCategories
         var slots: [OrbitTypeSlot] = []
         let active = activeDroneCategory
 
         // Pulsar orbits (drone-sized) only while a drone holds the centre.
         if active != nil {
-            slots.append(OrbitTypeSlot(id: "pulsar", category: nil, count: 1))
+            slots.append(OrbitTypeSlot(id: "pulsar", category: nil))
         }
         // One slot per distinct in-flight type, in canonical taxonomy order,
         // skipping the type that's currently at centre.
-        for category in DroneRegistry.categories where category != active {
-            if let count = counts[category], count > 0 {
-                slots.append(OrbitTypeSlot(id: category, category: category, count: count))
-            }
+        for category in DroneRegistry.categories
+        where category != active && present.contains(category) {
+            slots.append(OrbitTypeSlot(id: category, category: category))
         }
         return slots
     }
 
-    /// In-flight drone counts keyed by (lowercased) category.
-    private var inFlightCountsByCategory: [String: Int] {
-        var counts: [String: Int] = [:]
-        for category in viewModel.inFlightDrones.values {
-            counts[category.lowercased(), default: 0] += 1
-        }
-        return counts
+    /// The set of distinct in-flight categories (lowercased) — presence only.
+    private var inFlightCategories: Set<String> {
+        Set(viewModel.inFlightDrones.values.map { $0.lowercased() })
     }
 
     /// In-flight drones in a stable order (by agentId) — kept for the swap-edge
@@ -409,41 +385,67 @@ struct FloatingHeadsView: View {
 
     private var captionSource: String? { viewModel.playback.currentText }
 
+    /// A stable identity for the CURRENT speaker — the drone category, else
+    /// "pulsar" while Pulsar speaks, else nil when nothing is the active speaker.
+    /// Used to detect a speaker CHANGE so a caption is never lingered under a
+    /// different speaker.
+    private var currentSpeakerKey: String? {
+        guard let s = viewModel.activeSpeaker else { return nil }
+        return s.category ?? "pulsar"
+    }
+
     private var subtitlesActive: Bool {
         viewModel.isSubtitlesEnabled && viewModel.isFloatingHeadEnabled
     }
 
     private func updateCaption() {
         guard subtitlesActive else {
-            lingerTask?.cancel(); lingerTask = nil
-            displayedCaption = nil
+            clearCaption()
             return
         }
 
         let source = captionSource
         let speaking = viewModel.playback.isPlaying
+        let owner = currentSpeakerKey
+
+        // Speaker changed out from under a displayed caption → drop it at once.
+        // The old caption belongs to the previous speaker, not whoever is here
+        // now (or to the idle state). Don't linger it.
+        if displayedCaption != nil, owner != captionOwner {
+            clearCaption()
+        }
 
         if speaking, let text = source, !text.isEmpty {
             lingerTask?.cancel(); lingerTask = nil
             if displayedCaption != text { captionStartedAt = Date() }  // new line → restart the typewriter clock
             displayedCaption = text
-        } else if let text = source, !text.isEmpty, displayedCaption != nil {
+            captionOwner = owner
+        } else if let text = source, !text.isEmpty, displayedCaption != nil, owner == captionOwner {
+            // Same speaker, line finished → hold through the linger.
             displayedCaption = text
-            scheduleLinger()
+            scheduleLinger(for: owner)
         } else if source == nil || source?.isEmpty == true {
-            lingerTask?.cancel(); lingerTask = nil
-            displayedCaption = nil
-            captionStartedAt = nil
+            clearCaption()
         }
     }
 
-    private func scheduleLinger() {
+    /// Clear the caption + its lifecycle state in one place.
+    private func clearCaption() {
+        lingerTask?.cancel(); lingerTask = nil
+        displayedCaption = nil
+        captionStartedAt = nil
+        captionOwner = nil
+    }
+
+    private func scheduleLinger(for owner: String?) {
         lingerTask?.cancel()
         lingerTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(Self.lingerAfterIdle * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            if !viewModel.playback.isPlaying {
-                displayedCaption = nil
+            // Only clear if the SAME speaker is still (not) speaking — a new
+            // speaker would have already replaced the caption + owner.
+            if !viewModel.playback.isPlaying, captionOwner == owner {
+                clearCaption()
             }
         }
     }

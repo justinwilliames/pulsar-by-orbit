@@ -96,6 +96,10 @@ struct AudioEntry: Sendable {
     /// = the main Pulsar head speaks; a drone category makes that drone the
     /// active speaker for the line's duration.
     var agentCategory: String?
+    /// When this entry entered the queue. Drives the staleness purge so a line
+    /// that has waited too long behind a backed-up queue is dropped rather than
+    /// blocking newer lines. Set at enqueue time.
+    var enqueuedAt: Date = Date()
 }
 
 struct HistoryItem: Sendable {
@@ -247,24 +251,50 @@ actor AudioQueueActor {
     // MARK: - Public API
 
     /// Maximum number of entries allowed to wait behind the currently-playing
-    /// one. Cap of 1 means: one playing + at most one waiting. Anything beyond
-    /// that gets dropped at enqueue. Sir's call — if it doesn't play, it
-    /// doesn't play.
-    static let maxWaitingDepth = 1
+    /// one. A burst of lines (e.g. a roll call of sub-agents) should all queue
+    /// and play in order, so this is generous — only a genuinely huge backlog
+    /// is refused.
+    static let maxWaitingDepth = 50
+
+    /// A WAITING entry older than this (never the currently-playing one) is a
+    /// never-said straggler — purged so a backed-up queue self-clears and new
+    /// lines always get in.
+    static let staleWaiterSeconds: TimeInterval = 60
 
     /// Add an entry to the queue. Returns queue depth after insertion, or
     /// nil if the queue was full and the entry was dropped.
     func enqueue(_ entry: AudioEntry) -> Int? {
+        // Self-clear before the cap check: drop any waiting entries that have
+        // sat unplayed too long, so a stuck/backed-up queue never permanently
+        // blocks future lines.
+        purgeStaleWaiters()
+
         if queue.count >= Self.maxWaitingDepth {
             NSLog("[AudioQueue] ✋ dropped '\(entry.text.prefix(60))' — busy (waiting=\(queue.count))")
             return nil
         }
-        queue.append(entry)
+        var stamped = entry
+        stamped.enqueuedAt = Date()
+        queue.append(stamped)
         if !workerRunning {
             workerRunning = true
             Task { await runWorker() }
         }
         return queue.count
+    }
+
+    /// Drop WAITING entries whose `enqueuedAt` is older than `staleWaiterSeconds`.
+    /// Only touches `queue` (waiters) — never `currentEntry` (the line actually
+    /// playing). Returns the number purged.
+    @discardableResult
+    private func purgeStaleWaiters(now: Date = Date()) -> Int {
+        let before = queue.count
+        queue.removeAll { now.timeIntervalSince($0.enqueuedAt) > Self.staleWaiterSeconds }
+        let purged = before - queue.count
+        if purged > 0 {
+            NSLog("[AudioQueue] 🧹 purged \(purged) stale waiter(s) (>\(Int(Self.staleWaiterSeconds))s unplayed)")
+        }
+        return purged
     }
 
     /// Called by the background TTS fetch task when audio is ready.
@@ -361,8 +391,25 @@ actor AudioQueueActor {
     /// every subsequent enqueue burns ElevenLabs quota for audio nobody hears.
     static let fetchWaitTimeoutSeconds: UInt64 = 30
 
+    /// Breath between consecutive lines so a roll call sounds like a conversation
+    /// with pauses, not a run-on. Applied BETWEEN lines only — never before the
+    /// first, never when nothing follows.
+    static let interLineGapSeconds: Double = 1.0
+
     private func runWorker() async {
+        var firstLine = true
         while !queue.isEmpty {
+            // Sweep stale waiters each iteration so a straggler can't sit forever
+            // when nothing new is being enqueued to trigger the enqueue-time purge.
+            purgeStaleWaiters()
+            guard !queue.isEmpty else { break }
+
+            // A clear ~1s breath BETWEEN lines (not before the first).
+            if !firstLine {
+                try? await Task.sleep(nanoseconds: UInt64(Self.interLineGapSeconds * 1_000_000_000))
+            }
+            firstLine = false
+
             var entry = queue.removeFirst()
             currentEntry = entry
 

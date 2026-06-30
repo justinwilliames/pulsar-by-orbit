@@ -153,6 +153,34 @@ struct QueueStatusHistorySnapshot: Encodable, Sendable {
     let failed: Bool
 }
 
+/// Single-resume guard for a process-wait continuation. `Process.termination-
+/// Handler` fires on a Foundation-owned thread (off the actor), and the cutoff
+/// path may also try to finish, so the resume must be exactly-once and thread-
+/// safe. A plain lock makes it so without blocking any cooperative-pool thread.
+private final class ContinuationBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resumed = false
+    var cont: CheckedContinuation<Void, Error>?
+
+    func resume() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resumed, let c = cont else { return }
+        resumed = true
+        cont = nil
+        c.resume()
+    }
+
+    func resume(throwing error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resumed, let c = cont else { return }
+        resumed = true
+        cont = nil
+        c.resume(throwing: error)
+    }
+}
+
 // MARK: - AudioQueueActor
 
 /// Serial audio playback queue. One utterance plays at a time via `afplay`.
@@ -177,9 +205,15 @@ actor AudioQueueActor {
     // resumed by markReady/markFailed.
     private var readyContinuations: [String: CheckedContinuation<Void, Never>] = [:]
 
-    // Resolved URLs for entries that were already popped from `queue`
-    // when markReady fires. Worker reads here after continuation resumes.
+    // Resolved URLs for entries whose fetch completed (possibly BEFORE the
+    // worker dequeues/waits on them). The worker reads here both at dequeue
+    // (pre-resolved pickup) and after its continuation resumes.
     private var resolvedURLs: [String: URL] = [:]
+
+    // Ids whose fetch FAILED before/while the worker handles them. Mirrors
+    // resolvedURLs for the failure case so a markFailed that fires before the
+    // worker waits isn't a lost wakeup (worker would otherwise park 30s).
+    private var failedIds: Set<String> = []
 
     // MARK: - In-flight sub-agent drones
 
@@ -300,14 +334,19 @@ actor AudioQueueActor {
     /// Called by the background TTS fetch task when audio is ready.
     func markReady(id: String, url: URL) {
         resolvedURLs[id] = url
+        let waiting = readyContinuations[id] != nil
         readyContinuations[id]?.resume()
         readyContinuations.removeValue(forKey: id)
+        NSLog("[AudioQueue] ✅ markReady \(id) (worker \(waiting ? "WAS waiting — resumed" : "not yet waiting — stored"))")
     }
 
     /// Called by the background TTS fetch task on failure.
     func markFailed(id: String) {
+        let waiting = readyContinuations[id] != nil
+        failedIds.insert(id)
         readyContinuations[id]?.resume()
         readyContinuations.removeValue(forKey: id)
+        NSLog("[AudioQueue] ❌ markFailed \(id) (worker \(waiting ? "WAS waiting — resumed" : "not yet waiting — flagged"))")
     }
 
     func stopCurrent() {
@@ -397,6 +436,7 @@ actor AudioQueueActor {
     static let interLineGapSeconds: Double = 1.0
 
     private func runWorker() async {
+        NSLog("[AudioQueue] 🔁 runWorker START (queue=\(queue.count))")
         var firstLine = true
         while !queue.isEmpty {
             // Sweep stale waiters each iteration so a straggler can't sit forever
@@ -413,16 +453,34 @@ actor AudioQueueActor {
             var entry = queue.removeFirst()
             currentEntry = entry
 
-            // Resolution may have raced ahead of us — check the resolved
-            // table before setting up a continuation we'd be stuck on.
-            if entry.audioURL == nil, !entry.fetchFailed,
-               let pre = resolvedURLs.removeValue(forKey: entry.id) {
-                entry.audioURL = pre
+            // Resolution may have raced ahead of us — pick up a URL (or a failure)
+            // that landed BEFORE we dequeued this entry. This is the common case
+            // in a burst: every later entry resolves while line 1 plays, long
+            // before the worker reaches it.
+            if entry.audioURL == nil, !entry.fetchFailed {
+                if let pre = resolvedURLs.removeValue(forKey: entry.id) {
+                    entry.audioURL = pre
+                } else if failedIds.remove(entry.id) != nil {
+                    entry.fetchFailed = true
+                }
             }
 
-            // Wait for the audio URL if still not available.
+            let source: String
+            if entry.audioURL != nil {
+                source = entry.fetchFailed ? "fetchFailed" : "pre-resolved/cached"
+            } else {
+                source = "nil — awaiting fetch"
+            }
+            NSLog("[AudioQueue] ⬇️ dequeue \(entry.id) '\(entry.text.prefix(40))' audioURL=\(source) remaining=\(queue.count)")
+
+            // Wait for the fetch ONLY if the URL still isn't available and the
+            // fetch hasn't already failed. Race-free: the pre-resolved/pre-failed
+            // pickup above and this registration run in the SAME synchronous
+            // actor region (no await between them), so a markReady/markFailed
+            // can't slip in unseen between the check and the wait.
             if entry.audioURL == nil && !entry.fetchFailed {
                 let entryId = entry.id
+                NSLog("[AudioQueue] ⏳ \(entryId) not yet resolved — waiting for fetch")
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     readyContinuations[entryId] = cont
                     // Watchdog: if no markReady/markFailed arrives in
@@ -433,17 +491,34 @@ actor AudioQueueActor {
                         await self?.timeoutEntry(id: entryId)
                     }
                 }
-                entry.audioURL = resolvedURLs.removeValue(forKey: entry.id)
-                if entry.audioURL == nil {
+                // Continuation resumed (markReady, markFailed, or watchdog) —
+                // read whichever outcome landed.
+                if let url = resolvedURLs.removeValue(forKey: entry.id) {
+                    entry.audioURL = url
+                } else {
+                    failedIds.remove(entry.id)
                     entry.fetchFailed = true
                 }
+                NSLog("[AudioQueue] ▶️resume \(entryId) → \(entry.audioURL != nil ? "have URL, playing" : "no URL, native fallback")")
             }
 
             await playEntry(entry)
             currentEntry = nil
+            NSLog("[AudioQueue] ⏹ done \(entry.id); \(queue.count) waiting")
         }
         currentEntry = nil
+        // Clear the running flag LAST, then re-check: an enqueue that raced in
+        // after the `while` test saw workerRunning==true and did NOT spawn a new
+        // worker, so its entry would sit unplayed forever. Re-arm if so. (This is
+        // the lost-worker race that stalls a burst with entries still queued.)
         workerRunning = false
+        if !queue.isEmpty {
+            NSLog("[AudioQueue] ♻️ runWorker re-arming — \(queue.count) enqueued during shutdown")
+            workerRunning = true
+            await runWorker()
+            return
+        }
+        NSLog("[AudioQueue] 🔚 runWorker END (queue empty)")
     }
 
     /// Watchdog: if a fetch never reports back, free the worker.
@@ -452,6 +527,12 @@ actor AudioQueueActor {
         guard let cont = readyContinuations.removeValue(forKey: id) else { return }
         NSLog("[AudioQueue] ⏱ fetch timeout for \(id) after \(Self.fetchWaitTimeoutSeconds)s — skipping")
         cont.resume()
+    }
+
+    /// Terminate a process if it's still running (effective-end cutoff). Actor-
+    /// isolated so it's serialized with the rest of the queue's process handling.
+    private func terminateIfRunning(_ process: Process) {
+        if process.isRunning { process.terminate() }
     }
 
     // MARK: - Playback
@@ -483,11 +564,17 @@ actor AudioQueueActor {
         process.standardError = FileHandle.nullDevice
         currentProcess = process
         do {
-            try process.run()
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                Task.detached {
-                    process.waitUntilExit()
-                    cont.resume()
+            // Same non-blocking wait as playEntry: resume from the termination
+            // handler, never from a blocking `waitUntilExit()` on a pool thread.
+            let box = ContinuationBox()
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                box.cont = cont
+                process.terminationHandler = { _ in box.resume() }
+                do {
+                    try process.run()
+                } catch {
+                    process.terminationHandler = nil
+                    box.resume(throwing: error)
                 }
             }
         } catch {
@@ -550,30 +637,46 @@ actor AudioQueueActor {
         currentProcess = process
 
         do {
-            try process.run()
-            // Wait off-actor so we don't block other actor calls during playback.
-            // Race two tasks: natural exit, or the effective-end deadline.
-            // First one to finish wins; the other gets cancelled.
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                let exitTask = Task.detached {
-                    process.waitUntilExit()
+            // Wait for afplay WITHOUT blocking a cooperative-pool thread.
+            //
+            // ROOT CAUSE of the "stops after 2 lines" stall: the old code waited
+            // on `Task.detached { process.waitUntilExit() }`. `waitUntilExit()` is
+            // a BLOCKING syscall, and `Task.detached` runs on Swift's cooperative
+            // thread pool (sized to core count). Every play — plus each /speak's
+            // detached `say` synthesis — parked a pool thread on a blocking wait.
+            // A burst of 7 lines exhausted the pool, so the `cont.resume()` task
+            // (also detached) could never get scheduled → the worker parked
+            // forever with entries still queued and NO further log output. Exactly
+            // the observed symptom.
+            //
+            // Fix: resume the continuation from `process.terminationHandler`
+            // (fired by Foundation off the pool) and arm the effective-end cutoff
+            // with a NON-blocking `Task.sleep`. A resumeOnce guard makes the two
+            // racers (natural exit vs cutoff) safe — the continuation resumes
+            // exactly once. No cooperative thread is ever blocked.
+            let resumeBox = ContinuationBox()
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                resumeBox.cont = cont
+                process.terminationHandler = { _ in
+                    resumeBox.resume()
                 }
-                let killTask: Task<Void, Never>?
+                do {
+                    try process.run()
+                } catch {
+                    process.terminationHandler = nil
+                    resumeBox.resume(throwing: error)
+                    return
+                }
+                // Effective-end cutoff: stop afplay before trailing silence.
                 if let cutoff = effectiveDuration, cutoff > 0,
                    fileDuration == nil || cutoff < (fileDuration ?? 0) - 0.05 {
-                    killTask = Task.detached {
+                    Task { [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(cutoff * 1_000_000_000))
-                        if process.isRunning { process.terminate() }
+                        await self?.terminateIfRunning(process)
                     }
-                } else {
-                    killTask = nil
-                }
-                Task.detached {
-                    await exitTask.value
-                    killTask?.cancel()
-                    cont.resume()
                 }
             }
+            NSLog("[AudioQueue] ⏏️ afplay returned for \(entry.id)")
         } catch {
             NSLog("[AudioQueue] afplay launch failed: \(error)")
         }

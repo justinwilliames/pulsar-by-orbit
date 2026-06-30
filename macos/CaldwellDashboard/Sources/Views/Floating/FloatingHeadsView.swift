@@ -280,10 +280,17 @@ struct FloatingHeadsView: View {
         var out: [Participant] = []
         let active = activeDroneCategory
 
-        // Centre occupant.
-        if let active, let centreDrone = sortedDrones.first(where: { $0.category == active }) {
-            out.append(Participant(id: centreDrone.id, category: centreDrone.category,
-                                   color: droneColor(for: centreDrone.category),
+        // Centre occupant. When a drone is the ACTIVE SPEAKER its OWN face must
+        // show — its frames + colour — even if that category is no longer in the
+        // in-flight set (a sub-agent can finish, then the session narrates its
+        // result tagged --agent <cat>). So drive the centre off `activeSpeaker`,
+        // not off in-flight membership: prefer the live in-flight drone's id for
+        // a continuous swap, else a synthetic id so the speaker's face still
+        // renders. Pulsar speaking → Pulsar face.
+        if let active {
+            let centreId = sortedDrones.first(where: { $0.category == active })?.id ?? "speaker-\(active)"
+            out.append(Participant(id: centreId, category: active,
+                                   color: droneColor(for: active),
                                    isCentre: true, orbitIndex: 0))
         } else {
             out.append(Participant(id: "pulsar", category: nil,

@@ -227,9 +227,13 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         else {
             return try Self.json(ErrorResponse("Invalid JSON — need agent_id"), status: .badRequest)
         }
-        let category = (body["category"] as? String).flatMap {
+        let rawCategory = (body["category"] as? String).flatMap {
             $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0.lowercased()
         } ?? "atlas"
+        // Defend the daemon against unknown categories: anything not in the
+        // locked taxonomy degrades to "atlas" (the generalist), so a garbage
+        // category renders a real Atlas drone, never a broken indigo monogram.
+        let category = isDrone(rawCategory) ? rawCategory : "atlas"
 
         await audioQueue.addInFlightDrone(id: agentId, category: category)
         let drones = await audioQueue.inFlightDronesSnapshot()

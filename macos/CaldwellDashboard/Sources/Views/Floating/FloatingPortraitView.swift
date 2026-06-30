@@ -3,15 +3,18 @@ import SwiftUI
 /// Pulsar's floating head.
 ///
 /// Brand-locked to Orbit indigo (no per-voice tint, no rainbow hue-shift). The
-/// glow reads as an actual *pulsar*: a slow rotating two-beam sweep behind the
-/// head, plus a rhythmic heartbeat glow and an expanding ping on a steady beat.
+/// head sits inside a soft, *glowing* squircle halo that breathes on a steady
+/// pulsar heartbeat — all glow, no hard lines, and every animated element
+/// follows the portrait's squircle silhouette rather than fighting it with
+/// circles.
 ///
-/// The portrait is clipped to a squircle, so the tight neon rim and the expanding
-/// "ping" follow that same rounded-rect silhouette; the radial bloom and rotating
-/// beams stay circular by design — they read as an omnidirectional energy field.
-/// Everything is driven continuously by one `TimelineView(.animation)` clock —
-/// there is deliberately NO `.animation(value: amplitude)` (a spring on top of
-/// the 60Hz amplitude feed is what caused the old stutter).
+/// The portrait is clipped to a squircle (corner radius = size * 0.22,
+/// `.continuous`), so the aura, the expanding pulse ripples and the rim glow
+/// are all squircle-shaped and concentric with it — the energy reads as
+/// parallel to the rounded-square. Everything is driven continuously by one
+/// `TimelineView(.animation)` clock — there is deliberately NO
+/// `.animation(value: amplitude)` (a spring on top of the 60Hz amplitude feed
+/// is what caused the old stutter).
 struct FloatingPortraitView: View {
     let voiceName: String
     let amplitude: Float
@@ -24,9 +27,13 @@ struct FloatingPortraitView: View {
     private let beatPeriod: Double = 1.4
 
     /// Continuous-curvature corner radius for the portrait squircle — kept in
-    /// lockstep with `PortraitView.squircle` (size * 0.22) so the neon rim hugs
-    /// the actual clipped edge instead of a mismatched circle.
+    /// lockstep with `PortraitView.squircle` (size * 0.22) so every glow layer
+    /// hugs the actual clipped edge instead of a mismatched circle.
     private var cornerRadius: CGFloat { portraitSize * 0.22 }
+
+    /// Corner-radius *ratio* — reused so ripples drawn at any scale keep the
+    /// same squircle proportions as the portrait.
+    private let cornerRatio: CGFloat = 0.22
 
     // Fixed Pulsar palette.
     private var core: Color { .orbit }        // #6366F1
@@ -44,11 +51,10 @@ struct FloatingPortraitView: View {
             let pulse = heartbeat(beat)
 
             ZStack {
-                // Back → front.
-                beamSweep(time: time, amp: amp)        // rotating pulsar beams
-                outerGlow(pulse: pulse, amp: amp)      // soft indigo bloom
-                pulseRings(time: time, amp: amp)       // crisp expanding beat ring
-                heartCore(pulse: pulse, amp: amp)      // tight bright neon rim
+                // Back → front. All squircle-shaped, all soft glow.
+                pulseRipples(time: time, amp: amp)     // expanding glowing squircle ripples
+                auraGlow(pulse: pulse, amp: amp)       // soft blurred squircle halo
+                rimGlow(pulse: pulse, amp: amp)        // bright squircle rim glow hugging the edge
 
                 PortraitView(
                     voiceName: voiceName,
@@ -81,136 +87,110 @@ struct FloatingPortraitView: View {
         return exp(-decay * 3.2)                     // 1 → ~0.04 fade
     }
 
-    // MARK: - Pulsar beam-sweep (behind the head)
+    // MARK: - Soft squircle aura (behind the head)
 
-    /// Two soft opposing indigo beams slowly rotating behind the portrait, like
-    /// a pulsar's lighthouse beams. Low opacity, slow rotation.
+    /// A soft, blurred indigo halo in the *squircle* shape, sitting just behind
+    /// the portrait and breathing with the beat. This is the replacement for the
+    /// old circular radial bloom + rotating beams: one diffuse glow that hugs
+    /// the rounded-square outline. Two stacked, differently-blurred squircles
+    /// give the glow depth — a tight inner brightness and a wide outer falloff.
     @ViewBuilder
-    private func beamSweep(time: Double, amp: Double) -> some View {
-        let rotation = Angle.radians(time * 0.22)    // slow sweep
-        let intensity = 0.20 + amp * 0.22
+    private func auraGlow(pulse: Double, amp: Double) -> some View {
+        let intensity = 0.22 + amp * 0.34 + pulse * 0.20
+        // The halo swells very slightly on each beat so it reads as a pulse of
+        // light rather than a static gradient.
+        let swell = portraitSize + 14 + CGFloat(amp * 22 + pulse * 10)
 
         ZStack {
-            beam()
-            beam().rotationEffect(.degrees(180))     // opposing beam
+            // Wide, very soft outer falloff.
+            RoundedRectangle(cornerRadius: (swell * cornerRatio) + 26, style: .continuous)
+                .fill(core)
+                .frame(width: swell + 52, height: swell + 52)
+                .blur(radius: 34)
+                .opacity(intensity * 0.85)
+
+            // Tighter, brighter inner glow hugging the edge.
+            RoundedRectangle(cornerRadius: (swell * cornerRatio) + 12, style: .continuous)
+                .fill(light)
+                .frame(width: swell + 22, height: swell + 22)
+                .blur(radius: 18)
+                .opacity(intensity)
         }
-        .rotationEffect(rotation)
-        .frame(width: portraitSize + 96, height: portraitSize + 96)
-        .blur(radius: 14)
-        .opacity(intensity)
         .blendMode(.plusLighter)
         .allowsHitTesting(false)
     }
 
-    /// A single wedge-shaped beam fading out from the centre.
+    // MARK: - Expanding glowing squircle ripples
+
+    /// Soft, blurred, *glowing* squircle ripples that scale outward from the
+    /// portrait's squircle and fade — the pulsar "pulse" expressed as ripples of
+    /// light in the rounded-square shape, NOT thin sharp ring strokes. Each
+    /// ripple is a thick, soft-edged squircle band (drawn wide then blurred) so
+    /// it reads as glow travelling outward. Two ripples run a half-beat apart
+    /// for rhythm; both intensify with amplitude.
     @ViewBuilder
-    private func beam() -> some View {
-        let size = portraitSize + 96
-        AngularGradient(
-            gradient: Gradient(stops: [
-                .init(color: .clear, location: 0.00),
-                .init(color: light.opacity(0.9), location: 0.06),
-                .init(color: .clear, location: 0.16),
-                .init(color: .clear, location: 1.00),
-            ]),
-            center: .center,
-            angle: .degrees(-8)
-        )
-        .frame(width: size, height: size)
-        .mask(
-            RadialGradient(
-                colors: [.white, .white.opacity(0.5), .clear],
-                center: .center,
-                startRadius: portraitSize * 0.18,
-                endRadius: size * 0.55
-            )
-        )
-    }
-
-    // MARK: - Outer glow bloom
-
-    /// Soft fixed-indigo bloom behind the head, breathing gently with the beat
-    /// and lifting with amplitude. Replaces the old rainbow aurora.
-    @ViewBuilder
-    private func outerGlow(pulse: Double, amp: Double) -> some View {
-        let opacity = 0.16 + amp * 0.28 + pulse * 0.12
-
-        RadialGradient(
-            colors: [core.opacity(0.9), core.opacity(0.35), .clear],
-            center: .center,
-            startRadius: portraitSize * 0.30,
-            endRadius: portraitSize * 0.66
-        )
-        .frame(width: portraitSize + 56, height: portraitSize + 56)
-        .blur(radius: 16)
-        .opacity(opacity)
-        .blendMode(.plusLighter)
-        .allowsHitTesting(false)
-    }
-
-    // MARK: - Crisp neon beat rings
-
-    /// A crisp thin expanding *squircle* released on each beat (the pulsar
-    /// "ping"), echoing the portrait's rounded-rect silhouette so the energy
-    /// reads as travelling outward from the shape, not a mismatched circle.
-    /// Sharp lines + a little glow, not a soft blur.
-    @ViewBuilder
-    private func pulseRings(time: Double, amp: Double) -> some View {
+    private func pulseRipples(time: Double, amp: Double) -> some View {
         Canvas { context, size in
+            context.addFilter(.blur(radius: 7))          // soft-edge every ripple
+
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let baseHalf = portraitSize / 2                  // squircle half-side
+            let baseHalf = portraitSize / 2
 
-            // Expanding "ping" squircle, re-emitted every beat. Reads as the pulse
-            // travelling outward. Present even when quiet, stronger when loud.
+            func ripple(phase: Double, tint: Color, gain: Double) {
+                // 0 → 1 across the beat; grows outward and fades as it goes.
+                let half = baseHalf + 2 + phase * (24 + amp * 34)
+                // Ease-out fade so the ripple is brightest just after release.
+                let fade = pow(1.0 - phase, 1.6)
+                let opacity = fade * (0.30 + amp * 0.50) * gain
+                guard opacity > 0.015 else { return }
+                // Thick, soft band — width tapers as the ripple expands so it
+                // dissolves into the dark rather than thinning to a hard line.
+                let width = (7.0 + amp * 5.0) * (1.0 - phase * 0.5)
+                glowSquircle(context, center: center, half: half,
+                             color: tint.opacity(opacity), width: width)
+            }
+
             let beat = fmod(time, beatPeriod) / beatPeriod
-            let ringProgress = beat                          // 0 → 1 across the beat
-            let half = baseHalf + 3 + ringProgress * (18 + amp * 26)
-            let ringOpacity = (1.0 - ringProgress) * (0.30 + amp * 0.45)
+            ripple(phase: beat, tint: light, gain: 1.0)
 
-            if ringOpacity > 0.02 {
-                strokeSquircle(context, center: center, half: half,
-                               color: light.opacity(ringOpacity), width: 1.6)
-            }
-
-            // A second, fainter squircle a half-beat out of phase for rhythm.
             let beat2 = fmod(time + beatPeriod / 2, beatPeriod) / beatPeriod
-            let half2 = baseHalf + 3 + beat2 * (18 + amp * 26)
-            let r2Opacity = (1.0 - beat2) * (0.14 + amp * 0.22)
-            if r2Opacity > 0.02 {
-                strokeSquircle(context, center: center, half: half2,
-                               color: muted.opacity(r2Opacity), width: 1.2)
-            }
+            ripple(phase: beat2, tint: muted, gain: 0.55)
         }
-        .frame(width: portraitSize + 80, height: portraitSize + 80)
+        .frame(width: portraitSize + 110, height: portraitSize + 110)
+        .blendMode(.plusLighter)
         .allowsHitTesting(false)
     }
 
-    /// Tight bright neon rim hugging the head, brightening on each beat — the
-    /// crisp cybernetic accent that matches the headset's neon lines. Follows the
-    /// portrait *squircle* (offset out by 2pt) so the rim sits exactly on the
-    /// clipped edge rather than a mismatched circle.
-    @ViewBuilder
-    private func heartCore(pulse: Double, amp: Double) -> some View {
-        let side = portraitSize + 4                       // 2pt clearance each side
-        let intensity = 0.35 + amp * 0.4 + pulse * 0.25
+    // MARK: - Rim glow (hugging the edge)
 
-        RoundedRectangle(cornerRadius: cornerRadius + 2, style: .continuous)
-            .stroke(light.opacity(intensity), lineWidth: 1.4)
+    /// A soft, bright squircle rim of light hugging the portrait edge, brightening
+    /// on each beat. Replaces the old crisp 1.4pt neon stroke: this is a blurred
+    /// glow band following the exact squircle, so the head sits *in* light rather
+    /// than being outlined by a hard line.
+    @ViewBuilder
+    private func rimGlow(pulse: Double, amp: Double) -> some View {
+        let side = portraitSize + 6
+        let intensity = 0.30 + amp * 0.34 + pulse * 0.30
+
+        RoundedRectangle(cornerRadius: cornerRadius + 3, style: .continuous)
+            .stroke(light.opacity(intensity), lineWidth: 3.5 + pulse * 2.0)
             .frame(width: side, height: side)
-            .shadow(color: core.opacity(0.5 + pulse * 0.3), radius: 3 + pulse * 3)
+            .blur(radius: 4 + pulse * 2)
+            .blendMode(.plusLighter)
             .allowsHitTesting(false)
     }
 
     // MARK: - Canvas helper
 
-    private func strokeSquircle(_ context: GraphicsContext, center: CGPoint,
-                                half: CGFloat, color: Color, width: CGFloat) {
+    /// Strokes a squircle with the same 0.22 corner ratio as the portrait, at an
+    /// arbitrary half-side. Used for the expanding ripples; the Canvas-level blur
+    /// filter turns each (deliberately thick) stroke into a soft glowing band.
+    private func glowSquircle(_ context: GraphicsContext, center: CGPoint,
+                              half: CGFloat, color: Color, width: CGFloat) {
         let rect = CGRect(x: center.x - half, y: center.y - half,
                           width: half * 2, height: half * 2)
-        // Keep the same 0.22 corner ratio as the portrait squircle so the
-        // expanding pings stay shape-consistent as they grow.
-        let path = RoundedRectangle(cornerRadius: half * 0.44, style: .continuous)
-            .path(in: rect)
+        let path = RoundedRectangle(cornerRadius: half * 2 * cornerRatio,
+                                    style: .continuous).path(in: rect)
         context.stroke(path, with: .color(color), lineWidth: width)
     }
 }

@@ -16,19 +16,19 @@ struct FloatingHeadsView: View {
     /// long captions at ~3 lines.
     var onCaptionText: ((String) -> Void)?
 
-    private let orbitRadius: CGFloat = 76
+    private let orbitRadius: CGFloat = 82
     private let thumbnailSize: CGFloat = 40
     /// Lift the whole orbit UP so the drones ring the TOP/sides of the central
     /// head, leaving the below-head zone clear for the name pill + subtitle.
-    /// (Was +24, which pushed the arc down into the chin/caption zone.) Kept
-    /// modest so the top drone (radius 76 + this lift + thumb half ≈ 108pt)
-    /// clears the 120pt half-height without clipping.
-    private let orbitYOffset: CGFloat = -12
-    /// Upper arc, in SwiftUI screen degrees (y down): 200°→340° sweeps across the
-    /// TOP and upper sides of the head (sin negative = above centre), instead of
-    /// the old 20°→160° bottom arc that crowded the area under the chin.
-    private let arcStart: Double = 200
-    private let arcEnd: Double = 340
+    /// Kept modest so even the top-most of 6 slots (radius 82 + this lift + thumb
+    /// half ≈ 108pt) clears the 120pt half-height without clipping.
+    private let orbitYOffset: CGFloat = -6
+    /// Upper arc, in SwiftUI screen degrees (y down): sweeps across the TOP and
+    /// upper sides of the head (sin negative = above centre). Widened to 190°→350°
+    /// so up to SIX distinct-type slots seat with a clean gap (step 32°, adjacent
+    /// centres ≈ 45pt apart > the 40pt thumbnail) instead of overlapping.
+    private let arcStart: Double = 190
+    private let arcEnd: Double = 350
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
@@ -79,10 +79,6 @@ struct FloatingHeadsView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Cap on simultaneously-visible orbiting drones. Past ~4 the orbit collides
-    /// at radius 82 / arc 20–160°, so extras collapse into a "+N" badge.
-    private let maxVisibleOrbit = 3
-
     /// The single source of truth for who is speaking (P3). Everything in the
     /// head zone reads ONLY this — no independent currentAgentCategory /
     /// inFlightDrones / amplitude reads — so the centre, name card, and subtitle
@@ -108,18 +104,17 @@ struct FloatingHeadsView: View {
                 // Idle queued voices orbit behind everything.
                 queuedThumbnails
 
-                // ONE list of participants (Pulsar + every in-flight drone). Each
-                // is positioned by its TARGET slot — centre or an orbit index —
-                // so when the active speaker changes, the incoming drone travels
+                // ONE list of participants: the centre occupant + one orbit slot
+                // PER DISTINCT in-flight character TYPE (up to 6 types → 6 slots).
+                // Each is positioned by its TARGET slot — centre or an orbit index
+                // — so when the active speaker changes, the incoming type travels
                 // orbit→centre while Pulsar travels centre→orbit on the SAME
                 // spring value-change: a genuine pass-the-baton, not a crossfade.
                 ForEach(participants) { p in
                     participantView(p)
                         .id(p.id)
-                        .zIndex(p.isCentre ? 20 : Double(5 - p.orbitIndex))
+                        .zIndex(p.isCentre ? 20 : Double(6 - p.orbitIndex))
                 }
-
-                overflowBadge
             }
         }
         .frame(width: Self.headZoneWidth, height: Self.headZoneHeight)
@@ -153,6 +148,8 @@ struct FloatingHeadsView: View {
                 droneName: p.category ?? "pulsar",
                 glowColor: p.color
             )
+            // The active type's count (×N) still reads in the centre slot.
+            .overlay(alignment: .bottomTrailing) { countBadge(p.count, color: p.color, big: true) }
             // The speaker's name lives as a header pill on the subtitle bubble
             // (see `nameHeaderPill`), NOT under the chin — that zone is where the
             // orbit drones + the bubble sit and the card was getting occluded.
@@ -174,21 +171,38 @@ struct FloatingHeadsView: View {
                 thumbnailSize: thumbnailSize,
                 orbitRadius: orbitRadius,
                 orbitYOffset: orbitYOffset,
-                angle: orbitAngle(index: p.orbitIndex, total: visibleOrbitCount),
+                angle: orbitAngle(index: p.orbitIndex, total: orbitTypeSlots.count),
                 index: p.orbitIndex,
                 reduceMotion: reduceMotion,
+                countBadge: p.count,
                 portraitManager: viewModel.portraitManager
             )
         }
     }
 
+    /// A small "×N" count badge for a character-type slot running N>1 drones.
+    /// N==1 → nothing. Tinted to the type colour; legible on the dark desktop.
+    @ViewBuilder
+    private func countBadge(_ count: Int, color: Color, big: Bool) -> some View {
+        if count > 1 {
+            Text("×\(count)")
+                .font(.system(size: big ? 12 : 10, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, big ? 6 : 5)
+                .padding(.vertical, big ? 2.5 : 1.5)
+                .background(Capsule().fill(color.opacity(0.95)))
+                .overlay(Capsule().strokeBorder(.white.opacity(0.85), lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                .allowsHitTesting(false)
+        }
+    }
+
     /// The orbit-slot offset the centre occupant travels FROM (on arrival) and
-    /// TO (on departure) — the "swap lane". Both the incoming drone and the
+    /// TO (on departure) — the "swap lane". Both the incoming type and the
     /// outgoing Pulsar trade through the first orbit slot, so they pass each
-    /// other along the same arc. Pulsar's pinned slot is index 0; a drone
-    /// arriving from orbit also vacates near the front of the roster.
+    /// other along the same arc.
     private func homeOrbitOffset(for _: Participant) -> CGSize {
-        let angle = orbitAngle(index: 0, total: max(visibleOrbitCount, 1))
+        let angle = orbitAngle(index: 0, total: max(orbitTypeSlots.count, 1))
         return CGSize(width: cos(angle) * orbitRadius,
                       height: sin(angle) * orbitRadius + orbitYOffset)
     }
@@ -239,93 +253,100 @@ struct FloatingHeadsView: View {
         }
     }
 
-    /// "+N" overflow badge on the last visible orbit slot when more drones are
-    /// in flight than we render (P7 clutter cap).
-    @ViewBuilder
-    private var overflowBadge: some View {
-        let hidden = orbitParticipants.count - visibleOrbitCount
-        if hidden > 0 {
-            let lastIndex = visibleOrbitCount - 1
-            let angle = orbitAngle(index: lastIndex, total: visibleOrbitCount)
-            Text("+\(hidden)")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Capsule().fill(Color.black.opacity(0.55)))
-                .overlay(Capsule().strokeBorder(.white.opacity(0.35), lineWidth: 1))
-                .offset(
-                    x: cos(angle) * orbitRadius + thumbnailSize * 0.4,
-                    y: sin(angle) * orbitRadius + orbitYOffset + thumbnailSize * 0.4
-                )
-                .zIndex(30)
-                .allowsHitTesting(false)
-        }
-    }
+    // MARK: - Participant model (one slot per distinct character TYPE)
 
-    // MARK: - Participant model (centre + orbit slots)
-
-    /// One participant on screen: Pulsar or an in-flight drone, tagged with the
-    /// slot it currently occupies. Identity is stable (Pulsar = "pulsar", drones
-    /// by agentId) so SwiftUI animates the SAME view between centre and orbit.
+    /// One participant on screen: Pulsar or a character-TYPE slot (one per
+    /// distinct in-flight category, however many drones of that type are
+    /// running). Identity is stable — Pulsar = "pulsar", a type slot = its
+    /// category name — so SwiftUI animates the SAME view between centre and orbit
+    /// as the speaker swaps. `count` is how many drones of this type are in
+    /// flight (>1 → a "×N" badge).
     private struct Participant: Identifiable {
-        let id: String          // "pulsar" or agentId
+        let id: String          // "pulsar" or the category name
         let category: String?   // nil = Pulsar
         let color: Color
+        let count: Int          // in-flight drones of this type (1 = no badge)
         let isCentre: Bool
         let orbitIndex: Int     // valid only when !isCentre
     }
 
-    /// The full participant list: exactly one centre occupant + the orbit roster.
+    /// The full participant list: exactly one centre occupant + one orbit slot
+    /// PER DISTINCT in-flight character type.
     private var participants: [Participant] {
         var out: [Participant] = []
         let active = activeDroneCategory
+        let counts = inFlightCountsByCategory
 
         // Centre occupant. When a drone is the ACTIVE SPEAKER its OWN face must
         // show — its frames + colour — even if that category is no longer in the
         // in-flight set (a sub-agent can finish, then the session narrates its
-        // result tagged --agent <cat>). So drive the centre off `activeSpeaker`,
-        // not off in-flight membership: prefer the live in-flight drone's id for
-        // a continuous swap, else a synthetic id so the speaker's face still
-        // renders. Pulsar speaking → Pulsar face.
+        // result tagged --agent <cat>). The centre is keyed by category so it's
+        // continuous with that type's orbit slot through the swap. The count
+        // still reflects how many of that type are running.
         if let active {
-            let centreId = sortedDrones.first(where: { $0.category == active })?.id ?? "speaker-\(active)"
-            out.append(Participant(id: centreId, category: active,
+            out.append(Participant(id: active, category: active,
                                    color: droneColor(for: active),
+                                   count: counts[active] ?? 1,
                                    isCentre: true, orbitIndex: 0))
         } else {
             out.append(Participant(id: "pulsar", category: nil,
                                    color: droneColor(for: nil),
-                                   isCentre: true, orbitIndex: 0))
+                                   count: 1, isCentre: true, orbitIndex: 0))
         }
 
-        // Orbit occupants, capped.
-        for (i, occ) in orbitParticipants.prefix(visibleOrbitCount).enumerated() {
-            out.append(Participant(id: occ.id, category: occ.category == "pulsar" ? nil : occ.category,
-                                   color: droneColor(for: occ.category),
+        // Orbit slots: one per distinct in-flight type (minus the centre type),
+        // plus Pulsar (drone-sized) when a drone holds the centre.
+        for (i, slot) in orbitTypeSlots.enumerated() {
+            out.append(Participant(id: slot.id, category: slot.category,
+                                   color: droneColor(for: slot.categoryKey),
+                                   count: slot.count,
                                    isCentre: false, orbitIndex: i))
         }
         return out
     }
 
-    /// The orbit roster (uncapped): in-flight drones minus the centre one, plus
-    /// Pulsar (drone-sized) when a drone holds the centre. Pulsar pinned first.
-    private var orbitParticipants: [DroneInFlight] {
-        guard let active = activeDroneCategory else {
-            // Pulsar is centre → every in-flight drone orbits.
-            return sortedDrones
+    /// One orbit slot per distinct character type.
+    private struct OrbitTypeSlot: Identifiable {
+        let id: String          // "pulsar" or the category name
+        let category: String?   // nil = Pulsar
+        let count: Int
+        /// Colour/category key — "pulsar" for the Pulsar slot, else the category.
+        var categoryKey: String { category ?? "pulsar" }
+    }
+
+    /// The orbit roster, grouped by TYPE: one slot per distinct in-flight
+    /// category (excluding the one at centre), plus Pulsar pinned first when a
+    /// drone holds the centre. Stable canonical order so slots don't reshuffle.
+    private var orbitTypeSlots: [OrbitTypeSlot] {
+        let counts = inFlightCountsByCategory
+        var slots: [OrbitTypeSlot] = []
+        let active = activeDroneCategory
+
+        // Pulsar orbits (drone-sized) only while a drone holds the centre.
+        if active != nil {
+            slots.append(OrbitTypeSlot(id: "pulsar", category: nil, count: 1))
         }
-        var list: [DroneInFlight] = [DroneInFlight(id: "pulsar", category: "pulsar")]
-        for d in sortedDrones where d.category != active { list.append(d) }
-        return list
+        // One slot per distinct in-flight type, in canonical taxonomy order,
+        // skipping the type that's currently at centre.
+        for category in DroneRegistry.categories where category != active {
+            if let count = counts[category], count > 0 {
+                slots.append(OrbitTypeSlot(id: category, category: category, count: count))
+            }
+        }
+        return slots
     }
 
-    /// How many orbit slots we actually render (clutter cap).
-    private var visibleOrbitCount: Int {
-        min(orbitParticipants.count, maxVisibleOrbit)
+    /// In-flight drone counts keyed by (lowercased) category.
+    private var inFlightCountsByCategory: [String: Int] {
+        var counts: [String: Int] = [:]
+        for category in viewModel.inFlightDrones.values {
+            counts[category.lowercased(), default: 0] += 1
+        }
+        return counts
     }
 
-    /// In-flight drones in a stable order (by agentId) so orbit slots don't
-    /// reshuffle every render.
+    /// In-flight drones in a stable order (by agentId) — kept for the swap-edge
+    /// animation key (membership/category set).
     private var sortedDrones: [DroneInFlight] {
         viewModel.inFlightDrones
             .sorted { $0.key < $1.key }

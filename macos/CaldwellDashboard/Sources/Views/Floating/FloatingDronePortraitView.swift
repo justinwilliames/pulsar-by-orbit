@@ -30,6 +30,9 @@ struct FloatingDronePortraitView: View {
     let index: Int
     /// Honour Reduce Motion — freeze the bob + pause blink when on.
     var reduceMotion: Bool = false
+    /// How many drones of this TYPE are in flight. >1 shows a "×N" count badge so
+    /// the viewer can tell how many of each character are running; 1 → no badge.
+    var countBadge: Int = 1
     let portraitManager: PortraitManager
 
     private var color: Color { droneColor(for: category) }
@@ -70,6 +73,7 @@ struct FloatingDronePortraitView: View {
                 droneName: category
             )
             .overlay(alignment: .topTrailing) { roleBadge }
+            .overlay(alignment: .bottomTrailing) { countPill }
             .shadow(color: color.opacity(0.3), radius: 4)
             .offset(
                 x: cos(angle) * orbitRadius + bobX,
@@ -87,6 +91,24 @@ struct FloatingDronePortraitView: View {
                     .combined(with: .offset(y: -24))
             )
         )
+    }
+
+    /// A "×N" count pill in the lower corner when this TYPE has >1 drone in
+    /// flight — so the viewer can read how many of each character are running.
+    @ViewBuilder
+    private var countPill: some View {
+        if countBadge > 1 {
+            Text("×\(countBadge)")
+                .font(.system(size: thumbnailSize * 0.26, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, thumbnailSize * 0.12)
+                .padding(.vertical, thumbnailSize * 0.04)
+                .background(Capsule().fill(color.opacity(0.95)))
+                .overlay(Capsule().strokeBorder(.white.opacity(0.85), lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                .offset(x: thumbnailSize * 0.14, y: thumbnailSize * 0.12)
+                .allowsHitTesting(false)
+        }
     }
 
     /// Tiny role badge in the portrait corner — a non-colour distinguisher so

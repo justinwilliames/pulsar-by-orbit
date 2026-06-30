@@ -38,10 +38,15 @@ let package = Package(
                 .copy("Resources/OrbitLogo.png"),
                 .copy("Resources/OrbitLogo@2x.png"),
                 .copy("Resources/OrbitLogo@3x.png"),
-                // Pulsar robot base — one front-facing robot with a blank screen.
-                // The procedural face (eyes/brows/mouth) is drawn live in SwiftUI
-                // on top of this; placed in Contents/Resources/ by the build script.
-                .copy("Resources/pulsar-base.png"),
+                // Pulsar mouth sprites — 5 rendered frames of one robot, mouth
+                // closed (0) → full open (4). PortraitView crossfades adjacent
+                // frames by amplitude. Placed in Contents/Resources/ by the
+                // build script so Bundle.main finds them via NSImage(named:).
+                .copy("Resources/pulsar-mouth-0.png"),
+                .copy("Resources/pulsar-mouth-1.png"),
+                .copy("Resources/pulsar-mouth-2.png"),
+                .copy("Resources/pulsar-mouth-3.png"),
+                .copy("Resources/pulsar-mouth-4.png"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

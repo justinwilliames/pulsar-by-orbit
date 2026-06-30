@@ -66,13 +66,15 @@ fi
 # them into Contents/Resources/ so Bundle.main can find them via NSImage(named:).
 RESOURCE_BUNDLE="$(find "$APP_DIR/.build" -name "CaldwellDashboard_CaldwellDashboard.bundle" -path "*/release/*" 2>/dev/null | head -1)"
 if [ -n "$RESOURCE_BUNDLE" ] && [ -d "$RESOURCE_BUNDLE" ]; then
-  for f in OrbitLogo.png "OrbitLogo@2x.png" "OrbitLogo@3x.png" pulsar-base.png; do
+  for f in OrbitLogo.png "OrbitLogo@2x.png" "OrbitLogo@3x.png" \
+           pulsar-mouth-0.png pulsar-mouth-1.png pulsar-mouth-2.png \
+           pulsar-mouth-3.png pulsar-mouth-4.png; do
     src="$RESOURCE_BUNDLE/$f"
     if [ -f "$src" ]; then
       cp "$src" "$APP_BUNDLE/Contents/Resources/$f"
     fi
   done
-  echo "Copied OrbitLogo + pulsar-base PNGs to Contents/Resources."
+  echo "Copied OrbitLogo + pulsar-mouth PNGs to Contents/Resources."
 else
   echo "Warning: SPM resource bundle not found — OrbitLogo may not render." >&2
 fi

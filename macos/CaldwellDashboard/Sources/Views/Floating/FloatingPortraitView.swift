@@ -4,7 +4,11 @@ import SwiftUI
 ///
 /// Brand-locked to Orbit indigo (no per-voice tint, no rainbow hue-shift). The
 /// glow reads as an actual *pulsar*: a slow rotating two-beam sweep behind the
-/// head, plus a rhythmic heartbeat glow and an expanding ring on a steady beat.
+/// head, plus a rhythmic heartbeat glow and an expanding ping on a steady beat.
+///
+/// The portrait is clipped to a squircle, so the tight neon rim and the expanding
+/// "ping" follow that same rounded-rect silhouette; the radial bloom and rotating
+/// beams stay circular by design — they read as an omnidirectional energy field.
 /// Everything is driven continuously by one `TimelineView(.animation)` clock —
 /// there is deliberately NO `.animation(value: amplitude)` (a spring on top of
 /// the 60Hz amplitude feed is what caused the old stutter).
@@ -18,6 +22,11 @@ struct FloatingPortraitView: View {
 
     /// Pulsar beat period, seconds. One "pulse" per beat.
     private let beatPeriod: Double = 1.4
+
+    /// Continuous-curvature corner radius for the portrait squircle — kept in
+    /// lockstep with `PortraitView.squircle` (size * 0.22) so the neon rim hugs
+    /// the actual clipped edge instead of a mismatched circle.
+    private var cornerRadius: CGFloat { portraitSize * 0.22 }
 
     // Fixed Pulsar palette.
     private var core: Color { .orbit }        // #6366F1
@@ -141,33 +150,35 @@ struct FloatingPortraitView: View {
 
     // MARK: - Crisp neon beat rings
 
-    /// A crisp thin expanding ring released on each beat (the pulsar "ping"),
-    /// plus a tight steady rim. Sharp lines + a little glow, not a soft blur.
+    /// A crisp thin expanding *squircle* released on each beat (the pulsar
+    /// "ping"), echoing the portrait's rounded-rect silhouette so the energy
+    /// reads as travelling outward from the shape, not a mismatched circle.
+    /// Sharp lines + a little glow, not a soft blur.
     @ViewBuilder
     private func pulseRings(time: Double, amp: Double) -> some View {
         Canvas { context, size in
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let baseRadius = portraitSize / 2
+            let baseHalf = portraitSize / 2                  // squircle half-side
 
-            // Expanding "ping" ring, re-emitted every beat. Reads as the pulse
+            // Expanding "ping" squircle, re-emitted every beat. Reads as the pulse
             // travelling outward. Present even when quiet, stronger when loud.
             let beat = fmod(time, beatPeriod) / beatPeriod
             let ringProgress = beat                          // 0 → 1 across the beat
-            let ringRadius = baseRadius + 3 + ringProgress * (18 + amp * 26)
+            let half = baseHalf + 3 + ringProgress * (18 + amp * 26)
             let ringOpacity = (1.0 - ringProgress) * (0.30 + amp * 0.45)
 
             if ringOpacity > 0.02 {
-                strokeCircle(context, center: center, radius: ringRadius,
-                             color: light.opacity(ringOpacity), width: 1.6)
+                strokeSquircle(context, center: center, half: half,
+                               color: light.opacity(ringOpacity), width: 1.6)
             }
 
-            // A second, fainter ring a half-beat out of phase for rhythm.
+            // A second, fainter squircle a half-beat out of phase for rhythm.
             let beat2 = fmod(time + beatPeriod / 2, beatPeriod) / beatPeriod
-            let r2Radius = baseRadius + 3 + beat2 * (18 + amp * 26)
+            let half2 = baseHalf + 3 + beat2 * (18 + amp * 26)
             let r2Opacity = (1.0 - beat2) * (0.14 + amp * 0.22)
             if r2Opacity > 0.02 {
-                strokeCircle(context, center: center, radius: r2Radius,
-                             color: muted.opacity(r2Opacity), width: 1.2)
+                strokeSquircle(context, center: center, half: half2,
+                               color: muted.opacity(r2Opacity), width: 1.2)
             }
         }
         .frame(width: portraitSize + 80, height: portraitSize + 80)
@@ -175,25 +186,31 @@ struct FloatingPortraitView: View {
     }
 
     /// Tight bright neon rim hugging the head, brightening on each beat — the
-    /// crisp cybernetic accent that matches the headset's neon lines.
+    /// crisp cybernetic accent that matches the headset's neon lines. Follows the
+    /// portrait *squircle* (offset out by 2pt) so the rim sits exactly on the
+    /// clipped edge rather than a mismatched circle.
     @ViewBuilder
     private func heartCore(pulse: Double, amp: Double) -> some View {
-        let rim = portraitSize / 2 + 2
+        let side = portraitSize + 4                       // 2pt clearance each side
         let intensity = 0.35 + amp * 0.4 + pulse * 0.25
 
-        Circle()
+        RoundedRectangle(cornerRadius: cornerRadius + 2, style: .continuous)
             .stroke(light.opacity(intensity), lineWidth: 1.4)
-            .frame(width: rim * 2, height: rim * 2)
+            .frame(width: side, height: side)
             .shadow(color: core.opacity(0.5 + pulse * 0.3), radius: 3 + pulse * 3)
             .allowsHitTesting(false)
     }
 
     // MARK: - Canvas helper
 
-    private func strokeCircle(_ context: GraphicsContext, center: CGPoint,
-                              radius: CGFloat, color: Color, width: CGFloat) {
-        let rect = CGRect(x: center.x - radius, y: center.y - radius,
-                          width: radius * 2, height: radius * 2)
-        context.stroke(Circle().path(in: rect), with: .color(color), lineWidth: width)
+    private func strokeSquircle(_ context: GraphicsContext, center: CGPoint,
+                                half: CGFloat, color: Color, width: CGFloat) {
+        let rect = CGRect(x: center.x - half, y: center.y - half,
+                          width: half * 2, height: half * 2)
+        // Keep the same 0.22 corner ratio as the portrait squircle so the
+        // expanding pings stay shape-consistent as they grow.
+        let path = RoundedRectangle(cornerRadius: half * 0.44, style: .continuous)
+            .path(in: rect)
+        context.stroke(path, with: .color(color), lineWidth: width)
     }
 }

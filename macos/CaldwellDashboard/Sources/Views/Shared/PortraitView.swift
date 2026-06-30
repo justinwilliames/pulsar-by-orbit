@@ -12,6 +12,9 @@ import SwiftUI
 /// closed frame on a varied ~3.5–5.5s timer — but ONLY during speech pauses
 /// (smoothed amplitude < 0.05), so the robot never blinks mid-sentence.
 ///
+/// The whole portrait is clipped to a continuous-curvature *squircle* (not a
+/// circle), with the amplitude glow stroke following the same squircle.
+///
 /// One robot for all voices (`voiceName` is ignored for the image, kept only for
 /// the fallback monogram + API stability). The external signature is unchanged so
 /// NowPlayingView / FloatingPortraitView keep working.
@@ -39,6 +42,13 @@ struct PortraitView: View {
     private let blinkDuration: Double = 0.12
     private let speechFloor: CGFloat = 0.05
 
+    /// The portrait clip/stroke shape — a continuous-curvature squircle (rounded
+    /// rect, iOS-style superellipse) rather than a hard circle. Corner radius
+    /// scales with `size` so it reads identically at any portrait dimension.
+    private var squircle: RoundedRectangle {
+        RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+    }
+
     var body: some View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
@@ -62,10 +72,10 @@ struct PortraitView: View {
                 }
             }
             .frame(width: size, height: size)
-            .clipShape(Circle())
+            .clipShape(squircle)
             .overlay {
                 if amplitude > 0 {
-                    Circle()
+                    squircle
                         .stroke(voiceColor.opacity(0.6), lineWidth: 2)
                         .shadow(color: voiceColor.opacity(0.4), radius: 6)
                 }
@@ -106,7 +116,7 @@ struct PortraitView: View {
     }
 
     @ViewBuilder private var fallback: some View {
-        Circle()
+        squircle
             .fill(voiceColor.opacity(0.3))
             .overlay {
                 Text(String(voiceName.prefix(1)).uppercased())

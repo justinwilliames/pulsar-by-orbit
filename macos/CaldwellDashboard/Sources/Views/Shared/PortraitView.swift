@@ -30,15 +30,14 @@ struct PortraitView: View {
     // x[0.30, 0.70], y[0.32, 0.50] of the image. Features are placed within that.
     private enum Screen {
         static let centerX: CGFloat = 0.500
-        static let eyeY: CGFloat    = 0.405   // eye row
-        static let mouthY: CGFloat  = 0.478   // mouth centre, lower screen
-        static let browY: CGFloat   = 0.352   // brow row, just above eyes (rest)
-        static let eyeDX: CGFloat   = 0.094   // half-distance between eyes
-        static let eyeW: CGFloat    = 0.078   // eye width
-        static let eyeH: CGFloat    = 0.096   // eye height (open)
-        static let browW: CGFloat   = 0.084   // brow bar length
-        static let mouthMaxW: CGFloat = 0.250 // mouth width when fully open
-        static let mouthMinW: CGFloat = 0.150 // mouth width when closed (line)
+        static let eyeY: CGFloat    = 0.388   // eye row (upper screen)
+        static let mouthY: CGFloat  = 0.480   // mouth centre, LOWER screen
+        static let browY: CGFloat   = 0.330   // brow row, just above eyes (rest)
+        static let eyeDX: CGFloat   = 0.098   // half-distance between eyes
+        static let eyeD: CGFloat    = 0.120   // eye diameter — BIG & ROUND
+        static let browW: CGFloat   = 0.072   // brow bar length (subtle)
+        static let mouthMaxW: CGFloat = 0.230 // mouth width when fully open
+        static let mouthMinW: CGFloat = 0.130 // mouth width when closed (line)
     }
 
     // MARK: Smoothed drive signals
@@ -130,37 +129,44 @@ struct PortraitView: View {
 
     @ViewBuilder
     private func eye(side: CGFloat, blink: CGFloat, drift: CGFloat) -> some View {
-        let w = Screen.eyeW * size
-        let h = Screen.eyeH * size
+        let d = Screen.eyeD * size                    // big round eye
         let x = (Screen.centerX + side * Screen.eyeDX) * size
         let y = (Screen.eyeY + drift) * size
 
         ZStack {
-            // Soft outer halo
-            RoundedRectangle(cornerRadius: w * 0.5, style: .continuous)
+            // Gentle outer halo — soft, not blown-out, so eyes read as distinct.
+            Circle()
                 .fill(glow)
-                .frame(width: w * 1.25, height: h * 1.25)
-                .blur(radius: w * 0.45)
-                .opacity(0.55)
+                .frame(width: d * 1.18, height: d * 1.18)
+                .blur(radius: d * 0.30)
+                .opacity(0.40)
 
-            // Eye body — vertical gradient indigo→cyan
-            RoundedRectangle(cornerRadius: w * 0.5, style: .continuous)
+            // Iris — radial cyan with a bright centre, like the master's eyes.
+            Circle()
                 .fill(
-                    LinearGradient(
-                        colors: [deep, glow],
-                        startPoint: .top, endPoint: .bottom
+                    RadialGradient(
+                        colors: [core, glow, deep],
+                        center: .init(x: 0.42, y: 0.38),
+                        startRadius: 0,
+                        endRadius: d * 0.62
                     )
                 )
-                .frame(width: w, height: h)
-                .shadow(color: glow.opacity(0.9), radius: h * 0.32)
+                .frame(width: d, height: d)
+                .shadow(color: glow.opacity(0.7), radius: d * 0.16)
 
-            // Bright core highlight
-            RoundedRectangle(cornerRadius: w * 0.45, style: .continuous)
+            // Bright catch-light highlight, upper-left (friendly, alive).
+            Circle()
                 .fill(core)
-                .frame(width: w * 0.5, height: h * 0.5)
-                .blur(radius: w * 0.12)
-                .opacity(0.95)
-                .offset(y: -h * 0.12)
+                .frame(width: d * 0.30, height: d * 0.30)
+                .blur(radius: d * 0.04)
+                .offset(x: -d * 0.16, y: -d * 0.18)
+
+            // Tiny secondary sparkle, lower-right.
+            Circle()
+                .fill(.white)
+                .frame(width: d * 0.10, height: d * 0.10)
+                .opacity(0.85)
+                .offset(x: d * 0.14, y: d * 0.16)
         }
         .scaleEffect(x: 1.0, y: max(0.08, blink), anchor: .center)
         .position(x: x, y: y)
@@ -171,72 +177,54 @@ struct PortraitView: View {
     @ViewBuilder
     private func brow(side: CGFloat, speaking: CGFloat, drift: CGFloat) -> some View {
         let w = Screen.browW * size
-        let hBar = max(2.5, size * 0.018)
+        let hBar = max(2, size * 0.013)
 
-        // Lift up + small inward tilt when speaking. Kept small so the brow
-        // stays on the dark glass and never rides up onto the silver frame.
-        let lift = speaking * size * 0.014
-        let tilt = Angle(degrees: Double(side) * -11 * Double(speaking)) // inner end up
+        // FRIENDLY brows: flat at rest, a tiny SYMMETRIC up-raise when speaking
+        // (attentive). NEVER angled inward-down — that reads angry. No tilt at all.
+        let lift = speaking * size * 0.012
         let x = (Screen.centerX + side * Screen.eyeDX) * size
         let y = (Screen.browY + drift) * size - lift
 
-        ZStack {
-            // Soft halo so the brow reads as its own glowing element.
-            Capsule(style: .continuous)
-                .fill(glow)
-                .frame(width: w, height: hBar * 1.5)
-                .blur(radius: hBar * 0.7)
-                .opacity(0.45)
-            Capsule(style: .continuous)
-                .fill(LinearGradient(colors: [deep, glow], startPoint: .leading, endPoint: .trailing))
-                .frame(width: w, height: hBar)
-                .shadow(color: glow.opacity(0.9), radius: hBar * 1.0)
-        }
-        .rotationEffect(tilt, anchor: .center)
-        .position(x: x, y: y)
+        Capsule(style: .continuous)
+            .fill(glow)
+            .frame(width: w, height: hBar)
+            .opacity(0.65)
+            .shadow(color: glow.opacity(0.6), radius: hBar * 0.8)
+            .position(x: x, y: y)
     }
 
     // MARK: Mouth
 
     @ViewBuilder
     private func mouth(openness amp: CGFloat) -> some View {
-        let openH = (0.012 + amp * 0.085) * size      // line → wide aperture
+        let openH = (0.010 + amp * 0.075) * size      // thin line → open aperture
         let w = (Screen.mouthMinW + (Screen.mouthMaxW - Screen.mouthMinW) * amp) * size
         let x = Screen.centerX * size
         let y = Screen.mouthY * size
 
+        // A DARK opening: deep fill (darker than the screen glass) with a thin
+        // cyan rim that lights up as it opens. Reads as a mouth, not a glow blob.
         ZStack {
-            // Soft outer glow halo
-            Capsule(style: .continuous)
-                .fill(glow)
-                .frame(width: w * 1.1, height: openH * 1.6 + size * 0.01)
-                .blur(radius: size * 0.022)
-                .opacity(0.5)
-
-            // Aperture body
+            // Dark aperture body.
             Capsule(style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [glow, deep],
+                        colors: [
+                            Color(red: 0.02, green: 0.03, blue: 0.10),
+                            Color(red: 0.05, green: 0.09, blue: 0.22)
+                        ],
                         startPoint: .top, endPoint: .bottom
                     )
                 )
                 .frame(width: w, height: openH)
-                .shadow(color: glow.opacity(0.9), radius: openH * 0.6 + 2)
 
-            // Bright inner core (grows with openness)
+            // Thin cyan rim — brightens with openness, gives a defined edge.
             Capsule(style: .continuous)
-                .fill(core)
-                .frame(width: w * 0.82, height: openH * 0.5)
-                .blur(radius: openH * 0.18 + 0.5)
-                .opacity(0.85 * Double(0.5 + 0.5 * amp))
-
-            // Faint vocal centre-line — a thin bright bar across the mouth.
-            Capsule()
-                .fill(core)
-                .frame(width: w * 0.9, height: max(1, size * 0.004))
-                .opacity(0.6)
-                .blur(radius: 0.5)
+                .strokeBorder(glow.opacity(0.55 + 0.35 * Double(amp)),
+                              lineWidth: max(1, size * 0.006))
+                .frame(width: w, height: openH)
+                .shadow(color: glow.opacity(0.35 + 0.25 * Double(amp)),
+                        radius: size * 0.008)
         }
         .position(x: x, y: y)
     }

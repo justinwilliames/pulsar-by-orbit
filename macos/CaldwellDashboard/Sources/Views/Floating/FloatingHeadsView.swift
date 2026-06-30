@@ -93,11 +93,12 @@ struct FloatingHeadsView: View {
     /// The drone category owning the line, or nil when Pulsar speaks.
     private var activeDroneCategory: String? { speaker?.category }
 
-    /// The head zone renders whenever something is speaking OR a sub-agent is
-    /// in-flight — so silently-running drones still hover around a calm, centred
-    /// Pulsar (no lip-sync, no caption) until they despawn.
+    /// The head zone renders only while something is actually speaking (the panel
+    /// is speech-gated). In-flight drones still drive the orbit/swarm WHILE the
+    /// panel is up, but a non-empty in-flight set alone never renders a silent,
+    /// speaker-less head zone — drones appear only when they have something to say.
     private var panelHasContent: Bool {
-        speaker != nil || viewModel.hasInFlightDrones
+        speaker != nil
     }
 
     // MARK: - Head zone (true place-swap via matched arcs)
@@ -132,18 +133,17 @@ struct FloatingHeadsView: View {
     }
 
     /// Render one participant in its current slot. The CENTRE occupant is the
-    /// full-size Pulsar-style portrait (glow tinted to the speaker); ORBIT
-    /// occupants are small drone thumbnails. Pulsar in orbit renders as a
-    /// drone-sized pulsar thumbnail.
+    /// full-size speaker portrait (glow tinted to the speaker — Pulsar or a
+    /// drone); ORBIT occupants are small drone thumbnails (never Pulsar).
     @ViewBuilder
     private func participantView(_ p: Participant) -> some View {
         if p.isCentre {
-            // MATCHED ARC (P1): the centre occupant ARRIVES from the orbit slot
-            // it just vacated (insertion offset = that slot) and, when replaced,
-            // DEPARTS toward the slot it's headed for — so the incoming drone and
-            // the outgoing Pulsar physically pass each other rather than cross-
-            // fading in place. Arriving overshoots slightly (presence); departing
-            // eases out slower.
+            // MATCHED ARC: an incoming drone ARRIVES from an orbit slot
+            // (insertion offset = that slot) and, when the next speaker takes
+            // over, DEPARTS toward an orbit slot — so consecutive drone speakers
+            // pass each other rather than cross-fading in place. A Pulsar centre
+            // simply fades in/out (he has no orbit slot to travel from/to).
+            // Arriving overshoots slightly (presence); departing eases out slower.
             let home = homeOrbitOffset(for: p)
             FloatingPortraitView(
                 voiceName: speaker?.voiceLabel ?? "Pulsar",
@@ -183,9 +183,9 @@ struct FloatingHeadsView: View {
     }
 
     /// The orbit-slot offset the centre occupant travels FROM (on arrival) and
-    /// TO (on departure) — the "swap lane". Both the incoming type and the
-    /// outgoing Pulsar trade through the first orbit slot, so they pass each
-    /// other along the same arc.
+    /// TO (on departure) — the "swap lane" for drone↔drone hand-offs, so the
+    /// incoming and outgoing drones pass each other along the same arc. (A Pulsar
+    /// centre ignores this and just fades, having no orbit slot.)
     private func homeOrbitOffset(for _: Participant) -> CGSize {
         let angle = orbitAngle(index: 0, total: max(orbitTypeSlots.count, 1))
         return CGSize(width: cos(angle) * orbitRadius,
@@ -254,17 +254,18 @@ struct FloatingHeadsView: View {
         let orbitIndex: Int     // valid only when !isCentre
     }
 
-    /// The full participant list: exactly one centre occupant + one orbit slot
-    /// PER DISTINCT in-flight character type.
+    /// The full participant list: the centre occupant (the ACTIVE SPEAKER —
+    /// Pulsar OR a drone) + one orbit slot per OTHER distinct in-flight drone.
+    /// Pulsar is a peer: he occupies the centre only when he's the speaker, and
+    /// is never placed in the orbit.
     private var participants: [Participant] {
         var out: [Participant] = []
         let active = activeDroneCategory
 
-        // Centre occupant. When a drone is the ACTIVE SPEAKER its OWN face must
-        // show — its frames + colour — even if that category is no longer in the
-        // in-flight set (a sub-agent can finish, then the session narrates its
-        // result tagged --agent <cat>). The centre is keyed by category so it's
-        // continuous with that type's orbit slot through the swap.
+        // Centre occupant = the active speaker. A drone's OWN face shows (its
+        // frames + colour) even if its category is no longer in the in-flight set
+        // (a sub-agent can finish, then the session narrates its result tagged
+        // --agent <cat>). nil category = Pulsar speaks an untagged line.
         if let active {
             out.append(Participant(id: active, category: active,
                                    color: droneColor(for: active),
@@ -275,8 +276,8 @@ struct FloatingHeadsView: View {
                                    isCentre: true, orbitIndex: 0))
         }
 
-        // Orbit slots: one per distinct in-flight type (minus the centre type),
-        // plus Pulsar (drone-sized) when a drone holds the centre.
+        // Orbit slots: one per distinct in-flight DRONE type EXCEPT the centre
+        // speaker. Pulsar never appears in orbit.
         for (i, slot) in orbitTypeSlots.enumerated() {
             out.append(Participant(id: slot.id, category: slot.category,
                                    color: droneColor(for: slot.categoryKey),
@@ -285,35 +286,28 @@ struct FloatingHeadsView: View {
         return out
     }
 
-    /// One orbit slot per distinct character type.
+    /// One orbit slot per distinct in-flight DRONE type. Pulsar is NEVER in the
+    /// orbit — he's a peer who only ever occupies the centre, and only as the
+    /// active speaker.
     private struct OrbitTypeSlot: Identifiable {
-        let id: String          // "pulsar" or the category name
-        let category: String?   // nil = Pulsar
-        /// Colour/category key — "pulsar" for the Pulsar slot, else the category.
-        var categoryKey: String { category ?? "pulsar" }
+        let id: String          // the category name
+        let category: String    // always a real drone category
+        var categoryKey: String { category }
     }
 
-    /// The orbit roster, grouped by TYPE: one slot per distinct in-flight
-    /// category (excluding the one at centre), plus Pulsar pinned first when a
-    /// drone holds the centre. Stable canonical order so slots don't reshuffle.
-    /// Presence = "that type is working"; how many of that type run is invisible
-    /// by design (one character per type).
+    /// The orbit roster, grouped by TYPE: one slot per distinct in-flight DRONE
+    /// category, EXCLUDING the one at centre. Pulsar never appears here. Stable
+    /// canonical order so slots don't reshuffle. Presence = "that type is
+    /// working"; count is invisible by design (one character per type).
+    ///
+    /// So: a drone speaking → orbit = the OTHER in-flight drones (no Pulsar);
+    /// Pulsar speaking → orbit = all in-flight drones; one drone alone → no orbit.
     private var orbitTypeSlots: [OrbitTypeSlot] {
         let present = inFlightCategories
-        var slots: [OrbitTypeSlot] = []
         let active = activeDroneCategory
-
-        // Pulsar orbits (drone-sized) only while a drone holds the centre.
-        if active != nil {
-            slots.append(OrbitTypeSlot(id: "pulsar", category: nil))
-        }
-        // One slot per distinct in-flight type, in canonical taxonomy order,
-        // skipping the type that's currently at centre.
-        for category in DroneRegistry.categories
-        where category != active && present.contains(category) {
-            slots.append(OrbitTypeSlot(id: category, category: category))
-        }
-        return slots
+        return DroneRegistry.categories
+            .filter { $0 != active && present.contains($0) }
+            .map { OrbitTypeSlot(id: $0, category: $0) }
     }
 
     /// The set of distinct in-flight categories (lowercased) — presence only.

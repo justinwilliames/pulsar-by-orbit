@@ -21,16 +21,20 @@ final class DashboardViewModel {
     /// "drones_in_flight" SSE event; rendered as orbiting drones around Pulsar.
     var inFlightDrones: [String: String] = [:]
 
-    /// True while any sub-agent is running. Drones must hover around Pulsar WHILE
-    /// they run, not only while something is speaking — so this gates the panel
-    /// independently of voice activity.
+    /// True while any sub-agent is running. Still drives the orbit/swarm +
+    /// per-type grouping WHILE the panel is up during speech — but a non-empty
+    /// set does NOT force the panel visible on its own (drones only appear when
+    /// they have something to SAY; a silently-running sub-agent must not put a
+    /// mute drone on screen).
     var hasInFlightDrones: Bool { !inFlightDrones.isEmpty }
 
-    /// The panel must be visible whenever something is speaking/queued OR a
-    /// sub-agent is in-flight (silent drones still show). The trailing linger in
-    /// AppDelegate keeps it from flickering when the last input clears.
+    /// The panel is visible only while something is actually speaking/queued —
+    /// Pulsar or a drone — plus the existing trailing linger. In-flight drones
+    /// alone don't force it: each drone announces itself vocally on spawn (the
+    /// SubagentStart hook fires an acceptance line), so it appears WITH its voice
+    /// rather than silently hovering.
     var panelShouldBeVisible: Bool {
-        playback.isPlaying || playback.queuedCount > 0 || hasInFlightDrones
+        playback.isPlaying || playback.queuedCount > 0
     }
 
     /// Last value pushed to `onPlaybackChanged`, so we only fire on a real edge.

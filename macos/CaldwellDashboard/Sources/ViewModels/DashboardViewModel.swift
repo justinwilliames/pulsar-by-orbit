@@ -283,9 +283,9 @@ final class DashboardViewModel {
         }
     }
 
-    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
+    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
+            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, floatingHeadEnabled: floatingHeadEnabled, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }
@@ -309,6 +309,16 @@ final class DashboardViewModel {
     /// (bespoke-only — richer, fewer).
     func setCanonEnabled(_ on: Bool) async {
         _ = await saveSettings(canonEnabled: on)
+    }
+
+    /// Floating-head visibility: on = show the animated Pulsar head when it
+    /// speaks; off = voice only, no floating window.
+    func setFloatingHeadEnabled(_ on: Bool) async {
+        _ = await saveSettings(floatingHeadEnabled: on)
+    }
+
+    var isFloatingHeadEnabled: Bool {
+        settings?.floatingHeadEnabled ?? true
     }
 
     /// Free-mode local voice choice. Empty resets to auto (Daniel Enhanced else

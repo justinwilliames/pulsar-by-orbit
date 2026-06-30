@@ -85,6 +85,14 @@ final class CaldwellConfig: @unchecked Sendable {
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
+    /// Whether the animated floating Pulsar head is shown on screen while it
+    /// speaks. Default ON preserves today's behaviour. When OFF, the floating
+    /// window is never created/shown (the voice still plays).
+    var floatingHeadEnabled: Bool {
+        let val = lock.withLock { _config["CALDWELL_FLOATING_HEAD"] } ?? "1"
+        return !["0", "false", "no", "off", ""].contains(val.lowercased())
+    }
+
     // MARK: - Mutate + reload
 
     /// Re-read config.json from disk. Call after any write.

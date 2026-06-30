@@ -25,6 +25,17 @@ enum NativeVoiceClient {
         let label: String
     }
 
+    /// Known macOS novelty/robotic voices, matched case-insensitively by base
+    /// name. These report `.unspecified` gender so the human-voice filter in
+    /// `compute()` drops them — but the Robotic category needs them, so they are
+    /// re-added explicitly when installed. Keep in sync with the app-side
+    /// `VoiceCategory.robotic` set in SettingsView.
+    static let roboticVoiceNames: Set<String> = [
+        "zarvox", "trinoids", "fred", "albert", "ralph", "whisper", "wobble",
+        "bahh", "boing", "bells", "bubbles", "cellos", "organ", "jester",
+        "superstar", "bad news", "good news",
+    ]
+
     private struct ResolvedVoice {
         let display: String    // base name shown + stored, e.g. "Daniel"
         let resolved: String   // actual say -v name, e.g. "Daniel (Enhanced)"
@@ -75,6 +86,12 @@ enum NativeVoiceClient {
            let v = vs.first(where: { $0.display.caseInsensitiveCompare(choice) == .orderedSame }) {
             return v.resolved
         }
+        // Out-of-box default (no saved choice): Zarvox — Pulsar opens robotic.
+        // A user's saved pick is never overridden because `choice` is non-empty
+        // once they choose. Fall through to Daniel, then anything installed.
+        if let zarvox = vs.first(where: { $0.display.caseInsensitiveCompare("Zarvox") == .orderedSame }) {
+            return zarvox.resolved
+        }
         if let daniel = vs.first(where: { $0.display.caseInsensitiveCompare("Daniel") == .orderedSame }) {
             return daniel.resolved
         }
@@ -108,10 +125,22 @@ enum NativeVoiceClient {
             }
         }
 
-        let resolved = groups.map { (k, v) in
+        var resolved = groups.map { (k, v) in
             ResolvedVoice(display: k.base, resolved: v.name,
                           label: label(name: k.base, language: v.language), language: v.language)
         }
+
+        // Re-add installed robotic/novelty voices. They report `.unspecified`
+        // gender so the `human` filter above dropped them, but the Robotic voice
+        // category needs them selectable. Dedupe against anything already present.
+        let alreadyPresent = Set(resolved.map { $0.display.lowercased() })
+        for v in all where roboticVoiceNames.contains(v.name.lowercased())
+            && !alreadyPresent.contains(v.name.lowercased()) {
+            resolved.append(ResolvedVoice(
+                display: v.name, resolved: v.name,
+                label: "\(v.name) (Robotic)", language: v.language))
+        }
+
         // English first, then by language, then name.
         return resolved.sorted { a, b in
             let aEN = a.language.hasPrefix("en"), bEN = b.language.hasPrefix("en")

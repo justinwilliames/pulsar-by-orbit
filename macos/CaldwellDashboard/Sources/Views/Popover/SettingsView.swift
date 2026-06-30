@@ -9,6 +9,14 @@ struct SettingsView: View {
     @State private var statusMessage: String?
     @State private var statusKind: StatusKind = .info
 
+    /// Voice-picker navigation aid: which category's voices the list shows.
+    /// Defaults to Robotic (the out-of-box category, with Zarvox selected).
+    @State private var voiceCategory: VoiceCategory = .robotic
+    /// Tracks whether we've already reconciled the segment to the saved voice /
+    /// applied the out-of-box default, so a later settings refresh doesn't yank
+    /// the user back off a segment they deliberately switched to.
+    @State private var didInitVoiceCategory = false
+
     enum StatusKind { case ok, error, info }
 
     var body: some View {
@@ -26,6 +34,7 @@ struct SettingsView: View {
         }
         .task {
             await viewModel.loadSettings()
+            initVoiceCategoryIfNeeded()
         }
     }
 
@@ -75,11 +84,25 @@ struct SettingsView: View {
                 .tracking(0.5)
 
             if let voices = viewModel.settings?.availableVoices, !voices.isEmpty {
+                Picker("Voice type", selection: voiceCategoryBinding) {
+                    ForEach(VoiceCategory.allCases) { cat in
+                        Text(cat.rawValue).tag(cat)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                let filtered = voices.filter {
+                    VoiceCategory.category(for: $0.name) == voiceCategory
+                }
                 Picker("Local voice", selection: nativeVoiceBinding) {
-                    ForEach(voices, id: \.name) { v in Text(v.label).tag(v.name) }
+                    ForEach(filtered, id: \.name) { v in Text(v.label).tag(v.name) }
                 }
                 .pickerStyle(.menu)
-                Text("Pick any installed voice. Download more under System Settings → Accessibility → Spoken Content. (Apple reserves the Siri voices for the system — they can't be used here.)")
+                .disabled(filtered.isEmpty)
+                Text(voiceCategory == .robotic
+                    ? "Robotic — macOS novelty voices (Zarvox, Trinoids, Fred…). Pulsar's out-of-box default is Zarvox."
+                    : "Humanoid — natural macOS voices. Download more under System Settings → Accessibility → Spoken Content. (Apple reserves the Siri voices for the system — they can't be used here.)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -94,6 +117,19 @@ struct SettingsView: View {
                     Text("Quick cached pings")
                         .font(.caption.weight(.medium))
                     Text(canonHint)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+
+            Toggle(isOn: floatingHeadEnabledBinding) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Floating head")
+                        .font(.caption.weight(.medium))
+                    Text("Show the animated Pulsar head on screen when it speaks.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -127,15 +163,61 @@ struct SettingsView: View {
                 (viewModel.settings?.nativeVoice ?? "Daniel")
                     .replacingOccurrences(of: " (Enhanced)", with: "")
                     .replacingOccurrences(of: " (Premium)", with: "")
+                    .replacingOccurrences(of: " (Robotic)", with: "")
             },
             set: { newValue in Task { await viewModel.setNativeVoice(newValue) } }
         )
+    }
+
+    /// Segment binding for the Robotic | Humanoid voice-type toggle. Flipping the
+    /// segment also moves the selected voice to that category's default when the
+    /// current pick belongs to the other category, so the menu never shows a
+    /// voice that's invisible under the active filter.
+    private var voiceCategoryBinding: Binding<VoiceCategory> {
+        Binding(
+            get: { voiceCategory },
+            set: { newCategory in
+                voiceCategory = newCategory
+                let current = nativeVoiceBinding.wrappedValue
+                if VoiceCategory.category(for: current) != newCategory {
+                    let fallback = newCategory.defaultVoiceName
+                    Task { await viewModel.setNativeVoice(fallback) }
+                }
+            }
+        )
+    }
+
+    /// Reconcile the segment + apply the out-of-box default exactly once, when
+    /// settings first load. If no voice is saved yet, default to Zarvox on the
+    /// Robotic segment; otherwise open on whichever category the saved voice
+    /// belongs to. Never overrides a voice the user already chose.
+    private func initVoiceCategoryIfNeeded() {
+        guard !didInitVoiceCategory,
+              let voices = viewModel.settings?.availableVoices, !voices.isEmpty
+        else { return }
+        didInitVoiceCategory = true
+
+        // A voice is "set" when the daemon reports a non-empty native_voice that
+        // resolves to a real installed voice. The daemon always reports a
+        // resolved fallback (Daniel) even when CALDWELL_NATIVE_VOICE is blank, so
+        // we can't distinguish blank-config here — instead we trust the saved
+        // value and just open on its category. The blank → Zarvox default is
+        // enforced server-side by leaving config untouched until the user picks.
+        let current = nativeVoiceBinding.wrappedValue
+        voiceCategory = VoiceCategory.category(for: current)
     }
 
     private var canonEnabledBinding: Binding<Bool> {
         Binding(
             get: { viewModel.settings?.canonEnabled ?? true },
             set: { newValue in Task { await viewModel.setCanonEnabled(newValue) } }
+        )
+    }
+
+    private var floatingHeadEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.floatingHeadEnabled ?? true },
+            set: { newValue in Task { await viewModel.setFloatingHeadEnabled(newValue) } }
         )
     }
 

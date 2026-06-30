@@ -85,6 +85,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[Pulsar] updateFloatingPanel called but panel is nil")
             return
         }
+
+        // Honour the floating-head setting. When off, the head never appears —
+        // the voice still plays. If it's somehow on screen (setting flipped
+        // mid-utterance), take it down now.
+        guard CaldwellConfig.shared.floatingHeadEnabled else {
+            if panel.isVisible {
+                hidePanel(reason: "floating-head-disabled")
+            }
+            return
+        }
+
         NSLog("[Pulsar] updateFloatingPanel isActive=\(isActive) wasVisible=\(panel.isVisible)")
         if isActive {
             hideWorkItem?.cancel()

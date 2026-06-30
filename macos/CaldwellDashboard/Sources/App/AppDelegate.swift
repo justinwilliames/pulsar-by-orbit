@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // cover a long line + the 10s read tail.
     private static let maxVisibleDuration: TimeInterval = 45.0
     private var hideWorkItem: DispatchWorkItem?
+    /// True while the panel is mid fade-out, so a new line can abort it.
+    private var isFadingOut = false
     private var maxVisibleWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -102,7 +104,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isActive {
             hideWorkItem?.cancel()
             hideWorkItem = nil
+            if isFadingOut {
+                // A new line arrived mid fade-out — abort it and restore him.
+                isFadingOut = false
+                panel.alphaValue = 1
+            }
             if !panel.isVisible {
+                panel.alphaValue = 1
                 panel.positionOnScreen()
                 // orderFrontRegardless bypasses macOS 26's stricter activation
                 // rules for non-activating panels — orderFront alone can be
@@ -145,18 +153,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hideWorkItem = nil
         maxVisibleWorkItem?.cancel()
         maxVisibleWorkItem = nil
-        // Fade Pulsar out instead of snapping off: clearing the voice/text fires
-        // the head + caption removal transitions (FloatingHeadsView animates on
-        // currentVoice), so he dissolves. Order the now-transparent panel out only
-        // AFTER that fade — unless a new line revived him in the meantime.
-        viewModel.playback.currentVoice = nil
-        viewModel.playback.currentText = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
-            guard let self, self.viewModel.playback.currentVoice == nil else { return }
-            self.floatingPanel?.orderOut(nil)
-            // Collapse to the head-only footprint so the next appearance starts at
-            // base height and no stale tall transparent area lingers off-screen.
-            self.floatingPanel?.resetToBaseSize()
+        guard let panel = floatingPanel, panel.isVisible else {
+            floatingPanel?.orderOut(nil)
+            viewModel.playback.currentVoice = nil
+            viewModel.playback.currentText = nil
+            floatingPanel?.resetToBaseSize()
+            return
+        }
+        // Slow, gentle fade rather than a snap: animate the whole panel's alpha to
+        // 0, then order it out, clear state, and reset alpha + footprint — unless a
+        // new line revived him mid-fade (the isFadingOut guard). Tune `duration`.
+        isFadingOut = true
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.9
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            guard let self, self.isFadingOut else { return }
+            self.isFadingOut = false
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+            self.viewModel.playback.currentVoice = nil
+            self.viewModel.playback.currentText = nil
+            panel.resetToBaseSize()
         }
         NSLog("[Pulsar] Panel hidden (\(reason))")
     }

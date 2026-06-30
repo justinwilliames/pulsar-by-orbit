@@ -1,7 +1,7 @@
 import Foundation
 
 /// Singleton config store. Reads from:
-///   1. REPO_ROOT/config.json — muted state, native voice.
+///   1. REPO_ROOT/config.json — muted state, expletives toggle, native voice.
 ///   2. Environment variables — overrides for the native-voice choice + canon.
 ///
 /// Thread-safe: all mutations go through an NSLock. Call `reload()` after
@@ -56,6 +56,15 @@ final class CaldwellConfig: @unchecked Sendable {
 
     var isMuted: Bool {
         let val = lock.withLock { _config["CALDWELL_MUTED"] } ?? "0"
+        return ["1", "true", "yes", "on"].contains(val.lowercased())
+    }
+
+    /// Whether Potty Mouth mode is on. Default OFF (Polite). When ON, canon
+    /// picks from the potty pool and bespoke /speak lines are delivered as-is
+    /// (no scrubbing). When OFF, bespoke lines are scrubbed clean before being
+    /// cached or spoken, making Polite authoritative regardless of caller text.
+    var expletivesEnabled: Bool {
+        let val = lock.withLock { _config["CALDWELL_EXPLETIVES"] } ?? "0"
         return ["1", "true", "yes", "on"].contains(val.lowercased())
     }
 

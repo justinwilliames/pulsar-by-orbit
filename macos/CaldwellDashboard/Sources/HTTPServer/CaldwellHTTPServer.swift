@@ -553,6 +553,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
 
         guard update.muted != nil ||
+                update.expletives_enabled != nil ||
                 update.canon_enabled != nil ||
                 update.native_voice != nil
         else {
@@ -564,6 +565,9 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         do {
             if let muted = update.muted {
                 try config.set("CALDWELL_MUTED", value: muted ? "1" : "0")
+            }
+            if let expletives = update.expletives_enabled {
+                try config.set("CALDWELL_EXPLETIVES", value: expletives ? "1" : "0")
             }
             if let canon = update.canon_enabled {
                 try config.set("CALDWELL_CANON_ENABLED", value: canon ? "1" : "0")
@@ -595,22 +599,55 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     // MARK: - /canon/pick handler
 
-    /// Context → neutral status phrases. Single pool per context — no persona branching.
+    /// Context → polite/potty phrase pools.
+    ///
+    /// Polite = the current neutral professional status lines (default).
+    /// Potty  = same neutral status with expletives; no persona, no "Sir", no RP-isms.
     ///
     /// "neutral" is a FIRST-CLASS context with its own generic-acknowledgement
     /// pool — it is NOT the union of every other context. Generic lines are safe
     /// after literally any turn; specifics only fire on a confident match.
-    nonisolated private static let canonContexts: [String: [String]] = [
-        "push": ["Pushed.", "Push complete.", "Changes pushed.", "Sent up.", "Push done."],
-        "tests-pass": ["Tests passing.", "Tests green.", "All tests passed.", "Suite passing.", "Green."],
-        "build-pass": ["Build complete.", "Build succeeded.", "Build green.", "Compiled clean.", "Clean build."],
-        "found": ["Found it.", "Located.", "Got it.", "There it is.", "Identified."],
-        "fail": ["That failed.", "Something errored.", "Check the output.", "Failed.", "Error — check logs."],
-        "done": ["Done.", "Task complete.", "Finished.", "Ready.", "Complete."],
-        "start": ["On it.", "Starting.", "Looking into it.", "In progress.", "Got it."],
-        "ack": ["Noted.", "Got it.", "Understood.", "Confirmed.", "Acknowledged."],
-        "reassure": ["All clear.", "No issues.", "Looking good.", "Nothing to worry about."],
-        "neutral": ["Done.", "Ready.", "Complete.", "Finished.", "Task complete.", "Noted.", "Got it."],
+    nonisolated private static let canonContexts: [String: (polite: [String], potty: [String])] = [
+        "push": (
+            polite: ["Pushed.", "Push complete.", "Changes pushed.", "Sent up.", "Push done."],
+            potty:  ["Pushed, finally.", "Fucking pushed.", "Push done, fuck yeah.", "Sent the fucker up.", "Up it goes."]
+        ),
+        "tests-pass": (
+            polite: ["Tests passing.", "Tests green.", "All tests passed.", "Suite passing.", "Green."],
+            potty:  ["Tests fucking passing.", "Tests pass, thank fuck.", "All green, finally.", "Green as hell.", "Suite's green, fuck yeah."]
+        ),
+        "build-pass": (
+            polite: ["Build complete.", "Build succeeded.", "Build green.", "Compiled clean.", "Clean build."],
+            potty:  ["Build's fucking done.", "Compiled, fuck yeah.", "Build green, finally.", "Clean fucking build.", "Built clean."]
+        ),
+        "found": (
+            polite: ["Found it.", "Located.", "Got it.", "There it is.", "Identified."],
+            potty:  ["Found the bastard.", "There's the fucker.", "Got the little shit.", "Found it, fuck yeah.", "There it is."]
+        ),
+        "fail": (
+            polite: ["That failed.", "Something errored.", "Check the output.", "Failed.", "Error — check logs."],
+            potty:  ["That's fucked.", "Shit, that failed.", "Bollocks — check the output.", "Fucking failed.", "Something's fucked."]
+        ),
+        "done": (
+            polite: ["Done.", "Task complete.", "Finished.", "Ready.", "Complete."],
+            potty:  ["Done, fuck yeah.", "Finally done.", "Nailed it.", "That's the bastard finished.", "All fucking done."]
+        ),
+        "start": (
+            polite: ["On it.", "Starting.", "Looking into it.", "In progress.", "Got it."],
+            potty:  ["On it.", "Right, fucking on it.", "Looking into it.", "In progress.", "On the bastard now."]
+        ),
+        "ack": (
+            polite: ["Noted.", "Got it.", "Understood.", "Confirmed.", "Acknowledged."],
+            potty:  ["Got it.", "Fucking noted.", "Understood.", "Yeah, got it.", "Right, noted."]
+        ),
+        "reassure": (
+            polite: ["All clear.", "No issues.", "Looking good.", "Nothing to worry about."],
+            potty:  ["Sweet fuck-all to worry about.", "All clear.", "Not a damn thing wrong.", "Looks fucking fine."]
+        ),
+        "neutral": (
+            polite: ["Done.", "Ready.", "Complete.", "Finished.", "Task complete.", "Noted.", "Got it."],
+            potty:  ["Done, fuck yeah.", "Nailed it.", "That's fucking done.", "Finished.", "Right, done."]
+        ),
     ]
 
     /// Anti-repeat: the exact canon line we last played. When the chosen
@@ -646,7 +683,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
 
         // Build the candidate pool for this context.
-        let candidates = canonCandidates(for: requestedContext)
+        let candidates = canonCandidates(for: requestedContext, expletives: cfg.expletivesEnabled)
         guard !candidates.isEmpty else {
             return Response(status: .noContent)
         }
@@ -708,8 +745,70 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     /// including "neutral" — is a key in `canonContexts`, so this is a plain
     /// lookup. Unknown tags (anything the skill passes that we don’t
     /// recognise) return [], so the picker stays silent rather than guessing.
-    nonisolated private static func canonCandidates(for context: String) -> [String] {
-        return canonContexts[context] ?? []
+    /// When `expletives` is true the potty pool is used; otherwise the polite pool.
+    nonisolated private static func canonCandidates(for context: String, expletives: Bool) -> [String] {
+        guard let lists = canonContexts[context] else { return [] }
+        return expletives ? lists.potty : lists.polite
+    }
+
+    /// Polite-mode swear scrub. Replaces known expletives with clean equivalents
+    /// so Polite mode is authoritative even if a bespoke /speak line contains
+    /// swears. Word-boundary aware (handles apostrophe forms like "fuckin’"),
+    /// preserves first-letter case, and tidies whitespace a dropped intensifier
+    /// leaves behind. Applied to bespoke /speak text ONLY when Polite is active.
+    nonisolated static func politeScrub(_ input: String) -> String {
+        let rules: [(String, String)] = [
+            ("motherfuck\\w*", "blunder"),
+            ("fuck(?:ing|in[‘’]?)", ""),
+            ("fucked", "broke"),
+            ("fuck\\w*", "blast"),
+            ("dogshit", "dreadful"),
+            ("bullshit", "nonsense"),
+            ("shitshow", "shambles"),
+            ("shitty", "dreadful"),
+            ("shites?", "rubbish"),
+            ("shit\\w*", "rubbish"),
+            ("bastards", "blighters"),
+            ("bastard", "blighter"),
+            ("bollocks", "nonsense"),
+            ("bloody", ""),
+            ("buggered", "broken"),
+            ("buggers", "blighters"),
+            ("bugger", "blighter"),
+            ("arseholes?", "blighter"),
+            ("arse", "backside"),
+            ("pissed", "annoyed"),
+            ("piss\\w*", "fuss"),
+            ("crap\\w*", "rubbish"),
+            ("goddamn\\w*", "blasted"),
+            ("damn(?:ed|it)?", "blasted"),
+            ("twats?", "fool"),
+            ("wankers?", "fool"),
+            ("tossers?", "fool"),
+        ]
+        var s = input
+        for (core, replacement) in rules {
+            let pattern = "(?i)(?<![\\p{L}’])(?:\(core))(?![\\p{L}])"
+            guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
+            let ns = s as NSString
+            let matches = re.matches(in: s, range: NSRange(location: 0, length: ns.length))
+            if matches.isEmpty { continue }
+            for m in matches.reversed() {
+                let matched = ns.substring(with: m.range)
+                var rep = replacement
+                if let first = matched.first, first.isUppercase, !rep.isEmpty {
+                    rep = rep.prefix(1).uppercased() + rep.dropFirst()
+                }
+                s = (s as NSString).replacingCharacters(in: m.range, with: rep)
+            }
+        }
+        s = s.replacingOccurrences(of: "[ \\t]{2,}", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\\s+([,.;:!?])", with: "$1", options: .regularExpression)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let first = s.first, first.isLowercase {
+            s = s.prefix(1).uppercased() + s.dropFirst()
+        }
+        return s
     }
 
     // MARK: - /speak handler
@@ -728,7 +827,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
 
         // Validate text
-        guard let text = body["text"] as? String, !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+        guard var text = body["text"] as? String, !text.trimmingCharacters(in: .whitespaces).isEmpty else {
             return try Self.json(ErrorResponse("No text provided"), status: .badRequest)
         }
         let maxLen = 5000
@@ -740,6 +839,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let cfg = CaldwellConfig.shared
         if cfg.isMuted {
             return try Self.json(MutedResponse(muted: true, text_preview: String(text.prefix(100))))
+        }
+
+        // Polite mode: scrub expletives from bespoke lines before they are
+        // cached or spoken. The toggle is authoritative — Polite is always clean
+        // regardless of what the caller sends. Canon lines are never scrubbed
+        // (they are already pre-cleaned in the polite pool).
+        if !cfg.expletivesEnabled {
+            text = Self.politeScrub(text)
         }
 
         let channel  = body["channel"]  as? String
@@ -812,6 +919,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let config = CaldwellConfig.shared
         return SettingsResponse(
             muted: config.isMuted,
+            expletives_enabled: config.expletivesEnabled,
             native_voice: NativeVoiceClient.bestVoice(),
             enhanced_installed: NativeVoiceClient.enhancedInstalled(),
             canon_enabled: config.canonEnabled,
@@ -1055,6 +1163,7 @@ private struct CanonPickResponse: Encodable, Sendable {
 
 private struct SettingsResponse: Encodable, Sendable {
     let muted: Bool
+    let expletives_enabled: Bool
     let native_voice: String
     let enhanced_installed: Bool
     let canon_enabled: Bool
@@ -1063,6 +1172,7 @@ private struct SettingsResponse: Encodable, Sendable {
 
 private struct SettingsUpdateRequest: Decodable, Sendable {
     let muted: Bool?
+    let expletives_enabled: Bool?
     let canon_enabled: Bool?
     let native_voice: String?
 }

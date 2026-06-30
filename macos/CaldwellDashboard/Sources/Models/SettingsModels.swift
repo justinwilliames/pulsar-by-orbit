@@ -2,6 +2,8 @@ import Foundation
 
 struct DaemonSettings: Codable, Sendable {
     let muted: Bool?
+    /// Whether Potty Mouth mode is on (true) or Polite (false, default).
+    let expletivesEnabled: Bool?
     /// The macOS voice the native path resolves to (e.g. "Daniel (Enhanced)").
     let nativeVoice: String?
     /// Whether the neural Enhanced Daniel is installed (drives the install nudge).
@@ -14,6 +16,7 @@ struct DaemonSettings: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case muted
+        case expletivesEnabled = "expletives_enabled"
         case nativeVoice = "native_voice"
         case enhancedInstalled = "enhanced_installed"
         case canonEnabled = "canon_enabled"
@@ -23,6 +26,7 @@ struct DaemonSettings: Codable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.muted = try container.decodeIfPresent(Bool.self, forKey: .muted)
+        self.expletivesEnabled = try container.decodeIfPresent(Bool.self, forKey: .expletivesEnabled)
         self.nativeVoice = try container.decodeIfPresent(String.self, forKey: .nativeVoice)
         self.enhancedInstalled = try container.decodeIfPresent(Bool.self, forKey: .enhancedInstalled)
         self.canonEnabled = try container.decodeIfPresent(Bool.self, forKey: .canonEnabled)

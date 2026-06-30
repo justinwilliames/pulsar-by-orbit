@@ -64,6 +64,21 @@ struct SettingsView: View {
             }
             .toggleStyle(.switch)
             .controlSize(.small)
+
+            Picker("Voice register", selection: expletivesBinding) {
+                Text("Polite").tag(false)
+                Text("Potty Mouth").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Voice register")
+                    .font(.caption.weight(.medium))
+                Text(expletivesHint)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -92,6 +107,20 @@ struct SettingsView: View {
             return "Off -- bespoke only: model-composed lines each turn."
         }
         return "On -- short cached status pings at turn-end (e.g. \"Done.\", \"Pushed.\")."
+    }
+
+    private var expletivesBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.expletivesEnabled ?? false },
+            set: { newValue in Task { await viewModel.setExpletivesEnabled(newValue) } }
+        )
+    }
+
+    private var expletivesHint: String {
+        if viewModel.settings?.expletivesEnabled == true {
+            return "Potty Mouth — status lines include the odd expletive (neutral register, no persona)."
+        }
+        return "Polite — clean professional status lines. Default."
     }
 
     @ViewBuilder

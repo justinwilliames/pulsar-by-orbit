@@ -283,9 +283,9 @@ final class DashboardViewModel {
         }
     }
 
-    func saveSettings(muted: Bool? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
+    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(muted: muted, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
+            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }
@@ -294,6 +294,15 @@ final class DashboardViewModel {
         } catch {
             return .failure("Network error: \(error.localizedDescription)")
         }
+    }
+
+    /// Voice register: false = Polite (clean), true = Potty Mouth (expletives).
+    func setExpletivesEnabled(_ on: Bool) async {
+        _ = await saveSettings(expletivesEnabled: on)
+    }
+
+    var isExpletivesEnabled: Bool {
+        settings?.expletivesEnabled ?? false
     }
 
     /// Message style: cached pings on (frequent, notification-style) vs off

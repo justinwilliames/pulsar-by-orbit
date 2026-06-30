@@ -41,6 +41,10 @@ CANON=$(printf '%s' "$SETTINGS" | python3 -c 'import sys,json
 try: print("off" if json.load(sys.stdin).get("canon_enabled") is False else "on")
 except: print("on")' 2>/dev/null || echo "on")
 
+EXPLETIVES=$(printf '%s' "$SETTINGS" | python3 -c 'import sys,json
+try: print("true" if json.load(sys.stdin).get("expletives_enabled") else "false")
+except: print("false")' 2>/dev/null || echo "false")
+
 ENGINE=$(printf '%s' "$SETTINGS" | python3 -c 'import sys,json
 try: print(json.load(sys.stdin).get("voice_engine") or "native")
 except: print("native")' 2>/dev/null || echo "native")
@@ -54,9 +58,16 @@ else
   CADENCE_LINE="This bespoke line is the goal; the cached canon Stop hook is only a fallback for turns you do not speak on (it debounces on recent pings, so there is no double voice)."
 fi
 
-DIRECTIVE="Voice is ACTIVE this session — the Pulsar app is running. At the END of every assistant turn, optionally emit ONE short, neutral, professional spoken status line reflecting what just happened:
+# Register flavour: Polite = clean professional; Potty Mouth = same but may include the odd expletive.
+if [ "$EXPLETIVES" = "true" ]; then
+  REGISTER_NOTE=" Voice register is POTTY MOUTH — the status line MAY include the odd expletive (e.g. \"Pushed, finally.\", \"Tests fucking passing.\", \"Build's done.\"). Still short, still plain, still neutral status — no persona, no \"Sir\". The swearing is the register, not a character."
+else
+  REGISTER_NOTE=" Voice register is POLITE — keep the status line clean, no profanity."
+fi
+
+DIRECTIVE="Voice is ACTIVE this session — the Pulsar app is running. At the END of every assistant turn, optionally emit ONE short, neutral spoken status line reflecting what just happened:
   ${SAY} \"<status line>\"
-Keep it plain and present-tense — e.g. \"Tests passing.\", \"Build complete.\", \"Pushed.\", \"Done.\", \"Found it.\". No persona, no \"Sir\", no humour, no flourish. ${CADENCE_LINE} Keep each line short — a phrase or one short sentence. Never pass --cacheable on a session-specific line (named files, commits, findings). If the user gives a mute keyword (e.g. \"voice off\", \"mute\"), stop firing for the rest of the session. If say.sh exits non-zero, stay silent that turn."
+Keep it plain and present-tense — e.g. \"Tests passing.\", \"Build complete.\", \"Pushed.\", \"Done.\", \"Found it.\". No persona, no \"Sir\", no flourish.${REGISTER_NOTE} ${CADENCE_LINE} Keep each line short — a phrase or one short sentence. Never pass --cacheable on a session-specific line (named files, commits, findings). If the user gives a mute keyword (e.g. \"voice off\", \"mute\"), stop firing for the rest of the session. If say.sh exits non-zero, stay silent that turn."
 
 # Emit as SessionStart additionalContext (JSON on stdout). Pass the directive
 # via stdin so multi-line text with quotes can't be mangled by the shell.

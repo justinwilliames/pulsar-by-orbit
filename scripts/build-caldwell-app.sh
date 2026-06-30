@@ -31,6 +31,20 @@ fi
 
 cd "$APP_DIR"
 
+# Re-sync the Claude voice-integration payload from the repo's source-of-truth
+# copies into the app's staging dir, so a stale Sources/Resources/claude-integration
+# can never ship. These are the exact files the in-app installer drops into the
+# user's ~/.claude. Keep this list in lockstep with ClaudeIntegrationInstaller.swift.
+CLAUDE_STAGE="$APP_DIR/Sources/Resources/claude-integration"
+echo "Syncing Claude integration payload into the app staging dir..."
+mkdir -p "$CLAUDE_STAGE/scripts"
+cp "$REPO_ROOT/SKILL.md"    "$CLAUDE_STAGE/SKILL.md"
+cp "$REPO_ROOT/CANON.md"    "$CLAUDE_STAGE/CANON.md"
+cp "$REPO_ROOT/voices.json" "$CLAUDE_STAGE/voices.json"
+for f in say.sh session-start-voice.sh stop-hook.sh chime.sh turn-start.sh statusline.sh; do
+  cp "$REPO_ROOT/scripts/$f" "$CLAUDE_STAGE/scripts/$f"
+done
+
 echo "Building release binary (this can take a minute)..."
 swift build -c release
 
@@ -75,6 +89,20 @@ if [ -n "$RESOURCE_BUNDLE" ] && [ -d "$RESOURCE_BUNDLE" ]; then
     fi
   done
   echo "Copied OrbitLogo + pulsar-mouth + blink PNGs to Contents/Resources."
+
+  # Claude voice-integration payload: SPM copies the whole directory verbatim
+  # into the resource bundle. Lift it into Contents/Resources/claude-integration/
+  # so ClaudeIntegrationInstaller can find it via Bundle.main.resourceURL. Keep
+  # the scripts executable so the installed hooks run without a chmod dance.
+  CI_SRC="$RESOURCE_BUNDLE/claude-integration"
+  if [ -d "$CI_SRC" ]; then
+    rm -rf "$APP_BUNDLE/Contents/Resources/claude-integration"
+    cp -R "$CI_SRC" "$APP_BUNDLE/Contents/Resources/claude-integration"
+    chmod +x "$APP_BUNDLE/Contents/Resources/claude-integration/scripts/"*.sh 2>/dev/null || true
+    echo "Copied claude-integration payload (skill + hooks + say.sh) to Contents/Resources."
+  else
+    echo "Warning: claude-integration payload not found in SPM bundle — in-app installer will be unavailable." >&2
+  fi
 else
   echo "Warning: SPM resource bundle not found — OrbitLogo may not render." >&2
 fi

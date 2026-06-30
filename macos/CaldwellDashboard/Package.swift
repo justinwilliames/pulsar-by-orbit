@@ -50,6 +50,14 @@ let package = Package(
                 // Blink frame — same robot, eyes closed (eyebrows kept). Briefly
                 // crossfaded over the closed mouth frame during speech pauses.
                 .copy("Resources/pulsar-blink.png"),
+                // Claude Code voice-integration payload — the skill, the hooks,
+                // say.sh + CANON.md + voices.json. Bundled verbatim so a DMG-only
+                // user (no repo) can one-click install Pulsar's Claude integration
+                // from inside the app. The whole directory is copied into the SPM
+                // resource bundle, then build-caldwell-app.sh re-syncs it from the
+                // repo (so it never goes stale) and lifts it into
+                // Contents/Resources/claude-integration/ for ClaudeIntegrationInstaller.
+                .copy("Resources/claude-integration"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

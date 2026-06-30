@@ -25,6 +25,8 @@ struct SettingsView: View {
                 recoveryBanners
                 voiceSection
                 Divider()
+                claudeIntegrationSection
+                Divider()
                 personaSection
                 statusBanner
                 Divider()
@@ -35,6 +37,64 @@ struct SettingsView: View {
         .task {
             await viewModel.loadSettings()
             initVoiceCategoryIfNeeded()
+        }
+    }
+
+    // MARK: - Claude Code integration (one-click installer)
+
+    @State private var isInstalling = false
+
+    @ViewBuilder
+    private var claudeIntegrationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("CLAUDE CODE")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Set up Pulsar in Claude Code")
+                    .font(.caption.weight(.medium))
+                Text("Installs Pulsar's skill + hooks into Claude Code so it speaks during your sessions.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(action: installClaudeIntegration) {
+                Label(isInstalling ? "Installing…" : "Set up Pulsar in Claude Code",
+                      systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(isInstalling)
+        }
+    }
+
+    private func installClaudeIntegration() {
+        isInstalling = true
+        statusKind = .info
+        statusMessage = "Installing Pulsar into Claude Code…"
+        Task {
+            do {
+                let installer = ClaudeIntegrationInstaller()
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try installer.install()
+                }.value
+                await MainActor.run {
+                    statusKind = .ok
+                    statusMessage = "Installed Pulsar's skill + hooks into Claude Code "
+                        + "(\(result.skillPath)). Start a new Claude Code session to load them."
+                    isInstalling = false
+                }
+            } catch {
+                await MainActor.run {
+                    statusKind = .error
+                    statusMessage = (error as? LocalizedError)?.errorDescription
+                        ?? "Couldn't set up Pulsar in Claude Code: \(error.localizedDescription)"
+                    isInstalling = false
+                }
+            }
         }
     }
 

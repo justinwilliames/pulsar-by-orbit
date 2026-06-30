@@ -166,6 +166,70 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         router.get("/queue") { request, _ -> Response in
             return try await Self.handleQueue(request: request, audioQueue: audioQueue)
         }
+
+        // POST /subagent/start — a sub-agent was spawned. Body {agent_id,
+        // category}. Records it as an in-flight drone and broadcasts the set.
+        router.post("/subagent/start") { request, _ -> Response in
+            return try await Self.handleSubagentStart(
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+        }
+
+        // POST /subagent/stop — a sub-agent finished. Body {agent_id}. Removes
+        // it from the in-flight set and broadcasts the updated set.
+        router.post("/subagent/stop") { request, _ -> Response in
+            return try await Self.handleSubagentStop(
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+        }
+    }
+
+    // MARK: - /subagent handlers
+
+    /// Drone-set SSE payload: {"drones": {agentId: category, ...}}.
+    nonisolated private static func broadcastDrones(
+        _ drones: [String: String],
+        sseBroadcaster: SSEBroadcaster
+    ) async {
+        let json = (try? Self.jsonString(DronesInFlightPayload(drones: drones))) ?? "{\"drones\":{}}"
+        await sseBroadcaster.broadcast(event: "drones_in_flight", json: json)
+    }
+
+    nonisolated private static func handleSubagentStart(
+        request: Request,
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async throws -> Response {
+        guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+              let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
+              let agentId = body["agent_id"] as? String, !agentId.isEmpty
+        else {
+            return try Self.json(ErrorResponse("Invalid JSON — need agent_id"), status: .badRequest)
+        }
+        let category = (body["category"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0.lowercased()
+        } ?? "atlas"
+
+        await audioQueue.addInFlightDrone(id: agentId, category: category)
+        let drones = await audioQueue.inFlightDronesSnapshot()
+        await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+        return try Self.json(SubagentResponse(ok: true, drones: drones))
+    }
+
+    nonisolated private static func handleSubagentStop(
+        request: Request,
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async throws -> Response {
+        guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+              let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
+              let agentId = body["agent_id"] as? String, !agentId.isEmpty
+        else {
+            return try Self.json(ErrorResponse("Invalid JSON — need agent_id"), status: .badRequest)
+        }
+
+        await audioQueue.removeInFlightDrone(id: agentId)
+        let drones = await audioQueue.inFlightDronesSnapshot()
+        await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+        return try Self.json(SubagentResponse(ok: true, drones: drones))
     }
 
     // MARK: - /queue handler
@@ -859,6 +923,12 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
         let channel  = body["channel"]  as? String
         let priority = body["priority"] as? Bool ?? false
+        // Optional drone attribution. A drone category (e.g. "voyager") makes
+        // that sibling drone the active speaker for this line; nil/"pulsar"
+        // keeps the main Pulsar head speaking.
+        let agentCategory = (body["agent"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
 
         // macOS local voice — synthesise via `say` to a temp AIFF so it plays
         // through the same envelope/lip-sync path. No network, no API key, no
@@ -868,7 +938,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             id: entryId, text: String(text.prefix(100)), voiceId: "native",
             voiceLabel: "Pulsar", createdAt: Date(), channel: channel,
             priority: priority, fullText: text, isReplay: false,
-            audioURL: nil, engine: "native")
+            audioURL: nil, engine: "native", agentCategory: agentCategory)
         guard let position = await audioQueue.enqueue(entry) else {
             return try Self.json(SpeakResponse(
                 id: entryId, position: nil, voice: "native",
@@ -1161,6 +1231,15 @@ private struct ReplayResponse: Encodable, Sendable {
     let position: Int?
     let replaying: String
     let dropped: Bool?
+}
+
+private struct DronesInFlightPayload: Encodable, Sendable {
+    let drones: [String: String]
+}
+
+private struct SubagentResponse: Encodable, Sendable {
+    let ok: Bool
+    let drones: [String: String]
 }
 
 private struct CanonPickResponse: Encodable, Sendable {

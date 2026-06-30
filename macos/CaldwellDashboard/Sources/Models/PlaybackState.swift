@@ -16,6 +16,9 @@ final class PlaybackState {
     var chunkMs: Int = 50
     var queuedCount: Int = 0
     var channel: String?
+    /// Drone category attributed to the currently-speaking line (e.g. "voyager").
+    /// nil = the main Pulsar head is speaking.
+    var currentAgentCategory: String?
 
     var globalPaused = false
     var channelPaused: [String] = []
@@ -39,6 +42,7 @@ final class PlaybackState {
             offset = 0
             elapsed = 0
             envelope = []
+            currentAgentCategory = nil
         } else {
             isPlaying = true
             currentVoice = data.voice
@@ -52,6 +56,7 @@ final class PlaybackState {
             envelope = data.envelope ?? []
             chunkMs = data.chunkMs ?? 50
             channel = data.channel
+            currentAgentCategory = data.agent
             startTimer()
         }
         queuedCount = data.queued ?? 0
@@ -98,13 +103,14 @@ struct VoiceActiveEvent: Codable {
     let queued: Int?
     let channel: String?
     let priority: Bool?
+    let agent: String?
 
     enum CodingKeys: String, CodingKey {
         case id, voice, type, text, duration
         case totalDuration = "total_duration"
         case offset, segments, envelope
         case chunkMs = "chunk_ms"
-        case queued, channel, priority
+        case queued, channel, priority, agent
     }
 }
 
@@ -114,6 +120,12 @@ struct DialogueSegment: Codable {
     let chars: Int
     let start: Double?
     let end: Double?
+}
+
+/// The set of currently in-flight sub-agent drones, pushed over SSE whenever a
+/// sub-agent starts or stops. Maps agentId → drone category.
+struct DronesInFlightEvent: Codable {
+    let drones: [String: String]
 }
 
 struct PauseStateEvent: Codable {

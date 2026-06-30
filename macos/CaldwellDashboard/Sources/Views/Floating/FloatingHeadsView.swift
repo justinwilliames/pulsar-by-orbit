@@ -69,21 +69,55 @@ struct FloatingHeadsView: View {
 
     // MARK: - Head zone
 
+    /// The drone category owning the current line, only when it's a real drone
+    /// (not Pulsar / nil). Drives the speaker-switch + theming.
+    private var activeDroneCategory: String? {
+        let cat = viewModel.playback.currentAgentCategory
+        return isDrone(cat) ? cat?.lowercased() : nil
+    }
+
+    /// When a drone is the active speaker, Pulsar shrinks and falls silent
+    /// (amplitude 0); otherwise Pulsar is full-size and speaks.
+    private var pulsarIsActive: Bool { activeDroneCategory == nil }
+
     @ViewBuilder
     private var headZone: some View {
         ZStack {
             if let voice = viewModel.playback.currentVoice {
                 FloatingPortraitView(
                     voiceName: voice,
-                    amplitude: viewModel.lipSync.amplitude,
+                    amplitude: pulsarIsActive ? viewModel.lipSync.amplitude : 0,
                     voiceColor: viewModel.voiceColor(for: voice),
                     portraitManager: viewModel.portraitManager
                 )
                 .id(voice)
                 .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                // Pulsar shrinks while a drone speaks, returns to full size when
+                // it's Pulsar's line again.
+                .scaleEffect(pulsarIsActive ? 1.0 : 0.7)
+                .animation(.spring(response: 0.42, dampingFraction: 0.72), value: pulsarIsActive)
                 // Centred in the zone: equal top/bottom glow clearance so the
                 // pulse never clips whichever edge the head sits near.
                 .zIndex(10)
+
+                // In-flight sub-agent drones orbiting Pulsar — only the live
+                // ones are present. The active speaker pops + lip-syncs.
+                let drones = sortedDrones
+                ForEach(Array(drones.enumerated()), id: \.element.id) { index, drone in
+                    FloatingDronePortraitView(
+                        category: drone.category,
+                        isActiveSpeaker: drone.category == activeDroneCategory,
+                        liveAmplitude: viewModel.lipSync.amplitude,
+                        thumbnailSize: thumbnailSize,
+                        orbitRadius: orbitRadius,
+                        orbitYOffset: orbitYOffset,
+                        angle: orbitAngle(index: index, total: drones.count),
+                        index: index,
+                        portraitManager: viewModel.portraitManager
+                    )
+                    .id(drone.id)
+                    .zIndex(drone.category == activeDroneCategory ? 9 : Double(4 - index))
+                }
 
                 let queued = Array(viewModel.queueItems.filter { !$0.isPlaying }.prefix(5))
                 ForEach(Array(queued.enumerated()), id: \.element.id) { index, item in
@@ -98,13 +132,22 @@ struct FloatingHeadsView: View {
                         voiceColor: viewModel.voiceColor(for: item.voice),
                         portraitManager: viewModel.portraitManager
                     )
-                    .zIndex(Double(5 - index))
+                    .zIndex(Double(-1 - index))
                 }
             }
         }
         .frame(width: Self.headZoneWidth, height: Self.headZoneHeight)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: viewModel.queueItems.map(\.id))
+        .animation(.spring(response: 0.5, dampingFraction: 0.75), value: sortedDrones.map(\.id))
         .animation(.spring(response: 0.42, dampingFraction: 0.72), value: viewModel.playback.currentVoice)
+    }
+
+    /// In-flight drones in a stable order (by agentId) so orbit slots don't
+    /// reshuffle every render.
+    private var sortedDrones: [DroneInFlight] {
+        viewModel.inFlightDrones
+            .sorted { $0.key < $1.key }
+            .map { DroneInFlight(id: $0.key, category: $0.value.lowercased()) }
     }
 
     // MARK: - Caption zone
@@ -117,7 +160,9 @@ struct FloatingHeadsView: View {
                                    startedAt: captionStartedAt ?? Date(),
                                    holdFull: !viewModel.playback.isPlaying,
                                    tailEdge: layout.captionEdge == .above ? .bottom : .top,
-                                   maxHeight: captionMaxHeight)
+                                   maxHeight: captionMaxHeight,
+                                   activeColor: droneColor(for: viewModel.playback.currentAgentCategory))
+                    .overlay(alignment: .top) { droneNameCard }
                     .id(caption)
                     .offset(x: layout.captionXOffset)
                     .padding(.horizontal, captionEdgePadding)
@@ -142,6 +187,31 @@ struct FloatingHeadsView: View {
         }
     }
 
+
+    /// A small pill above the caption showing the active drone's name, tinted to
+    /// its colour. Only shown when a drone owns the line; Pulsar shows nothing.
+    @ViewBuilder
+    private var droneNameCard: some View {
+        if let category = activeDroneCategory {
+            let color = droneColor(for: category)
+            Text(category.uppercased())
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .tracking(0.8)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule().fill(color.opacity(0.85))
+                )
+                .overlay(
+                    Capsule().stroke(color, lineWidth: 1).blur(radius: 1.5)
+                )
+                .shadow(color: color.opacity(0.5), radius: 4)
+                .offset(y: -14)
+                .transition(.opacity.combined(with: .scale(scale: 0.7)))
+                .allowsHitTesting(false)
+        }
+    }
 
     /// Cap the bubble height to what the panel can show on screen, so an extreme
     /// line still fits in full rather than being truncated.
@@ -202,6 +272,12 @@ struct FloatingHeadsView: View {
         let degrees = arcStart + step * Double(index)
         return degrees * .pi / 180
     }
+}
+
+/// One in-flight sub-agent drone, identified by its agentId, with its category.
+private struct DroneInFlight: Identifiable {
+    let id: String        // agentId
+    let category: String
 }
 
 /// Carries the caption's CURRENT (revealed) laid-out height to the controller.

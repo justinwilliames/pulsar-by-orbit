@@ -41,7 +41,7 @@ mkdir -p "$CLAUDE_STAGE/scripts"
 cp "$REPO_ROOT/SKILL.md"    "$CLAUDE_STAGE/SKILL.md"
 cp "$REPO_ROOT/CANON.md"    "$CLAUDE_STAGE/CANON.md"
 cp "$REPO_ROOT/voices.json" "$CLAUDE_STAGE/voices.json"
-for f in say.sh session-start-voice.sh stop-hook.sh chime.sh turn-start.sh statusline.sh; do
+for f in say.sh session-start-voice.sh stop-hook.sh chime.sh turn-start.sh statusline.sh subagent-start.sh subagent-stop.sh; do
   cp "$REPO_ROOT/scripts/$f" "$CLAUDE_STAGE/scripts/$f"
 done
 

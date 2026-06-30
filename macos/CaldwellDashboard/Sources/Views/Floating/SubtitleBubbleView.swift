@@ -31,12 +31,17 @@ struct SubtitleBubbleView: View {
     var tailEdge: Edge = .top
     /// Hard ceiling on bubble height so an extreme line still fits on screen.
     var maxHeight: CGFloat = .greatestFiniteMagnitude
+    /// Rim-glow tint. Defaults to Pulsar indigo (`.orbitLight`); the active
+    /// drone's colour themes the rim when a sub-agent owns the line.
+    var activeColor: Color = .orbitLight
 
     static let maxWidth: CGFloat = 280
     private let tailHeight: CGFloat = 8
 
     private var core: Color { .orbit }        // #6366F1 — matches the head
-    private var light: Color { .orbitLight }  // #818CF8 — the head's rim glow tint
+    /// The rim-glow tint — Pulsar indigo by default, the active drone's colour
+    /// when a sub-agent owns the line.
+    private var light: Color { activeColor }
 
     /// The revealed prefix at time `now`: time-based from `startedAt` (always
     /// completes), or the full text once `holdFull`. Snapped UP to a word boundary

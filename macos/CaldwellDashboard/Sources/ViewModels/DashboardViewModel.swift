@@ -17,6 +17,10 @@ final class DashboardViewModel {
     var cacheTotalBytes: Int = 0
     var cacheMaxBytes: Int = 0
 
+    /// In-flight sub-agent drones (agentId → drone category). Driven by the
+    /// "drones_in_flight" SSE event; rendered as orbiting drones around Pulsar.
+    var inFlightDrones: [String: String] = [:]
+
     /// O(1) lookup: is a given text string present in the phrase cache?
     var cachedTextIndex: [String: CachedPhrase] {
         Dictionary(cachedPhrases.map { ($0.text, $0) }, uniquingKeysWith: { first, _ in first })
@@ -82,9 +86,18 @@ final class DashboardViewModel {
             handleHistoryUpdateEvent(data)
         case "settings":
             handleSettingsEvent(data)
+        case "drones_in_flight":
+            handleDronesInFlightEvent(data)
         default:
             break
         }
+    }
+
+    /// A change to the set of in-flight sub-agent drones, pushed whenever a
+    /// sub-agent starts or stops. Decodes {"drones": {agentId: category}}.
+    private func handleDronesInFlightEvent(_ data: Data) {
+        guard let payload = try? decoder.decode(DronesInFlightEvent.self, from: data) else { return }
+        inFlightDrones = payload.drones
     }
 
     /// A settings change pushed from the daemon (e.g. mute toggled via the API,

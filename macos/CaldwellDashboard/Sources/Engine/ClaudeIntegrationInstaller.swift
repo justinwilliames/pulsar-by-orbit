@@ -77,6 +77,7 @@ struct ClaudeIntegrationInstaller {
     private static let scriptNames = [
         "say.sh", "session-start-voice.sh", "stop-hook.sh",
         "chime.sh", "turn-start.sh", "statusline.sh",
+        "subagent-start.sh", "subagent-stop.sh",
     ]
     private static let rootFiles = ["SKILL.md", "CANON.md", "voices.json"]
 
@@ -175,7 +176,7 @@ struct ClaudeIntegrationInstaller {
         let outcomes: [String]
     }
 
-    /// The five hook entries Pulsar manages, mirroring scripts/install-hooks.sh.
+    /// The hook entries Pulsar manages, mirroring scripts/install-hooks.sh.
     private struct ManagedHook {
         let event: String          // SessionStart / Stop / UserPromptSubmit
         let scriptName: String     // file under scripts/
@@ -188,6 +189,8 @@ struct ClaudeIntegrationInstaller {
         .init(event: "Stop", scriptName: "chime.sh", label: "Stop (chime)", timeout: 5),
         .init(event: "SessionStart", scriptName: "session-start-voice.sh", label: "SessionStart", timeout: 5),
         .init(event: "UserPromptSubmit", scriptName: "turn-start.sh", label: "UserPromptSubmit", timeout: 5),
+        .init(event: "SubagentStart", scriptName: "subagent-start.sh", label: "SubagentStart (drones)", timeout: 5),
+        .init(event: "SubagentStop", scriptName: "subagent-stop.sh", label: "SubagentStop (drones)", timeout: 5),
     ]
 
     private func wireHooks(settingsPath: URL, scriptsDir: URL) throws -> WiringResult {

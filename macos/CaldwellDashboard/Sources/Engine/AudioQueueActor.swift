@@ -92,6 +92,10 @@ struct AudioEntry: Sendable {
     var fetchFailed: Bool = false
     /// Which engine produced the audio. Always "native" now — ElevenLabs removed.
     var engine: String = "native"
+    /// Drone category this line is attributed to (e.g. "voyager"). nil/"pulsar"
+    /// = the main Pulsar head speaks; a drone category makes that drone the
+    /// active speaker for the line's duration.
+    var agentCategory: String?
 }
 
 struct HistoryItem: Sendable {
@@ -172,6 +176,28 @@ actor AudioQueueActor {
     // Resolved URLs for entries that were already popped from `queue`
     // when markReady fires. Worker reads here after continuation resumes.
     private var resolvedURLs: [String: URL] = [:]
+
+    // MARK: - In-flight sub-agent drones
+
+    /// Currently in-flight sub-agents, keyed by agentId → drone category. The
+    /// UI renders one orbiting drone per entry; populated by /subagent/start,
+    /// cleared by /subagent/stop.
+    private var inFlight: [String: String] = [:]
+
+    /// Record a newly-spawned sub-agent as in-flight under its drone category.
+    func addInFlightDrone(id: String, category: String) {
+        inFlight[id] = category
+    }
+
+    /// Remove a finished sub-agent from the in-flight set.
+    func removeInFlightDrone(id: String) {
+        inFlight.removeValue(forKey: id)
+    }
+
+    /// Snapshot of the current in-flight drones (agentId → category).
+    func inFlightDronesSnapshot() -> [String: String] {
+        inFlight
+    }
 
     // MARK: - Public API
 
@@ -418,6 +444,7 @@ actor AudioQueueActor {
             "queued": queue.count,
             "channel": entry.channel as Any,
             "priority": entry.priority,
+            "agent": entry.agentCategory as Any,
         ]
         await broadcaster.broadcast(event: "voice_active", json: jsonString(startDict))
 

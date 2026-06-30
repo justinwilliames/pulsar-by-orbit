@@ -38,7 +38,11 @@ struct SubtitleBubbleView: View {
     static let maxWidth: CGFloat = 280
     private let tailHeight: CGFloat = 8
 
-    private var core: Color { .orbit }        // #6366F1 — matches the head
+    /// True when no drone owns the line (the default Pulsar indigo tint).
+    private var isPulsarTint: Bool { activeColor == .orbitLight }
+    /// The bubble's tint — drives the fill wash + core shadow. Pulsar keeps its
+    /// deeper `#6366F1`; a speaking drone tints the whole bubble to its colour.
+    private var core: Color { isPulsarTint ? .orbit : activeColor }
     /// The rim-glow tint — Pulsar indigo by default, the active drone's colour
     /// when a sub-agent owns the line.
     private var light: Color { activeColor }

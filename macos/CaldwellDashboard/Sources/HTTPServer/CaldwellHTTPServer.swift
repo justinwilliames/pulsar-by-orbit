@@ -946,9 +946,10 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
         let idCopy = entryId
         let textCopy = text
+        let agentCopy = agentCategory
         Task.detached {
             do {
-                let url = try await NativeVoiceClient.synth(text: textCopy)
+                let url = try await NativeVoiceClient.synth(text: textCopy, agent: agentCopy)
                 await audioQueue.markReady(id: idCopy, url: url)
             } catch {
                 NSLog("[PulsarHTTP] native synth failed for \(idCopy): \(error)")

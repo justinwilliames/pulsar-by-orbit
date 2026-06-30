@@ -73,29 +73,48 @@ enum NativeVoiceClient {
         }
     }
 
-    /// The `say -v` name to actually speak with: env override → the user's pick
-    /// resolved to its best installed variant → Daniel → first available.
+    /// The `say -v` name to actually speak with for the DEFAULT (Pulsar) voice:
+    /// env override → Daniel (the fixed default) resolved to its best installed
+    /// variant → first available. The user voice-picker is gone — every line is
+    /// spoken in a character voice (Pulsar = Daniel, drones from the registry).
     static func bestVoice() -> String {
         if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }
+        return resolved(base: DroneRegistry.pulsarVoice)
+    }
+
+    /// Resolve a base voice name (e.g. "Daniel", "Thomas", "Karen") to its best
+    /// installed `say -v` variant (e.g. "Daniel (Enhanced)"). Falls back to the
+    /// raw base name if it isn't in the catalogue — `say` may still know it even
+    /// when `AVSpeechSynthesisVoice` doesn't enumerate it — and finally to
+    /// Pulsar's Daniel, then anything installed.
+    static func resolved(base: String) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespaces)
         let vs = voices()
-        let choice = CaldwellConfig.shared.nativeVoiceChoice
-        if !choice.isEmpty,
-           let v = vs.first(where: { $0.display.caseInsensitiveCompare(choice) == .orderedSame }) {
+        if !trimmed.isEmpty,
+           let v = vs.first(where: { $0.display.caseInsensitiveCompare(trimmed) == .orderedSame }) {
             return v.resolved
         }
-        // Out-of-box default (no saved choice): Trinoids — Pulsar opens robotic.
-        // A user's saved pick is never overridden because `choice` is non-empty
-        // once they choose. Fall through to Daniel, then anything installed.
-        if let trinoids = vs.first(where: { $0.display.caseInsensitiveCompare("Trinoids") == .orderedSame }) {
-            return trinoids.resolved
-        }
+        // Not enumerated by AVSpeechSynthesisVoice — trust `say` to know the name
+        // (it lists more voices than AVSpeech does). Use it verbatim.
+        if !trimmed.isEmpty { return trimmed }
         if let daniel = vs.first(where: { $0.display.caseInsensitiveCompare("Daniel") == .orderedSame }) {
             return daniel.resolved
         }
         return vs.first?.resolved ?? "Daniel"
+    }
+
+    /// The `say -v` voice for a line tagged with drone `category`. Pulsar / nil /
+    /// unknown → Daniel; a drone → its registry voice, each resolved to the best
+    /// installed variant. An env override still wins (debug/global force).
+    static func voice(forAgent category: String?) -> String {
+        if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
+           !override.trimmingCharacters(in: .whitespaces).isEmpty {
+            return override
+        }
+        return resolved(base: DroneRegistry.voice(for: category))
     }
 
     // MARK: - Private
@@ -168,8 +187,10 @@ enum NativeVoiceClient {
     }
 
     /// Synthesise `text` to a temp AIFF and return its URL. Caller owns the file.
-    static func synth(text: String, rate: Int = defaultRate) async throws -> URL {
-        let voice = bestVoice()
+    /// `agent` selects the character voice: nil/"pulsar" → Daniel; a drone
+    /// category → that drone's registry voice.
+    static func synth(text: String, agent: String? = nil, rate: Int = defaultRate) async throws -> URL {
+        let voice = voice(forAgent: agent)
         let out = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("pulsar-native-\(UUID().uuidString).aiff")
         let proc = Process()

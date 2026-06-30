@@ -16,11 +16,11 @@ struct FloatingHeadsView: View {
     /// long captions at ~3 lines.
     var onCaptionText: ((String) -> Void)?
 
-    private let orbitRadius: CGFloat = 70
+    private let orbitRadius: CGFloat = 82
     private let thumbnailSize: CGFloat = 40
     private let orbitYOffset: CGFloat = 24
-    private let arcStart: Double = 30
-    private let arcEnd: Double = 150
+    private let arcStart: Double = 20
+    private let arcEnd: Double = 160
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
@@ -92,13 +92,16 @@ struct FloatingHeadsView: View {
                 )
                 .id(voice)
                 .transition(.opacity.combined(with: .scale(scale: 0.88)))
-                // Pulsar shrinks while a drone speaks, returns to full size when
-                // it's Pulsar's line again.
-                .scaleEffect(pulsarIsActive ? 1.0 : 0.7)
-                .animation(.spring(response: 0.42, dampingFraction: 0.72), value: pulsarIsActive)
-                // Centred in the zone: equal top/bottom glow clearance so the
-                // pulse never clips whichever edge the head sits near.
-                .zIndex(10)
+                // Speaker handoff: when a drone owns the line, Pulsar clearly
+                // SHRINKS and RECEDES — small scale + dimmed opacity so it
+                // visibly steps back and the eye goes to the active drone. Back
+                // to full size + full opacity when it's Pulsar's line again.
+                .scaleEffect(pulsarIsActive ? 1.0 : 0.48)
+                .opacity(pulsarIsActive ? 1.0 : 0.55)
+                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: pulsarIsActive)
+                // Active drone pops in FRONT of a shrunken Pulsar, so it must
+                // out-rank Pulsar's zIndex when speaking; Pulsar leads otherwise.
+                .zIndex(pulsarIsActive ? 10 : 6)
 
                 // In-flight sub-agent drones orbiting Pulsar — only the live
                 // ones are present. The active speaker pops + lip-syncs.

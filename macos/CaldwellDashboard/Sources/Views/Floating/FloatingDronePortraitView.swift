@@ -28,8 +28,15 @@ struct FloatingDronePortraitView: View {
 
     private var color: Color { droneColor(for: category) }
 
-    /// The active speaker pops larger; idle drones sit at the thumbnail size.
-    private var activeScale: CGFloat { isActiveSpeaker ? 1.5 : 1.0 }
+    /// The active speaker POPS large — clearly bigger than the idle drones AND
+    /// bigger than a shrunken Pulsar (120·0.48 ≈ 58pt): 40·2.4 ≈ 96pt. Idle
+    /// in-flight drones stay at thumbnail size in the orbit.
+    private var activeScale: CGFloat { isActiveSpeaker ? 2.4 : 1.0 }
+
+    /// When active, the drone is PULLED toward centre — only ~28% of its orbit
+    /// offset remains — so it moves forward into the spotlight rather than
+    /// popping out at the rim. Idle drones keep their full orbit offset.
+    private var radiusFactor: CGFloat { isActiveSpeaker ? 0.28 : 1.0 }
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -46,12 +53,16 @@ struct FloatingDronePortraitView: View {
                 portraitManager: portraitManager,
                 droneName: category
             )
-            .shadow(color: color.opacity(isActiveSpeaker ? 0.6 : 0.3),
-                    radius: isActiveSpeaker ? 9 : 4)
+            // Full, rich glow when speaking; a quiet hint when idle.
+            .shadow(color: color.opacity(isActiveSpeaker ? 0.85 : 0.3),
+                    radius: isActiveSpeaker ? 16 : 4)
+            .shadow(color: color.opacity(isActiveSpeaker ? 0.5 : 0),
+                    radius: isActiveSpeaker ? 6 : 0)
             .scaleEffect(activeScale)
             .offset(
-                x: cos(angle) * orbitRadius + bobX,
-                y: sin(angle) * orbitRadius + orbitYOffset + bobY
+                x: cos(angle) * orbitRadius * radiusFactor + bobX,
+                y: sin(angle) * orbitRadius * radiusFactor
+                    + orbitYOffset * radiusFactor + bobY
             )
             .animation(.spring(response: 0.4, dampingFraction: 0.7), value: isActiveSpeaker)
         }

@@ -593,7 +593,7 @@ actor AudioQueueActor {
             // hear Caldwell and only the premium voice failed.
             NSLog("[AudioQueue] fetch failed for \(entry.id) — native say fallback")
             await speakNative(entry.text)
-            await broadcaster.broadcast(event: "voice_active", json: jsonString(idlePayload(queued: queue.count)))
+            await broadcastIdleIfQueueEmpty()
             let historyItem = recordHistory(entry: entry, duration: nil, failed: true)
             await broadcaster.broadcast(
                 event: "history_update",
@@ -695,12 +695,26 @@ actor AudioQueueActor {
             try? FileManager.default.removeItem(at: audioURL)
         }
 
-        await broadcaster.broadcast(event: "voice_active", json: jsonString(idlePayload(queued: queue.count)))
+        await broadcastIdleIfQueueEmpty()
         let historyItem = recordHistory(entry: entry, duration: effectiveDuration, failed: false)
         await broadcaster.broadcast(
             event: "history_update",
             json: jsonString(historyPayload(for: historyItem, type: entry.isReplay ? "replay" : "speak"))
         )
+    }
+
+    /// Broadcast the idle / return-to-Pulsar state ONLY when the roll call is
+    /// genuinely over (no more lines queued). Between consecutive queued lines
+    /// this is a no-op, so the centre holds the just-finished speaker (its mouth
+    /// stilling as the audio ends) and the NEXT line's `voice_active` swaps
+    /// straight in — drone → drone, never drone → idle-Pulsar → drone. Pulsar
+    /// only returns to centre when the queue is empty.
+    private func broadcastIdleIfQueueEmpty() async {
+        guard queue.isEmpty else {
+            NSLog("[AudioQueue] ↪︎ holding centre — \(queue.count) line(s) still queued (no idle flash)")
+            return
+        }
+        await broadcaster.broadcast(event: "voice_active", json: jsonString(idlePayload(queued: queue.count)))
     }
 
     /// Walk back from the end of the envelope to find the last chunk loud

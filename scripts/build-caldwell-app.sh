@@ -82,7 +82,13 @@ RESOURCE_BUNDLE="$(find "$APP_DIR/.build" -name "CaldwellDashboard_CaldwellDashb
 if [ -n "$RESOURCE_BUNDLE" ] && [ -d "$RESOURCE_BUNDLE" ]; then
   for f in OrbitLogo.png "OrbitLogo@2x.png" "OrbitLogo@3x.png" \
            pulsar-mouth-0.png pulsar-mouth-1.png pulsar-mouth-2.png \
-           pulsar-mouth-3.png pulsar-mouth-4.png pulsar-blink.png; do
+           pulsar-mouth-3.png pulsar-mouth-4.png pulsar-blink.png \
+           voyager-mouth-0.png voyager-mouth-1.png voyager-mouth-2.png voyager-mouth-3.png voyager-mouth-4.png voyager-blink.png \
+           sentinel-mouth-0.png sentinel-mouth-1.png sentinel-mouth-2.png sentinel-mouth-3.png sentinel-mouth-4.png sentinel-blink.png \
+           nova-mouth-0.png nova-mouth-1.png nova-mouth-2.png nova-mouth-3.png nova-mouth-4.png nova-blink.png \
+           nebula-mouth-0.png nebula-mouth-1.png nebula-mouth-2.png nebula-mouth-3.png nebula-mouth-4.png nebula-blink.png \
+           echo-mouth-0.png echo-mouth-1.png echo-mouth-2.png echo-mouth-3.png echo-mouth-4.png echo-blink.png \
+           atlas-mouth-0.png atlas-mouth-1.png atlas-mouth-2.png atlas-mouth-3.png atlas-mouth-4.png atlas-blink.png; do
     src="$RESOURCE_BUNDLE/$f"
     if [ -f "$src" ]; then
       cp "$src" "$APP_BUNDLE/Contents/Resources/$f"

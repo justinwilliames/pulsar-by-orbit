@@ -20,7 +20,10 @@ struct FloatingHeadsView: View {
                         portraitManager: viewModel.portraitManager
                     )
                     .id(voice)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    // Clean on-brand entrance: scale up + fade in. The head's own
+                    // Pulsar pulse (FloatingPortraitView) fires immediately on
+                    // appear, so the indigo "ping" reads as the arrival beat.
+                    .transition(.opacity.combined(with: .scale(scale: 0.88)))
                     .offset(y: -16)
                     .zIndex(10)
 
@@ -44,7 +47,7 @@ struct FloatingHeadsView: View {
         }
         .frame(width: 240, height: 260)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: viewModel.queueItems.map(\.id))
-        .animation(.easeInOut(duration: 0.4), value: viewModel.playback.currentVoice)
+        .animation(.spring(response: 0.42, dampingFraction: 0.72), value: viewModel.playback.currentVoice)
     }
 
     private func orbitAngle(index: Int, total: Int) -> Double {

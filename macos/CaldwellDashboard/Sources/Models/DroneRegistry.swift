@@ -31,22 +31,26 @@ enum DroneRegistry {
     /// The LOCKED taxonomy + colours, plus a unique humanoid voice per character.
     /// Order is the canonical category list.
     ///
-    /// Voice choices (persona + assumed gender → closest INSTALLED humanoid
-    /// voice; the coordinator's named picks Lee/Serena/Oliver/Allison/Kate/etc.
-    /// are NOT installed on this machine, so the nearest same-gender humanoid is
-    /// used and reported):
-    ///   • voyager  (M, rugged explorer)      → Thomas  (fr-FR) — lively, energetic; only distinct male humanoid left after Daniel
-    ///   • sentinel (F, precise reviewer)     → Karen   (en-AU) — crisp, authoritative (Serena/Kate not installed)
-    ///   • nova     (F, eager builder)        → Samantha(en-US) — bright, upbeat (coordinator's primary)
-    ///   • nebula   (F, artist)               → Moira   (en-IE) — warm, lyrical (coordinator's primary)
-    ///   • echo     (M, writer/communicator)  → Xander  (nl-NL) — clear, articulate; distinct from Daniel
-    ///   • atlas    (M, sturdy generalist)    → Rishi   (en-IN) — deep, steady (coordinator's primary)
+    /// Voice choices — persona + assumed gender → a distinct, genuinely humanoid
+    /// ENGLISH voice installed on this machine. This box has only three humanoid
+    /// English MALE voices (Daniel, Rishi, Aman), one of which is Pulsar's, so the
+    /// two rugged males (Voyager, Atlas) take Aman + Rishi and the gender-neutral
+    /// communicator Echo takes a female voice (Tessa) — every character speaks in a
+    /// real English voice rather than a non-English one mispronouncing English.
+    /// To upgrade any of them: download a premium voice (System Settings → Spoken
+    /// Content → System Voice → Manage Voices) and edit the `voice:` string here.
+    ///   • voyager  (M, rugged explorer)      → Aman     (en-IN) — energetic, adventurous
+    ///   • sentinel (F, precise reviewer)     → Karen    (en-AU) — crisp, authoritative
+    ///   • nova     (F, eager builder)        → Samantha (en-US) — bright, upbeat
+    ///   • nebula   (F, artist)               → Moira    (en-IE) — warm, lyrical
+    ///   • echo     (F, writer/communicator)  → Tessa    (en-ZA) — clear, articulate
+    ///   • atlas    (M, sturdy generalist)    → Rishi    (en-IN) — deep, steady
     static let drones: [Drone] = [
-        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Thomas"),   // amber
+        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Aman"),     // amber
         Drone(category: "sentinel", role: "reviewer",   color: Color(red: 0.35, green: 0.78, blue: 0.88), voice: "Karen"),    // cyan
         Drone(category: "nova",     role: "builder",    color: Color(red: 0.36, green: 0.82, blue: 0.42), voice: "Samantha"), // green
         Drone(category: "nebula",   role: "artist",     color: Color(red: 0.91, green: 0.36, blue: 0.82), voice: "Moira"),    // magenta
-        Drone(category: "echo",     role: "writer",     color: Color(red: 0.25, green: 0.82, blue: 0.78), voice: "Xander"),   // teal
+        Drone(category: "echo",     role: "writer",     color: Color(red: 0.25, green: 0.82, blue: 0.78), voice: "Tessa"),    // teal
         Drone(category: "atlas",    role: "generalist", color: Color(red: 0.53, green: 0.58, blue: 0.66), voice: "Rishi"),    // slate
     ]
 

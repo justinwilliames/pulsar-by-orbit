@@ -15,7 +15,10 @@ final class FloatingPanelController: NSPanel {
         level = .statusBar
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        // No window shadow: on a borderless transparent panel (esp. macOS 26
+        // Liquid Glass) the shadow renders as a glassy rounded-rect "box"
+        // framing the head. The glow provides all the depth; let it float free.
+        hasShadow = false
         isMovableByWindowBackground = true
         // .stationary keeps the panel pinned across Spaces transitions even when
         // the user navigates between desktops mid-utterance.

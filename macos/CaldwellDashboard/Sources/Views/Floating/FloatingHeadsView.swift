@@ -5,9 +5,15 @@ struct FloatingHeadsView: View {
     /// Shared geometry: which side the caption renders on + its horizontal nudge.
     let layout: FloatingLayoutModel
 
-    /// Reports the caption's measured height (0 when hidden) up to the panel
-    /// controller so it can grow the window on the correct side and shrink back.
+    /// Reports the caption's CURRENT (revealed) height up to the panel controller
+    /// so it can grow the window in the locked direction as the text types in
+    /// (0 when hidden).
     var onCaptionHeightChange: ((CGFloat) -> Void)?
+
+    /// Reports the FULL text's measured height once per line so the controller can
+    /// LOCK the above/below placement upfront — the box then only grows in that
+    /// one direction and never flips mid-reveal.
+    var onFullCaptionHeight: ((CGFloat) -> Void)?
 
     private let orbitRadius: CGFloat = 70
     private let thumbnailSize: CGFloat = 40
@@ -16,16 +22,20 @@ struct FloatingHeadsView: View {
     private let arcEnd: Double = 150
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
-    /// live here; the caption grows ABOVE or BELOW it. Tightened from the old
-    /// 240×260 so the caption hugs the VISIBLE head rather than floating below a
-    /// tall empty zone. Kept in sync with `FloatingPanelController.headZoneSize`.
+    /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
+    /// pulsar-pulse glow (ripple frame = portrait+110 ⇒ ~115pt half-extent, plus
+    /// the head's soft shadow + bob) fades COMPLETELY before the panel's edge —
+    /// the head is centred, giving equal top/bottom clearance so neither
+    /// placement (caption-below ⇒ head near top, caption-above ⇒ head near
+    /// bottom) clips the glow. The caption still hugs the head via the negative
+    /// attach gap below, so this headroom does NOT reopen an empty gap.
     static let headZoneWidth: CGFloat = 240
-    static let headZoneHeight: CGFloat = 200
+    static let headZoneHeight: CGFloat = 240
 
-    /// Small overlap so the caption visually attaches to the head instead of
-    /// leaving an air gap. The head's glow tail fades within the zone, so a
-    /// slight negative gap reads as "attached".
-    private let captionAttachGap: CGFloat = -4
+    /// Negative overlap so the caption tucks UNDER the head's lower glow tail and
+    /// reads as attached — keeps the caption tight even though the head zone is
+    /// tall enough to clear the glow.
+    private let captionAttachGap: CGFloat = -22
     private let captionEdgePadding: CGFloat = 6
 
     // MARK: - Caption lifecycle state
@@ -68,7 +78,8 @@ struct FloatingHeadsView: View {
                 )
                 .id(voice)
                 .transition(.opacity.combined(with: .scale(scale: 0.88)))
-                .offset(y: -8)
+                // Centred in the zone: equal top/bottom glow clearance so the
+                // pulse never clips whichever edge the head sits near.
                 .zIndex(10)
 
                 let queued = Array(viewModel.queueItems.filter { !$0.isPlaying }.prefix(5))
@@ -99,8 +110,10 @@ struct FloatingHeadsView: View {
     private var captionZone: some View {
         Group {
             if let caption = displayedCaption {
-                SubtitleBubbleView(text: caption,
-                                   tailEdge: layout.captionEdge == .above ? .bottom : .top)
+                SubtitleBubbleView(fullText: caption,
+                                   revealedCount: revealedCount(for: caption),
+                                   tailEdge: layout.captionEdge == .above ? .bottom : .top,
+                                   maxHeight: captionMaxHeight)
                     .id(caption)
                     .offset(x: layout.captionXOffset)
                     .padding(.horizontal, captionEdgePadding)
@@ -110,6 +123,10 @@ struct FloatingHeadsView: View {
                             Color.clear.preference(key: CaptionHeightKey.self, value: proxy.size.height)
                         }
                     )
+                    // Hidden full-text measurer: lays out the WHOLE line at the
+                    // bubble's width to report its full height, used once to lock
+                    // the above/below placement so the box never flips as it grows.
+                    .background(fullHeightMeasurer(for: caption))
                     .transition(.opacity.combined(
                         with: .move(edge: layout.captionEdge == .above ? .bottom : .top)))
             }
@@ -117,12 +134,79 @@ struct FloatingHeadsView: View {
         .frame(maxWidth: .infinity)
         .animation(.easeInOut(duration: 0.35), value: displayedCaption)
         .animation(.easeInOut(duration: 0.35), value: layout.captionEdge)
+        // Smoothly ease the live (revealed) height as the typewriter fills in.
+        .animation(.easeInOut(duration: 0.28), value: revealedCount(for: displayedCaption ?? ""))
         .onPreferenceChange(CaptionHeightKey.self) { height in
             onCaptionHeightChange?(displayedCaption == nil ? 0 : height)
+        }
+        .onPreferenceChange(FullCaptionHeightKey.self) { height in
+            if displayedCaption != nil, height > 0 { onFullCaptionHeight?(height) }
         }
         .onChange(of: displayedCaption) { _, new in
             if new == nil { onCaptionHeightChange?(0) }
         }
+    }
+
+    /// Renders the full line invisibly at the caption's content width + padding to
+    /// measure its total height, so the controller can pre-lock placement.
+    private func fullHeightMeasurer(for caption: String) -> some View {
+        Text(caption)
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: SubtitleBubbleView.maxWidth - 28)   // minus h-padding (14*2)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(maxHeight: captionMaxHeight)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: FullCaptionHeightKey.self,
+                                           value: proxy.size.height + 2 * captionEdgePadding)
+                }
+            )
+            .opacity(0)
+            .allowsHitTesting(false)
+    }
+
+    // MARK: - Typewriter reveal
+
+    /// Characters of `caption` to show right now. Tracks playback: revealed in
+    /// proportion to elapsed/total while speaking (rounded to the next WORD so the
+    /// box grows in smooth steps, not per-character jitter), and held at full
+    /// length once speech ends — through the linger.
+    private func revealedCount(for caption: String) -> Int {
+        let count = caption.count
+        guard count > 0 else { return 0 }
+
+        let speaking = viewModel.playback.isPlaying
+        guard speaking else { return count }   // ended → hold full text
+
+        let total = viewModel.playback.totalDuration ?? viewModel.playback.duration ?? 0
+        guard total > 0 else { return count }
+        let progress = max(0, min(1, viewModel.playback.elapsed / total))
+        let target = Int((Double(count) * progress).rounded(.up))
+        // Snap UP to the next word boundary so partial words don't flash.
+        return wordBoundaryAtOrAfter(target, in: caption)
+    }
+
+    /// The index of the end of the word containing/after `index` (so we never
+    /// reveal a half-word). Whitespace at `index` counts as a boundary.
+    private func wordBoundaryAtOrAfter(_ index: Int, in s: String) -> Int {
+        let count = s.count
+        if index >= count { return count }
+        if index <= 0 { return 0 }
+        let chars = Array(s)
+        var i = index
+        while i < count && !chars[i].isWhitespace { i += 1 }
+        return i
+    }
+
+    /// Cap the bubble height to what the panel can show on screen, so an extreme
+    /// line still fits in full rather than being truncated.
+    private var captionMaxHeight: CGFloat {
+        let screenH = NSScreen.main?.visibleFrame.height ?? 900
+        // Leave room for the head zone + comfortable top/bottom margins.
+        return max(120, screenH - Self.headZoneHeight - 80)
     }
 
     // MARK: - Caption lifecycle driver
@@ -176,8 +260,17 @@ struct FloatingHeadsView: View {
     }
 }
 
-/// Carries the caption's laid-out height up to the panel controller.
+/// Carries the caption's CURRENT (revealed) laid-out height to the controller.
 private struct CaptionHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Carries the FULL text's measured height to the controller for the upfront
+/// above/below placement lock.
+private struct FullCaptionHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

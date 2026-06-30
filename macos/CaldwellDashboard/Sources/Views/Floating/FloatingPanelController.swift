@@ -24,8 +24,16 @@ final class FloatingPanelController: NSPanel {
     /// from this anchor + the current caption height + edge.
     private var headTopLeft: NSPoint?
 
-    /// Latest reported caption height (0 = no caption).
+    /// Latest reported caption height (the CURRENT revealed height — grows as the
+    /// typewriter fills in). 0 = no caption.
     private var captionHeight: CGFloat = 0
+
+    /// The full text's measured height, locked once per line, used to pick the
+    /// above/below placement UPFRONT so the box never flips as it grows. nil =
+    /// not yet locked.
+    private var lockedFullHeight: CGFloat?
+    /// The placement edge chosen from `lockedFullHeight`, held for the line.
+    private var lockedEdge: FloatingLayoutModel.CaptionEdge?
 
     /// Suppress the move handler while WE are setting the frame (so our own
     /// programmatic resizes don't get mistaken for a user drag).
@@ -48,9 +56,16 @@ final class FloatingPanelController: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         hidesOnDeactivate = false
 
-        let rootView = FloatingHeadsView(viewModel: viewModel, layout: layout) { [weak self] height in
-            self?.updateCaptionHeight(height)
-        }
+        let rootView = FloatingHeadsView(
+            viewModel: viewModel,
+            layout: layout,
+            onCaptionHeightChange: { [weak self] height in
+                self?.updateCaptionHeight(height)
+            },
+            onFullCaptionHeight: { [weak self] fullHeight in
+                self?.lockPlacement(forFullCaptionHeight: fullHeight)
+            }
+        )
         contentView = NSHostingView(rootView: rootView)
 
         // Re-evaluate placement after a user drag (the panel can be moved anywhere
@@ -83,6 +98,30 @@ final class FloatingPanelController: NSPanel {
         relayout(animated: false)
     }
 
+    // MARK: - Placement lock (decided from the FULL text upfront)
+
+    /// Lock the above/below placement from the full line's measured height the
+    /// first time it's reported for a line. After this, the box grows only in the
+    /// locked direction as the typewriter fills it in — it never flips.
+    private func lockPlacement(forFullCaptionHeight fullHeight: CGFloat) {
+        let h = max(0, fullHeight.rounded(.up))
+        guard h > 0 else { return }
+        // Re-lock only if the full height meaningfully changed (i.e. a new line),
+        // not on every measurement tick.
+        if let existing = lockedFullHeight, abs(existing - h) < 1 { return }
+        lockedFullHeight = h
+        lockedEdge = chooseEdge(forCaptionHeight: h)
+        relayout(animated: true)
+    }
+
+    /// Picks BELOW when the full caption fits beneath the head, else ABOVE.
+    private func chooseEdge(forCaptionHeight capH: CGFloat) -> FloatingLayoutModel.CaptionEdge {
+        guard let screen = self.screen ?? NSScreen.main, let anchor = headTopLeft else { return .below }
+        let vf = screen.visibleFrame
+        let roomBelow = (anchor.y - Self.headZoneHeight) - (vf.minY + screenMargin)
+        return (capH > 0 && roomBelow < capH) ? .above : .below
+    }
+
     // MARK: - Caption height → relayout
 
     private func updateCaptionHeight(_ rawHeight: CGFloat) {
@@ -103,12 +142,11 @@ final class FloatingPanelController: NSPanel {
         let headH = Self.headZoneHeight
         let capH = captionHeight
 
-        // Decide side: prefer BELOW. The head's bottom edge sits at
-        // anchor.y - headH; a below-caption needs capH of room beneath that down
-        // to the screen's bottom margin. If it won't fit, flip ABOVE.
-        let roomBelow = (anchor.y - headH) - (vf.minY + screenMargin)
+        // Placement direction is LOCKED from the full text upfront so the box
+        // never flips above/below while it grows. Before the lock lands (first
+        // frame), fall back to a live decision from the current height.
         let edge: FloatingLayoutModel.CaptionEdge =
-            (capH > 0 && roomBelow < capH) ? .above : .below
+            lockedEdge ?? chooseEdge(forCaptionHeight: capH)
 
         let totalH = headH + capH
         // Panel top edge in screen coords:
@@ -158,6 +196,11 @@ final class FloatingPanelController: NSPanel {
             ? f.maxY - captionHeight       // caption is above; head top is below it
             : f.maxY                        // head is at the panel top
         headTopLeft = NSPoint(x: headLeftX, y: headTopY)
+        // The new position may have changed which side the FULL caption fits on —
+        // re-evaluate the locked edge from the known full height at this spot.
+        if let full = lockedFullHeight {
+            lockedEdge = chooseEdge(forCaptionHeight: full)
+        }
         relayout(animated: false)
     }
 
@@ -167,6 +210,8 @@ final class FloatingPanelController: NSPanel {
     /// current head anchor so it reappears where it was.
     func resetToBaseSize() {
         captionHeight = 0
+        lockedFullHeight = nil   // next line re-locks its placement fresh
+        lockedEdge = nil
         layout.captionEdge = .below
         if headTopLeft != nil { relayout(animated: false) }
     }

@@ -75,7 +75,11 @@ struct SubtitleBubbleView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .frame(maxWidth: Self.maxWidth)
-            .frame(maxHeight: maxHeight)
+        // NO maxHeight frame: that let the bubble EXPAND to fill offered space
+        // (the container proposes ~infinite height), stranding the text in a
+        // giant empty box. fixedSize on the Text already prevents truncation, so
+        // the bubble hugs the wrapped text's intrinsic height and grows naturally
+        // line-by-line as the typewriter reveals more.
     }
 
     private func captionText(_ s: String) -> some View {

@@ -21,20 +21,27 @@ final class DashboardViewModel {
     /// "drones_in_flight" SSE event; rendered as orbiting drones around Pulsar.
     var inFlightDrones: [String: String] = [:]
 
-    /// True while any sub-agent is running. Still drives the orbit/swarm +
-    /// per-type grouping WHILE the panel is up during speech — but a non-empty
-    /// set does NOT force the panel visible on its own (drones only appear when
-    /// they have something to SAY; a silently-running sub-agent must not put a
-    /// mute drone on screen).
+    /// True while any sub-agent is running (SubagentStart → SubagentStop). A
+    /// running sub-agent means the live team is at work; each such drone is a
+    /// present participant (it orbits, and centres when it speaks).
     var hasInFlightDrones: Bool { !inFlightDrones.isEmpty }
 
-    /// The panel is visible only while something is actually speaking/queued —
-    /// Pulsar or a drone — plus the existing trailing linger. In-flight drones
-    /// alone don't force it: each drone announces itself vocally on spawn (the
-    /// SubagentStart hook fires an acceptance line), so it appears WITH its voice
-    /// rather than silently hovering.
+    /// Whether PULSAR is a present participant — i.e. the MAIN session is
+    /// actively working. Approximated (no new wiring) as: any drone in-flight (a
+    /// running sub-agent implies the main session is working) OR Pulsar is
+    /// speaking / within the trailing linger (`currentVoice` stays set through
+    /// the linger after `isPlaying` flips false). When present-but-silent Pulsar
+    /// orbits with the drones; when he speaks he takes the centre.
+    var pulsarIsPresent: Bool {
+        hasInFlightDrones || playback.currentVoice != nil
+    }
+
+    /// The panel is visible while ANY participant is present — Pulsar present OR
+    /// any drone in-flight — plus the existing trailing linger. Activity-gated,
+    /// not pure speech-gated: the orbit is the live team (Pulsar + running
+    /// sub-agents), shown whenever anyone on it is active.
     var panelShouldBeVisible: Bool {
-        playback.isPlaying || playback.queuedCount > 0
+        pulsarIsPresent || hasInFlightDrones || playback.queuedCount > 0
     }
 
     /// Last value pushed to `onPlaybackChanged`, so we only fire on a real edge.

@@ -179,14 +179,27 @@ actor AudioQueueActor {
 
     // MARK: - In-flight sub-agent drones
 
-    /// Currently in-flight sub-agents, keyed by agentId → drone category. The
-    /// UI renders one orbiting drone per entry; populated by /subagent/start,
-    /// cleared by /subagent/stop.
-    private var inFlight: [String: String] = [:]
+    /// One in-flight sub-agent: its drone category + the last time we heard from
+    /// it (start, or any `--agent` line it spoke). `lastSeen` powers the staleness
+    /// sweep so a dropped SubagentStop hook can't leave a ghost drone orbiting
+    /// forever.
+    private struct InFlightDrone {
+        var category: String
+        var lastSeen: Date
+    }
+
+    /// Currently in-flight sub-agents, keyed by agentId. Populated by
+    /// /subagent/start, refreshed by every tagged speak line, cleared by
+    /// /subagent/stop or the staleness sweep.
+    private var inFlight: [String: InFlightDrone] = [:]
+
+    /// An in-flight drone is evicted if nothing has refreshed it within this
+    /// window — covers a lost SubagentStop hook (the overlay would otherwise lie).
+    static let droneStaleAfter: TimeInterval = 90
 
     /// Record a newly-spawned sub-agent as in-flight under its drone category.
     func addInFlightDrone(id: String, category: String) {
-        inFlight[id] = category
+        inFlight[id] = InFlightDrone(category: category, lastSeen: Date())
     }
 
     /// Remove a finished sub-agent from the in-flight set.
@@ -194,9 +207,41 @@ actor AudioQueueActor {
         inFlight.removeValue(forKey: id)
     }
 
+    /// Refresh an in-flight drone's `lastSeen` by agentId — so an actively
+    /// narrating drone is never swept. No-op if the id isn't tracked (start is
+    /// the only spawn path; a tagged line never resurrects a drone).
+    func touchInFlightDrone(id: String) {
+        guard inFlight[id] != nil else { return }
+        inFlight[id]?.lastSeen = Date()
+    }
+
+    /// Refresh `lastSeen` for every in-flight drone of a given category. The
+    /// `/speak --agent <cat>` path carries only the category (not an agentId),
+    /// so a narrating drone keeps all same-category siblings alive for the line.
+    func touchInFlightDrones(category: String) {
+        let cat = category.lowercased()
+        let now = Date()
+        for (id, d) in inFlight where d.category == cat {
+            inFlight[id]?.lastSeen = now
+        }
+    }
+
     /// Snapshot of the current in-flight drones (agentId → category).
     func inFlightDronesSnapshot() -> [String: String] {
-        inFlight
+        inFlight.mapValues(\.category)
+    }
+
+    /// Evict any in-flight drone not seen within `droneStaleAfter`. Returns the
+    /// post-sweep snapshot ONLY when something was evicted (so the caller can
+    /// re-broadcast); nil when nothing changed (no needless broadcast).
+    func sweepStaleDrones(now: Date = Date()) -> [String: String]? {
+        let stale = inFlight.filter { now.timeIntervalSince($0.value.lastSeen) > Self.droneStaleAfter }
+        guard !stale.isEmpty else { return nil }
+        for id in stale.keys {
+            inFlight.removeValue(forKey: id)
+            NSLog("[AudioQueue] 🫥 swept stale drone \(id) (no Stop within \(Int(Self.droneStaleAfter))s)")
+        }
+        return inFlight.mapValues(\.category)
     }
 
     // MARK: - Public API

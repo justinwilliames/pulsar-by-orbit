@@ -21,6 +21,44 @@ final class DashboardViewModel {
     /// "drones_in_flight" SSE event; rendered as orbiting drones around Pulsar.
     var inFlightDrones: [String: String] = [:]
 
+    /// ONE coherent snapshot of who is speaking right now, collapsing the four
+    /// previously-independent signals (currentAgentCategory, inFlightDrones,
+    /// amplitude, currentVoice) into a single source of truth. The floating
+    /// views read ONLY this for the centre occupant, name card, and subtitle
+    /// tint — so they can never desync or flicker against each other.
+    ///
+    /// nil = nothing is speaking. A `category` of nil inside the snapshot means
+    /// Pulsar is the speaker (indigo); a real drone category means that drone.
+    struct SpeakerSnapshot: Equatable {
+        /// The drone category, or nil when Pulsar is speaking.
+        let category: String?
+        /// Resolved theme colour (drone colour, else Pulsar indigo).
+        let color: Color
+        /// Live mouth amplitude for the speaker.
+        let amplitude: Float
+        /// Pulsar's raw voice label (for the centre portrait's fallback monogram).
+        let voiceLabel: String
+
+        /// True when a real drone (not Pulsar) holds the line.
+        var isDrone: Bool { category != nil }
+    }
+
+    /// The current speaker, recomputed from playback + lipSync each time any
+    /// input changes. Present whenever `currentVoice` is set — so it persists
+    /// through the linger tail after `isPlaying` flips false — and nil only when
+    /// there is genuinely nothing on screen.
+    var activeSpeaker: SpeakerSnapshot? {
+        guard let voice = playback.currentVoice else { return nil }
+        // Only a REAL drone category themes the speaker; nil = Pulsar (indigo).
+        let cat = isDrone(playback.currentAgentCategory)
+            ? playback.currentAgentCategory?.lowercased()
+            : nil
+        return SpeakerSnapshot(category: cat,
+                               color: droneColor(for: cat),
+                               amplitude: lipSync.amplitude,
+                               voiceLabel: voice)
+    }
+
     /// O(1) lookup: is a given text string present in the phrase cache?
     var cachedTextIndex: [String: CachedPhrase] {
         Dictionary(cachedPhrases.map { ($0.text, $0) }, uniquingKeysWith: { first, _ in first })

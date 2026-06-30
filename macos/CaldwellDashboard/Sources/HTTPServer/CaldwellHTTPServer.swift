@@ -27,11 +27,32 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         self.port = port
     }
 
+    private var droneSweepTask: Task<Void, Never>?
+
     func configure() async {
         await audioQueue.setBroadcaster(sseBroadcaster)
         // History lives in memory and starts empty, so any retained replay
         // audio on disk is orphaned from a prior run — clear it.
         await audioQueue.purgeHistoryAudioStore()
+        startDroneSweeper()
+    }
+
+    /// ~1Hz staleness sweep: evict in-flight drones whose sub-agent never sent a
+    /// SubagentStop (a dropped hook would otherwise leave a ghost orbiting
+    /// forever). On any eviction, re-broadcast the trimmed set so connected UIs
+    /// fade the ghost out. Cheap when nothing is in-flight (empty filter).
+    private func startDroneSweeper() {
+        guard droneSweepTask == nil else { return }
+        let audioQueue = self.audioQueue
+        let sseBroadcaster = self.sseBroadcaster
+        droneSweepTask = Task.detached(priority: .utility) {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if let trimmed = await audioQueue.sweepStaleDrones() {
+                    await Self.broadcastDrones(trimmed, sseBroadcaster: sseBroadcaster)
+                }
+            }
+        }
     }
 
     func start() {
@@ -70,6 +91,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     }
 
     func stop() {
+        droneSweepTask?.cancel()
+        droneSweepTask = nil
         serverTask?.cancel()
         serverTask = nil
     }
@@ -333,12 +356,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     ) async throws -> Response {
         let state = await audioQueue.statusSnapshot(limit: 20)
         let stateJSON = try Self.jsonString(state)
+        // Replay the current in-flight drones too, so a RECONNECTING UI rebuilds
+        // the live set from scratch instead of trusting whatever ghosts it had
+        // when the stream dropped.
+        let drones = await audioQueue.inFlightDronesSnapshot()
+        let dronesJSON = (try? Self.jsonString(DronesInFlightPayload(drones: drones))) ?? "{\"drones\":{}}"
         let clientStream = await sseBroadcaster.makeStream()
 
         let bodyStream = AsyncStream<ByteBuffer> { continuation in
             let task = Task {
                 continuation.yield(ByteBuffer(string: Self.ssePayload(event: "connected", json: "{}")))
                 continuation.yield(ByteBuffer(string: Self.ssePayload(event: "state", json: stateJSON)))
+                continuation.yield(ByteBuffer(string: Self.ssePayload(event: "drones_in_flight", json: dronesJSON)))
 
                 for await payload in clientStream {
                     if Task.isCancelled {
@@ -928,6 +957,11 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // keeps the main Pulsar head speaking.
         let agentCategory = (body["agent"] as? String).flatMap {
             $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
+        // Keep a narrating drone alive: a tagged line refreshes lastSeen for that
+        // category so the staleness sweep never evicts a drone mid-sentence.
+        if let agentCategory, isDrone(agentCategory) {
+            await audioQueue.touchInFlightDrones(category: agentCategory)
         }
 
         // macOS local voice — synthesise via `say` to a temp AIFF so it plays

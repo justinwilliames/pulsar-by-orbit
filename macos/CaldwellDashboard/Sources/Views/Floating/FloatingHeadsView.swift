@@ -69,84 +69,141 @@ struct FloatingHeadsView: View {
 
     // MARK: - Head zone
 
-    /// The drone category owning the current line, only when it's a real drone
-    /// (not Pulsar / nil). Driven by `currentAgentCategory`, which is set when a
-    /// tagged line starts and cleared ONLY when playback genuinely ends (the
-    /// idle event) — NOT by the in-flight set. This is what keeps a speaking
-    /// drone in the centre for the whole line even after its sub-agent's
-    /// SubagentStop hook has removed it from `inFlightDrones`.
-    private var activeDroneCategory: String? {
-        let cat = viewModel.playback.currentAgentCategory
-        return isDrone(cat) ? cat?.lowercased() : nil
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// True when Pulsar (not a drone) owns the central slot.
-    private var pulsarIsCentre: Bool { activeDroneCategory == nil }
+    /// Cap on simultaneously-visible orbiting drones. Past ~4 the orbit collides
+    /// at radius 82 / arc 20–160°, so extras collapse into a "+N" badge.
+    private let maxVisibleOrbit = 3
 
-    // MARK: - Head zone (true place-swap)
+    /// The single source of truth for who is speaking (P3). Everything in the
+    /// head zone reads ONLY this — no independent currentAgentCategory /
+    /// inFlightDrones / amplitude reads — so the centre, name card, and subtitle
+    /// can never desync.
+    private var speaker: DashboardViewModel.SpeakerSnapshot? { viewModel.activeSpeaker }
+
+    /// The drone category owning the line, or nil when Pulsar speaks.
+    private var activeDroneCategory: String? { speaker?.category }
+
+    // MARK: - Head zone (true place-swap via matched arcs)
 
     @ViewBuilder
     private var headZone: some View {
         ZStack {
-            if viewModel.playback.currentVoice != nil {
-                centreOccupant
-                    .zIndex(20)        // the central speaker always reads on top
-                orbitOccupants
+            if speaker != nil {
+                // Idle queued voices orbit behind everything.
+                queuedThumbnails
+
+                // ONE list of participants (Pulsar + every in-flight drone). Each
+                // is positioned by its TARGET slot — centre or an orbit index —
+                // so when the active speaker changes, the incoming drone travels
+                // orbit→centre while Pulsar travels centre→orbit on the SAME
+                // spring value-change: a genuine pass-the-baton, not a crossfade.
+                ForEach(participants) { p in
+                    participantView(p)
+                        .id(p.id)
+                        .zIndex(p.isCentre ? 20 : Double(5 - p.orbitIndex))
+                }
+
+                overflowBadge
             }
         }
         .frame(width: Self.headZoneWidth, height: Self.headZoneHeight)
         .animation(.spring(response: 0.5, dampingFraction: 0.78), value: viewModel.queueItems.map(\.id))
         .animation(.spring(response: 0.5, dampingFraction: 0.78), value: sortedDrones.map(\.id))
-        // The swap itself: spring on WHO is in the centre so centre↔orbit reads
-        // as a smooth trade of places, not a snap.
-        .animation(.spring(response: 0.5, dampingFraction: 0.72), value: activeDroneCategory)
-        .animation(.spring(response: 0.42, dampingFraction: 0.72), value: viewModel.playback.currentVoice)
+        // The swap itself, P1: arriving drone overshoots slightly into the
+        // centre (presence); departing Pulsar eases out slower. Both keyed on
+        // who holds the centre so they animate as a matched trade.
+        .animation(.spring(response: 0.38, dampingFraction: 0.62), value: activeDroneCategory)
     }
 
-    /// The CENTRAL slot: Pulsar by default, or the active drone during a swap —
-    /// rendered at full Pulsar size + full glow, exactly where Pulsar normally
-    /// sits, tinted to the occupant's colour. The active drone speaks (live
-    /// amplitude); when Pulsar is centre, Pulsar speaks.
+    /// Render one participant in its current slot. The CENTRE occupant is the
+    /// full-size Pulsar-style portrait (glow tinted to the speaker); ORBIT
+    /// occupants are small drone thumbnails. Pulsar in orbit renders as a
+    /// drone-sized pulsar thumbnail.
     @ViewBuilder
-    private var centreOccupant: some View {
-        let voice = viewModel.playback.currentVoice ?? "Pulsar"
-        let drone = activeDroneCategory
-        FloatingPortraitView(
-            voiceName: voice,
-            amplitude: viewModel.lipSync.amplitude,   // whoever is centre is the speaker
-            voiceColor: drone.map { droneColor(for: $0) } ?? viewModel.voiceColor(for: voice),
-            portraitManager: viewModel.portraitManager,
-            droneName: drone ?? "pulsar",
-            glowColor: droneColor(for: drone)         // drone colour, else Pulsar indigo
-        )
-        // Keyed by occupant so the swap crossfades between the two characters.
-        .id(drone ?? "pulsar")
-        .transition(.opacity.combined(with: .scale(scale: 0.85)))
-    }
-
-    /// Everything orbiting the centre: each in-flight drone NOT currently in the
-    /// centre, plus Pulsar itself (drone-sized) when a drone has taken centre —
-    /// so the two genuinely trade places.
-    @ViewBuilder
-    private var orbitOccupants: some View {
-        let occupants = orbitList
-        ForEach(Array(occupants.enumerated()), id: \.element.id) { index, occ in
+    private func participantView(_ p: Participant) -> some View {
+        if p.isCentre {
+            // MATCHED ARC (P1): the centre occupant ARRIVES from the orbit slot
+            // it just vacated (insertion offset = that slot) and, when replaced,
+            // DEPARTS toward the slot it's headed for — so the incoming drone and
+            // the outgoing Pulsar physically pass each other rather than cross-
+            // fading in place. Arriving overshoots slightly (presence); departing
+            // eases out slower.
+            let home = homeOrbitOffset(for: p)
+            FloatingPortraitView(
+                voiceName: speaker?.voiceLabel ?? "Pulsar",
+                amplitude: speaker?.amplitude ?? 0,        // the centre is the speaker
+                voiceColor: p.color,
+                portraitManager: viewModel.portraitManager,
+                droneName: p.category ?? "pulsar",
+                glowColor: p.color
+            )
+            // Name card BELOW the central portrait squircle (P4).
+            .overlay(alignment: .bottom) { centreNameCard(for: p) }
+            .transition(.asymmetric(
+                insertion: .offset(home)
+                    .combined(with: .scale(scale: 0.72))   // steps forward from depth
+                    .combined(with: .opacity)
+                    .animation(.spring(response: 0.38, dampingFraction: 0.62)),
+                removal: .offset(home)
+                    .combined(with: .scale(scale: 0.72))
+                    .combined(with: .opacity)
+                    .animation(.spring(response: 0.55, dampingFraction: 0.74))
+            ))
+        } else {
             FloatingDronePortraitView(
-                category: occ.category,
-                isActiveSpeaker: false,                // the speaker is in the centre, never in orbit
+                category: p.category ?? "pulsar",
+                isActiveSpeaker: false,                    // the speaker is always centre
                 liveAmplitude: 0,
                 thumbnailSize: thumbnailSize,
                 orbitRadius: orbitRadius,
                 orbitYOffset: orbitYOffset,
-                angle: orbitAngle(index: index, total: occupants.count),
-                index: index,
+                angle: orbitAngle(index: p.orbitIndex, total: visibleOrbitCount),
+                index: p.orbitIndex,
+                reduceMotion: reduceMotion,
                 portraitManager: viewModel.portraitManager
             )
-            .id(occ.id)
-            .zIndex(Double(5 - index))
         }
+    }
 
-        // Idle queued voices keep their existing orbiting thumbnails behind the drones.
+    /// The orbit-slot offset the centre occupant travels FROM (on arrival) and
+    /// TO (on departure) — the "swap lane". Both the incoming drone and the
+    /// outgoing Pulsar trade through the first orbit slot, so they pass each
+    /// other along the same arc. Pulsar's pinned slot is index 0; a drone
+    /// arriving from orbit also vacates near the front of the roster.
+    private func homeOrbitOffset(for _: Participant) -> CGSize {
+        let angle = orbitAngle(index: 0, total: max(visibleOrbitCount, 1))
+        return CGSize(width: cos(angle) * orbitRadius,
+                      height: sin(angle) * orbitRadius + orbitYOffset)
+    }
+
+    /// The name card BELOW the centre portrait: "NAME · ROLE", drone-tinted.
+    /// Shown only when a drone holds the centre; Pulsar shows nothing (P4).
+    @ViewBuilder
+    private func centreNameCard(for p: Participant) -> some View {
+        if let category = p.category {
+            let color = p.color
+            let role = droneRole(for: category).uppercased()
+            Text(role.isEmpty ? category.uppercased() : "\(category.uppercased()) · \(role)")
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .tracking(1.2)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(color.opacity(0.85)))
+                // strokeBorder draws INSIDE the edge so a crisp 1pt line survives
+                // (the old stroke+blur(1.5) dissolved the line into nothing).
+                .overlay(Capsule().strokeBorder(color.opacity(0.6), lineWidth: 1))
+                .shadow(color: color.opacity(0.5), radius: 8)
+                .offset(y: 14)                              // below the squircle
+                .transition(.opacity.combined(with: .scale(scale: 0.7)))
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Idle queued voices keep their existing orbiting thumbnails, behind the drones.
+    @ViewBuilder
+    private var queuedThumbnails: some View {
         let queued = Array(viewModel.queueItems.filter { !$0.isPlaying }.prefix(5))
         ForEach(Array(queued.enumerated()), id: \.element.id) { index, item in
             QueueBubbleView(
@@ -164,23 +221,82 @@ struct FloatingHeadsView: View {
         }
     }
 
-    /// The orbit roster: in-flight drones minus whoever is in the centre, plus
-    /// Pulsar (as a drone-sized portrait) when a drone holds the centre. Pulsar
-    /// is pinned first so it keeps a stable slot.
-    private var orbitList: [DroneInFlight] {
-        var list: [DroneInFlight] = []
-        if let active = activeDroneCategory {
-            // A drone took the centre → Pulsar drops out to orbit.
-            list.append(DroneInFlight(id: "pulsar", category: "pulsar"))
-            // All OTHER in-flight drones orbit too (skip the centre one).
-            for d in sortedDrones where d.category != active {
-                list.append(d)
-            }
-        } else {
-            // Pulsar is centre → every in-flight drone orbits.
-            list = sortedDrones
+    /// "+N" overflow badge on the last visible orbit slot when more drones are
+    /// in flight than we render (P7 clutter cap).
+    @ViewBuilder
+    private var overflowBadge: some View {
+        let hidden = orbitParticipants.count - visibleOrbitCount
+        if hidden > 0 {
+            let lastIndex = visibleOrbitCount - 1
+            let angle = orbitAngle(index: lastIndex, total: visibleOrbitCount)
+            Text("+\(hidden)")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .overlay(Capsule().strokeBorder(.white.opacity(0.35), lineWidth: 1))
+                .offset(
+                    x: cos(angle) * orbitRadius + thumbnailSize * 0.4,
+                    y: sin(angle) * orbitRadius + orbitYOffset + thumbnailSize * 0.4
+                )
+                .zIndex(30)
+                .allowsHitTesting(false)
         }
+    }
+
+    // MARK: - Participant model (centre + orbit slots)
+
+    /// One participant on screen: Pulsar or an in-flight drone, tagged with the
+    /// slot it currently occupies. Identity is stable (Pulsar = "pulsar", drones
+    /// by agentId) so SwiftUI animates the SAME view between centre and orbit.
+    private struct Participant: Identifiable {
+        let id: String          // "pulsar" or agentId
+        let category: String?   // nil = Pulsar
+        let color: Color
+        let isCentre: Bool
+        let orbitIndex: Int     // valid only when !isCentre
+    }
+
+    /// The full participant list: exactly one centre occupant + the orbit roster.
+    private var participants: [Participant] {
+        var out: [Participant] = []
+        let active = activeDroneCategory
+
+        // Centre occupant.
+        if let active, let centreDrone = sortedDrones.first(where: { $0.category == active }) {
+            out.append(Participant(id: centreDrone.id, category: centreDrone.category,
+                                   color: droneColor(for: centreDrone.category),
+                                   isCentre: true, orbitIndex: 0))
+        } else {
+            out.append(Participant(id: "pulsar", category: nil,
+                                   color: droneColor(for: nil),
+                                   isCentre: true, orbitIndex: 0))
+        }
+
+        // Orbit occupants, capped.
+        for (i, occ) in orbitParticipants.prefix(visibleOrbitCount).enumerated() {
+            out.append(Participant(id: occ.id, category: occ.category == "pulsar" ? nil : occ.category,
+                                   color: droneColor(for: occ.category),
+                                   isCentre: false, orbitIndex: i))
+        }
+        return out
+    }
+
+    /// The orbit roster (uncapped): in-flight drones minus the centre one, plus
+    /// Pulsar (drone-sized) when a drone holds the centre. Pulsar pinned first.
+    private var orbitParticipants: [DroneInFlight] {
+        guard let active = activeDroneCategory else {
+            // Pulsar is centre → every in-flight drone orbits.
+            return sortedDrones
+        }
+        var list: [DroneInFlight] = [DroneInFlight(id: "pulsar", category: "pulsar")]
+        for d in sortedDrones where d.category != active { list.append(d) }
         return list
+    }
+
+    /// How many orbit slots we actually render (clutter cap).
+    private var visibleOrbitCount: Int {
+        min(orbitParticipants.count, maxVisibleOrbit)
     }
 
     /// In-flight drones in a stable order (by agentId) so orbit slots don't
@@ -202,8 +318,7 @@ struct FloatingHeadsView: View {
                                    holdFull: !viewModel.playback.isPlaying,
                                    tailEdge: layout.captionEdge == .above ? .bottom : .top,
                                    maxHeight: captionMaxHeight,
-                                   activeColor: droneColor(for: viewModel.playback.currentAgentCategory))
-                    .overlay(alignment: .top) { droneNameCard }
+                                   activeColor: speaker?.color ?? .orbitLight)   // P3 single source
                     .id(caption)
                     .offset(x: layout.captionXOffset)
                     .padding(.horizontal, captionEdgePadding)
@@ -228,31 +343,6 @@ struct FloatingHeadsView: View {
         }
     }
 
-
-    /// A small pill above the caption showing the active drone's name, tinted to
-    /// its colour. Only shown when a drone owns the line; Pulsar shows nothing.
-    @ViewBuilder
-    private var droneNameCard: some View {
-        if let category = activeDroneCategory {
-            let color = droneColor(for: category)
-            Text(category.uppercased())
-                .font(.system(size: 9, weight: .heavy, design: .rounded))
-                .tracking(0.8)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(
-                    Capsule().fill(color.opacity(0.85))
-                )
-                .overlay(
-                    Capsule().stroke(color, lineWidth: 1).blur(radius: 1.5)
-                )
-                .shadow(color: color.opacity(0.5), radius: 4)
-                .offset(y: -14)
-                .transition(.opacity.combined(with: .scale(scale: 0.7)))
-                .allowsHitTesting(false)
-        }
-    }
 
     /// Cap the bubble height to what the panel can show on screen, so an extreme
     /// line still fits in full rather than being truncated.

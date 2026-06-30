@@ -12,16 +12,32 @@ import SwiftUI
 /// (indigo `.orbitLight`), used for "pulsar", nil, or any unknown category.
 enum DroneRegistry {
 
+    /// A per-drone signature motion so each character moves distinctly rather
+    /// than every drone sharing one bob (which read as mere recolours):
+    ///   • bobAmplitude — px of orbital bob (wider = more restless)
+    ///   • bobFrequency — bob speed multiplier (higher = busier)
+    ///   • activeScale  — pop size when this drone takes the centre
+    struct MotionTrait: Sendable {
+        let bobAmplitude: CGFloat
+        let bobFrequency: Double
+        let activeScale: CGFloat
+    }
+
     /// One drone's fixed identity: its category id, a human-readable role, its
-    /// locked brand colour, and the macOS `say -v` voice it speaks in. The voice
-    /// is chosen by the character's persona + assumed gender, from the humanoid
-    /// voices actually installed on this machine (verified via
-    /// AVSpeechSynthesisVoice gender) — never a robotic/novelty voice.
+    /// locked brand colour, the macOS `say -v` voice it speaks in, a short
+    /// non-colour role badge (so the drones are distinguishable without relying
+    /// on hue alone), and its signature motion trait. Voice is chosen by the
+    /// character's persona + assumed gender, from the humanoid voices actually
+    /// installed on this machine — never a robotic/novelty voice.
     struct Drone: Sendable {
         let category: String
         let role: String
         let color: Color
         let voice: String
+        /// Single-character role badge shown in the portrait corner (E=explorer,
+        /// R=reviewer, B=builder, A=artist, W=writer, G=generalist).
+        let badge: String
+        let motion: MotionTrait
     }
 
     /// The default macOS voice for Pulsar (and any untagged / unknown line):
@@ -45,14 +61,30 @@ enum DroneRegistry {
     ///   • nebula   (F, artist)               → Moira    (en-IE) — warm, lyrical
     ///   • echo     (F, writer/communicator)  → Tessa    (en-ZA) — clear, articulate
     ///   • atlas    (M, sturdy generalist)    → Rishi    (en-IN) — deep, steady
+    /// Colours: voyager/nova/nebula unchanged. echo/sentinel/atlas were
+    /// re-separated (the old cyan/teal/slate blurred together) per the colour-
+    /// distinctness review — echo → deeper teal, sentinel → bluer azure, atlas →
+    /// a blue-leaning slate, so the three read as clearly different hues.
+    /// Motion: each character moves to its persona — explorer restless+fast,
+    /// reviewer near-still, builder bouncy, artist smooth/flowing, writer steady,
+    /// generalist neutral.
     static let drones: [Drone] = [
-        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Aman"),     // amber
-        Drone(category: "sentinel", role: "reviewer",   color: Color(red: 0.35, green: 0.78, blue: 0.88), voice: "Karen"),    // cyan
-        Drone(category: "nova",     role: "builder",    color: Color(red: 0.36, green: 0.82, blue: 0.42), voice: "Samantha"), // green
-        Drone(category: "nebula",   role: "artist",     color: Color(red: 0.91, green: 0.36, blue: 0.82), voice: "Moira"),    // magenta
-        Drone(category: "echo",     role: "writer",     color: Color(red: 0.25, green: 0.82, blue: 0.78), voice: "Tessa"),    // teal
-        Drone(category: "atlas",    role: "generalist", color: Color(red: 0.53, green: 0.58, blue: 0.66), voice: "Rishi"),    // slate
+        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Aman",     badge: "E",
+              motion: MotionTrait(bobAmplitude: 3.4, bobFrequency: 1.35, activeScale: 2.5)),  // amber — restless, wide, fast
+        Drone(category: "sentinel", role: "reviewer",   color: Color(red: 0.42, green: 0.72, blue: 0.92), voice: "Karen",    badge: "R",
+              motion: MotionTrait(bobAmplitude: 0.8, bobFrequency: 0.6,  activeScale: 2.3)),  // azure — still, minimal
+        Drone(category: "nova",     role: "builder",    color: Color(red: 0.36, green: 0.82, blue: 0.42), voice: "Samantha", badge: "B",
+              motion: MotionTrait(bobAmplitude: 2.6, bobFrequency: 1.6,  activeScale: 2.45)), // green — busy, bouncy
+        Drone(category: "nebula",   role: "artist",     color: Color(red: 0.91, green: 0.36, blue: 0.82), voice: "Moira",    badge: "A",
+              motion: MotionTrait(bobAmplitude: 2.4, bobFrequency: 0.85, activeScale: 2.4)),  // magenta — smooth, flowing
+        Drone(category: "echo",     role: "writer",     color: Color(red: 0.18, green: 0.75, blue: 0.72), voice: "Tessa",    badge: "W",
+              motion: MotionTrait(bobAmplitude: 1.6, bobFrequency: 1.0,  activeScale: 2.4)),  // teal — steady
+        Drone(category: "atlas",    role: "generalist", color: Color(red: 0.50, green: 0.55, blue: 0.80), voice: "Rishi",    badge: "G",
+              motion: MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9,  activeScale: 2.4)),  // slate-blue — neutral
     ]
+
+    /// Pulsar's own neutral motion trait, for when Pulsar drops to an orbit slot.
+    static let pulsarMotion = MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9, activeScale: 2.4)
 
     /// The canonical category list (drone names only — Pulsar is not a drone).
     static let categories: [String] = drones.map(\.category)
@@ -85,6 +117,27 @@ enum DroneRegistry {
         guard let category else { return false }
         return byCategory[category.lowercased()] != nil
     }
+
+    /// The full drone record for a category, or nil for Pulsar / unknown.
+    static func drone(for category: String?) -> Drone? {
+        guard let category else { return nil }
+        return byCategory[category.lowercased()]
+    }
+
+    /// The human-readable role for a category ("explorer", …); "" for Pulsar.
+    static func role(for category: String?) -> String {
+        drone(for: category)?.role ?? ""
+    }
+
+    /// The single-character role badge, or nil for Pulsar / unknown.
+    static func badge(for category: String?) -> String? {
+        drone(for: category)?.badge
+    }
+
+    /// The signature motion trait — the drone's own, else Pulsar's neutral one.
+    static func motion(for category: String?) -> MotionTrait {
+        drone(for: category)?.motion ?? pulsarMotion
+    }
 }
 
 /// Free-function conveniences matching the spec's call sites.
@@ -99,4 +152,19 @@ func isDrone(_ category: String?) -> Bool {
 /// The macOS `say -v` voice for a category (drone voice, else Pulsar's Daniel).
 func droneVoice(for category: String?) -> String {
     DroneRegistry.voice(for: category)
+}
+
+/// The role label for a category ("explorer" …); "" for Pulsar / unknown.
+func droneRole(for category: String?) -> String {
+    DroneRegistry.role(for: category)
+}
+
+/// The role badge letter for a category, or nil for Pulsar / unknown.
+func droneBadge(for category: String?) -> String? {
+    DroneRegistry.badge(for: category)
+}
+
+/// The signature motion trait for a category (its own, else Pulsar's neutral).
+func droneMotion(for category: String?) -> DroneRegistry.MotionTrait {
+    DroneRegistry.motion(for: category)
 }

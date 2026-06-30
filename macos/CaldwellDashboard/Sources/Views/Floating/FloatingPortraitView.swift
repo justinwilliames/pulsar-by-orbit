@@ -98,22 +98,28 @@ struct FloatingPortraitView: View {
     private func auraGlow(pulse: Double, amp: Double) -> some View {
         let intensity = 0.22 + amp * 0.34 + pulse * 0.20
         // The halo swells very slightly on each beat so it reads as a pulse of
-        // light rather than a static gradient.
-        let swell = portraitSize + 14 + CGFloat(amp * 22 + pulse * 10)
+        // light rather than a static gradient. Kept tight: the head centre sits
+        // at y −16 in a 240×260 panel, so the nearest (top) margin is only
+        // ~114pt from centre. The swell + frame + blur tail below must all fade
+        // to alpha 0 well inside that, leaving a clear transparent margin —
+        // otherwise the window bounds hard-clip the glow into a rectangle.
+        let swell = portraitSize + 6 + CGFloat(amp * 7 + pulse * 5)
 
         ZStack {
-            // Wide, very soft outer falloff.
-            RoundedRectangle(cornerRadius: (swell * cornerRatio) + 26, style: .continuous)
+            // Wide, soft outer falloff. Frame is small and the blur is gentle so
+            // the diffuse tail lands ~88pt half-extent at peak — a generous
+            // transparent margin to every window edge (nearest is ~114pt top).
+            RoundedRectangle(cornerRadius: (swell * cornerRatio) + 14, style: .continuous)
                 .fill(core)
-                .frame(width: swell + 52, height: swell + 52)
-                .blur(radius: 34)
+                .frame(width: swell + 18, height: swell + 18)
+                .blur(radius: 16)
                 .opacity(intensity * 0.85)
 
             // Tighter, brighter inner glow hugging the edge.
-            RoundedRectangle(cornerRadius: (swell * cornerRatio) + 12, style: .continuous)
+            RoundedRectangle(cornerRadius: (swell * cornerRatio) + 7, style: .continuous)
                 .fill(light)
-                .frame(width: swell + 22, height: swell + 22)
-                .blur(radius: 18)
+                .frame(width: swell + 10, height: swell + 10)
+                .blur(radius: 11)
                 .opacity(intensity)
         }
         .blendMode(.plusLighter)
@@ -138,9 +144,16 @@ struct FloatingPortraitView: View {
 
             func ripple(phase: Double, tint: Color, gain: Double) {
                 // 0 → 1 across the beat; grows outward and fades as it goes.
-                let half = baseHalf + 2 + phase * (24 + amp * 34)
-                // Ease-out fade so the ripple is brightest just after release.
-                let fade = pow(1.0 - phase, 1.6)
+                // Max expansion is kept short (peak half ≈ 60 + 2 + 30 ≈ 92pt;
+                // + band + 7pt blur ≈ 102pt) so the ripple has fully dissolved
+                // before it can reach the 240×260 window edge. The fade also
+                // multiplies in an extra ease so the band is essentially gone
+                // by the time it nears its outermost radius — no abrupt edge.
+                let half = baseHalf + 2 + phase * (16 + amp * 14)
+                // Ease-out fade so the ripple is brightest just after release,
+                // then a stronger tail-off so the outermost ring reads as a
+                // smooth dissolve rather than a travelling hard band.
+                let fade = pow(1.0 - phase, 2.0)
                 let opacity = fade * (0.30 + amp * 0.50) * gain
                 guard opacity > 0.015 else { return }
                 // Thick, soft band — width tapers as the ripple expands so it

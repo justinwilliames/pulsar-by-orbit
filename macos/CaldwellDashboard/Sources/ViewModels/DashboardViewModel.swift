@@ -21,6 +21,21 @@ final class DashboardViewModel {
     /// "drones_in_flight" SSE event; rendered as orbiting drones around Pulsar.
     var inFlightDrones: [String: String] = [:]
 
+    /// True while any sub-agent is running. Drones must hover around Pulsar WHILE
+    /// they run, not only while something is speaking — so this gates the panel
+    /// independently of voice activity.
+    var hasInFlightDrones: Bool { !inFlightDrones.isEmpty }
+
+    /// The panel must be visible whenever something is speaking/queued OR a
+    /// sub-agent is in-flight (silent drones still show). The trailing linger in
+    /// AppDelegate keeps it from flickering when the last input clears.
+    var panelShouldBeVisible: Bool {
+        playback.isPlaying || playback.queuedCount > 0 || hasInFlightDrones
+    }
+
+    /// Last value pushed to `onPlaybackChanged`, so we only fire on a real edge.
+    private var lastPanelVisible = false
+
     /// ONE coherent snapshot of who is speaking right now, collapsing the four
     /// previously-independent signals (currentAgentCategory, inFlightDrones,
     /// amplitude, currentVoice) into a single source of truth. The floating
@@ -133,9 +148,22 @@ final class DashboardViewModel {
 
     /// A change to the set of in-flight sub-agent drones, pushed whenever a
     /// sub-agent starts or stops. Decodes {"drones": {agentId: category}}.
+    /// Drives the panel directly: a silently-running sub-agent must show its
+    /// drone even with nothing speaking (and the last despawn lets it hide).
     private func handleDronesInFlightEvent(_ data: Data) {
         guard let payload = try? decoder.decode(DronesInFlightEvent.self, from: data) else { return }
         inFlightDrones = payload.drones
+        recomputePanelVisibility()
+    }
+
+    /// Fire `onPlaybackChanged` only when the should-be-visible edge flips, so
+    /// the AppDelegate shows the panel (drones present OR speaking) and starts
+    /// the hide linger when BOTH clear. Idempotent across redundant SSE events.
+    private func recomputePanelVisibility() {
+        let visible = panelShouldBeVisible
+        guard visible != lastPanelVisible else { return }
+        lastPanelVisible = visible
+        onPlaybackChanged?(visible)
     }
 
     /// A settings change pushed from the daemon (e.g. mute toggled via the API,
@@ -150,13 +178,11 @@ final class DashboardViewModel {
     private func handleStateEvent(_ data: Data) {
         guard let state = try? decoder.decode(QueueStatusResponse.self, from: data) else { return }
         applyQueueStatus(state)
-        let isActive = state.playing || state.queued > 0
-        onPlaybackChanged?(isActive)
+        recomputePanelVisibility()
     }
 
     private func handleVoiceActiveEvent(_ data: Data) {
         guard let event = try? decoder.decode(VoiceActiveEvent.self, from: data) else { return }
-        let wasActive = playback.isPlaying || playback.queuedCount > 0
         let previousQueuedCount = playback.queuedCount
         let previousCurrentId = playback.currentId
         playback.updateFromVoiceActive(event)
@@ -182,11 +208,10 @@ final class DashboardViewModel {
             requestQueueRefresh()
         }
 
-        let isActive = playback.isPlaying || playback.queuedCount > 0
-        if isActive != wasActive {
-            onPlaybackChanged?(isActive)
-        }
-        updateQueuePolling(isActive: isActive)
+        recomputePanelVisibility()
+        // Queue polling tracks audio activity specifically (not drone presence).
+        let audioActive = playback.isPlaying || playback.queuedCount > 0
+        updateQueuePolling(isActive: audioActive)
     }
 
     private func updateQueuePolling(isActive: Bool) {

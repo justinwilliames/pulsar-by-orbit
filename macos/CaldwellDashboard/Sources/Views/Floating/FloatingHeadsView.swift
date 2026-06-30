@@ -92,12 +92,19 @@ struct FloatingHeadsView: View {
     /// The drone category owning the line, or nil when Pulsar speaks.
     private var activeDroneCategory: String? { speaker?.category }
 
+    /// The head zone renders whenever something is speaking OR a sub-agent is
+    /// in-flight — so silently-running drones still hover around a calm, centred
+    /// Pulsar (no lip-sync, no caption) until they despawn.
+    private var panelHasContent: Bool {
+        speaker != nil || viewModel.hasInFlightDrones
+    }
+
     // MARK: - Head zone (true place-swap via matched arcs)
 
     @ViewBuilder
     private var headZone: some View {
         ZStack {
-            if speaker != nil {
+            if panelHasContent {
                 // Idle queued voices orbit behind everything.
                 queuedThumbnails
 

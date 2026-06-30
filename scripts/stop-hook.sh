@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # stop-hook.sh — Claude Code Stop event handler.
 #
-# Picks a context-appropriate Tier 0 canon line and asks the daemon to play
-# it — cache-only, no ElevenLabs spend. Stays silent on any of these:
+# Picks a context-appropriate fallback canon line and asks the daemon to play
+# it — this is the FLOOR, only for turns the model didn't compose a bespoke
+# line on. Bespoke is the default; this just stops a silent turn-end. Stays
+# silent on any of these:
 #
 #   1. Daemon unreachable
 #   2. Daemon mute is on (Sir AFK)
-#   3. Skill already fired in the last 60s (don't double up)
+#   3. Skill already fired in the last 60s (don't double up / talk over a line)
 #   4. Context detected but no cached canon matches it (daemon returns 204)
 #
 # Context comes from grepping the last assistant message in the Claude Code
@@ -40,7 +42,7 @@ MUTED=$(echo "$SETTINGS" | python3 -c 'import sys,json
 try: print("true" if json.load(sys.stdin).get("muted") else "false")
 except: print("false")' 2>/dev/null || echo "false")
 
-# Muted? Full silent mode — no ElevenLabs calls, no Tier 0 fallback
+# Muted? Full silent mode — no playback, no fallback line.
 [ "$MUTED" = "true" ] && exit 0
 
 # 3. Is anything currently playing or queued? If so, the skill already
@@ -134,8 +136,8 @@ print(last.lower()[-4000:])
 fi
 
 # 6. Fire the daemon's canon picker with the detected context.
-#    Cache-only — if no cached canon matches this context, daemon returns
-#    204 and we stay silent rather than spend ElevenLabs credit on a guess.
+#    Fallback floor only — if no cached canon matches this context, daemon
+#    returns 204 and we stay silent rather than fire an irrelevant guess.
 "$SAY" --canon "$CONTEXT" >/dev/null 2>&1 || true
 
 exit 0

@@ -76,10 +76,11 @@ final class CaldwellConfig: @unchecked Sendable {
             ?? "").trimmingCharacters(in: .whitespaces)
     }
 
-    /// Whether cached "canon" pings are allowed — the free notification-style
-    /// turn-end lines plus the budget-saver downgrade. Off = bespoke-only: only
-    /// the model's composed lines speak (richer, fewer, and they cost credit).
-    /// Default on preserves today's behaviour.
+    /// Whether the cached "canon" fallback is allowed — the Stop hook's
+    /// turn-end floor for turns the model didn't compose a bespoke line on.
+    /// Off = bespoke-only: only the model's freshly composed lines speak (the
+    /// default register). Speech is free (local `say`), so this is a style
+    /// choice, not a cost lever. Default on preserves today's behaviour.
     var canonEnabled: Bool {
         let val = lock.withLock { _config["CALDWELL_CANON_ENABLED"] } ?? "1"
         return !["0", "false", "no", "off", ""].contains(val.lowercased())

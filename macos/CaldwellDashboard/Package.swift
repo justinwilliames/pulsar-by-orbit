@@ -47,6 +47,9 @@ let package = Package(
                 .copy("Resources/pulsar-mouth-2.png"),
                 .copy("Resources/pulsar-mouth-3.png"),
                 .copy("Resources/pulsar-mouth-4.png"),
+                // Blink frame — same robot, eyes closed (eyebrows kept). Briefly
+                // crossfaded over the closed mouth frame during speech pauses.
+                .copy("Resources/pulsar-blink.png"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

@@ -8,6 +8,10 @@ import SwiftUI
 /// crossfaded by opacity, so the mouth appears to move continuously through the
 /// rendered art rather than snapping between discrete frames.
 ///
+/// A blink (`pulsar-blink`, eyes closed, eyebrows kept) is crossfaded over the
+/// closed frame on a varied ~3.5–5.5s timer — but ONLY during speech pauses
+/// (smoothed amplitude < 0.05), so the robot never blinks mid-sentence.
+///
 /// One robot for all voices (`voiceName` is ignored for the image, kept only for
 /// the fallback monogram + API stability). The external signature is unchanged so
 /// NowPlayingView / FloatingPortraitView keep working.
@@ -20,18 +24,39 @@ struct PortraitView: View {
 
     /// The 5 rendered mouth frames, loaded once (closed → full open).
     @State private var frames: [NSImage] = PortraitView.loadFrames()
+    /// The blink frame (eyes closed). Optional — blink simply no-ops if absent.
+    @State private var blinkFrame: NSImage? = NSImage(named: "pulsar-blink")
 
     /// Exponentially-smoothed amplitude in 0…1, used to position across frames.
     @State private var smoothedAmp: CGFloat = 0
     @State private var lastTick: Double = 0
 
+    // MARK: Blink state (driven off the timeline clock)
+    @State private var nextBlinkAt: Double = 0       // seeded on first tick
+    @State private var blinkStart: Double = -1       // -1 = not blinking
+
+    /// A blink lasts ~120ms (down + up). Only fire when amplitude is below this.
+    private let blinkDuration: Double = 0.12
+    private let speechFloor: CGFloat = 0.05
+
     var body: some View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
+            let blink = blinkAmount(now: t)            // 0…1 overlay opacity
 
             ZStack {
                 if frames.count == 5 {
                     frameStack(at: smoothedAmp)
+
+                    // Blink overlay — the eyes-closed frame faded in briefly over
+                    // the (closed) mouth frame during a pause.
+                    if let blinkFrame, blink > 0 {
+                        Image(nsImage: blinkFrame)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fill)
+                            .opacity(blink)
+                    }
                 } else {
                     fallback
                 }
@@ -93,13 +118,42 @@ struct PortraitView: View {
     // MARK: - Drive
 
     /// Eases the smoothed amplitude toward the live value each timeline tick, so
-    /// the crossfade glides instead of stepping with raw amplitude updates.
+    /// the crossfade glides instead of stepping with raw amplitude updates. Also
+    /// schedules blinks — but only during pauses, never mid-speech.
     private func advance(now t: Double) {
         let dt = lastTick == 0 ? 0 : min(0.1, t - lastTick)
+        // Seed the first blink relative to the absolute clock (t is huge, so a
+        // fixed seed would fire instantly).
+        if lastTick == 0 { nextBlinkAt = t + Double.random(in: 3.5...5.5) }
         lastTick = t
+
         let target = CGFloat(max(0, min(1, amplitude)))
         let k = 1 - pow(0.001, dt)        // fast but smooth follow
         smoothedAmp += (target - smoothedAmp) * k
+
+        // Start a blink only in a pause (low amplitude) once the timer elapses.
+        if blinkStart < 0 && t >= nextBlinkAt && smoothedAmp < speechFloor {
+            blinkStart = t
+        }
+        // End the blink and schedule the next, varied so it isn't metronomic.
+        if blinkStart >= 0 && t - blinkStart > blinkDuration {
+            blinkStart = -1
+            nextBlinkAt = t + Double.random(in: 3.5...5.5)
+        }
+        // If the timer elapsed while speaking, keep pushing it out so the blink
+        // lands in the next genuine pause rather than the instant speech stops.
+        if blinkStart < 0 && t >= nextBlinkAt && smoothedAmp >= speechFloor {
+            nextBlinkAt = t + 0.4
+        }
+    }
+
+    /// Blink overlay opacity, 0…1. A quick symmetric in/out triangle over
+    /// `blinkDuration` so the eyes-closed frame flashes briefly and fades.
+    private func blinkAmount(now t: Double) -> Double {
+        guard blinkStart >= 0 else { return 0 }
+        let p = (t - blinkStart) / blinkDuration       // 0…1 over the blink
+        if p <= 0 || p >= 1 { return 0 }
+        return 1 - abs(p - 0.5) * 2                     // 0 → 1 → 0
     }
 
     // MARK: - Loading

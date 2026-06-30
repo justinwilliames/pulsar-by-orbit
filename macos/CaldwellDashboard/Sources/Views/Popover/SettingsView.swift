@@ -198,6 +198,21 @@ struct SettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
 
+            Toggle(isOn: subtitlesEnabledBinding) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show subtitles")
+                        .font(.caption.weight(.medium))
+                    Text("Read along — show the line Pulsar is speaking in a caption below the head.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            // Subtitles ride on the head — no head, nothing to caption.
+            .disabled(viewModel.settings?.floatingHeadEnabled == false)
+
             Picker("Voice register", selection: expletivesBinding) {
                 Text("Polite").tag(false)
                 Text("Potty Mouth").tag(true)
@@ -278,6 +293,13 @@ struct SettingsView: View {
         Binding(
             get: { viewModel.settings?.floatingHeadEnabled ?? true },
             set: { newValue in Task { await viewModel.setFloatingHeadEnabled(newValue) } }
+        )
+    }
+
+    private var subtitlesEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.subtitlesEnabled ?? true },
+            set: { newValue in Task { await viewModel.setSubtitlesEnabled(newValue) } }
         )
     }
 

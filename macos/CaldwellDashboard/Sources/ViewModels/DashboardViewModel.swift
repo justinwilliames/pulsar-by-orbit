@@ -283,9 +283,9 @@ final class DashboardViewModel {
         }
     }
 
-    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
+    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, subtitlesEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, floatingHeadEnabled: floatingHeadEnabled, nativeVoice: nativeVoice)
+            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, floatingHeadEnabled: floatingHeadEnabled, subtitlesEnabled: subtitlesEnabled, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }
@@ -319,6 +319,16 @@ final class DashboardViewModel {
 
     var isFloatingHeadEnabled: Bool {
         settings?.floatingHeadEnabled ?? true
+    }
+
+    /// Read-along caption bubble: on = show the spoken line below the head;
+    /// off = head only. Gated by the floating head being visible.
+    func setSubtitlesEnabled(_ on: Bool) async {
+        _ = await saveSettings(subtitlesEnabled: on)
+    }
+
+    var isSubtitlesEnabled: Bool {
+        settings?.subtitlesEnabled ?? true
     }
 
     /// Free-mode local voice choice. Empty resets to auto (Daniel Enhanced else

@@ -94,6 +94,14 @@ final class CaldwellConfig: @unchecked Sendable {
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
+    /// Whether the read-along caption bubble is shown below the floating head
+    /// while it speaks. Default ON. Gated by `floatingHeadEnabled` at the view
+    /// layer — head off means no bubble regardless of this flag.
+    var subtitlesEnabled: Bool {
+        let val = lock.withLock { _config["CALDWELL_SUBTITLES"] } ?? "1"
+        return !["0", "false", "no", "off", ""].contains(val.lowercased())
+    }
+
     // MARK: - Mutate + reload
 
     /// Re-read config.json from disk. Call after any write.

@@ -146,6 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floatingPanel?.orderOut(nil)
         viewModel.playback.currentVoice = nil
         viewModel.playback.currentText = nil
+        // Collapse back to the head-only footprint so the next appearance starts
+        // at base height (the caption resize re-grows it if needed) and no stale
+        // tall transparent area lingers off-screen.
+        floatingPanel?.resetToBaseSize()
         NSLog("[Pulsar] Panel hidden (\(reason))")
     }
 }

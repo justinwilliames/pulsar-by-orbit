@@ -556,6 +556,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 update.expletives_enabled != nil ||
                 update.canon_enabled != nil ||
                 update.floating_head_enabled != nil ||
+                update.subtitles_enabled != nil ||
                 update.native_voice != nil
         else {
             return try Self.json(ErrorResponse("No fields to update"), status: .badRequest)
@@ -575,6 +576,9 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             }
             if let floatingHead = update.floating_head_enabled {
                 try config.set("CALDWELL_FLOATING_HEAD", value: floatingHead ? "1" : "0")
+            }
+            if let subtitles = update.subtitles_enabled {
+                try config.set("CALDWELL_SUBTITLES", value: subtitles ? "1" : "0")
             }
             if let nv = update.native_voice {
                 // Empty resets to auto; otherwise only accept an installed voice.
@@ -928,6 +932,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             enhanced_installed: NativeVoiceClient.enhancedInstalled(),
             canon_enabled: config.canonEnabled,
             floating_head_enabled: config.floatingHeadEnabled,
+            subtitles_enabled: config.subtitlesEnabled,
             available_voices: NativeVoiceClient.voiceOptions()
         )
     }
@@ -1173,6 +1178,7 @@ private struct SettingsResponse: Encodable, Sendable {
     let enhanced_installed: Bool
     let canon_enabled: Bool
     let floating_head_enabled: Bool
+    let subtitles_enabled: Bool
     let available_voices: [NativeVoiceClient.VoiceOption]
 }
 
@@ -1181,5 +1187,6 @@ private struct SettingsUpdateRequest: Decodable, Sendable {
     let expletives_enabled: Bool?
     let canon_enabled: Bool?
     let floating_head_enabled: Bool?
+    let subtitles_enabled: Bool?
     let native_voice: String?
 }

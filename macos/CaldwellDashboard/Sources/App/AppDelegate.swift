@@ -145,13 +145,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hideWorkItem = nil
         maxVisibleWorkItem?.cancel()
         maxVisibleWorkItem = nil
-        floatingPanel?.orderOut(nil)
+        // Fade Pulsar out instead of snapping off: clearing the voice/text fires
+        // the head + caption removal transitions (FloatingHeadsView animates on
+        // currentVoice), so he dissolves. Order the now-transparent panel out only
+        // AFTER that fade — unless a new line revived him in the meantime.
         viewModel.playback.currentVoice = nil
         viewModel.playback.currentText = nil
-        // Collapse back to the head-only footprint so the next appearance starts
-        // at base height (the caption resize re-grows it if needed) and no stale
-        // tall transparent area lingers off-screen.
-        floatingPanel?.resetToBaseSize()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+            guard let self, self.viewModel.playback.currentVoice == nil else { return }
+            self.floatingPanel?.orderOut(nil)
+            // Collapse to the head-only footprint so the next appearance starts at
+            // base height and no stale tall transparent area lingers off-screen.
+            self.floatingPanel?.resetToBaseSize()
+        }
         NSLog("[Pulsar] Panel hidden (\(reason))")
     }
 }

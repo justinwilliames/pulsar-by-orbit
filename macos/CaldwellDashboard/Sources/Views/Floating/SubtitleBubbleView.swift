@@ -135,17 +135,16 @@ struct SubtitleBubbleView: View {
 
     @ViewBuilder
     private func tail(pulse: Double) -> some View {
-        CaptionTail(pointingUp: tailEdge == .top)
+        // EXACT same fill stack as `bubbleBackground` so the tail is the same
+        // colour as the box and blends into it — no glow rim (that made it stand
+        // out as a separate triangle).
+        let up = tailEdge == .top
+        CaptionTail(pointingUp: up)
             .fill(.ultraThinMaterial)
-            .overlay { CaptionTail(pointingUp: tailEdge == .top).fill(core.opacity(0.28)) }
-            .overlay {
-                CaptionTail(pointingUp: tailEdge == .top)
-                    .stroke(light.opacity(0.30 + pulse * 0.30), lineWidth: 1)
-                    .blur(radius: 1 + pulse)
-                    .blendMode(.plusLighter)
-            }
+            .overlay { CaptionTail(pointingUp: up).fill(core.opacity(0.28)) }
+            .overlay { CaptionTail(pointingUp: up).fill(Color.black.opacity(0.35)) }
             .frame(width: 16, height: 8)
-            .offset(y: tailEdge == .top ? -7 : 7)
+            .offset(y: up ? -7 : 7)
     }
 }
 

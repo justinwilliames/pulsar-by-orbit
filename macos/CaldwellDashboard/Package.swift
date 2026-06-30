@@ -38,6 +38,10 @@ let package = Package(
                 .copy("Resources/OrbitLogo.png"),
                 .copy("Resources/OrbitLogo@2x.png"),
                 .copy("Resources/OrbitLogo@3x.png"),
+                // Pulsar robot base — one front-facing robot with a blank screen.
+                // The procedural face (eyes/brows/mouth) is drawn live in SwiftUI
+                // on top of this; placed in Contents/Resources/ by the build script.
+                .copy("Resources/pulsar-base.png"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

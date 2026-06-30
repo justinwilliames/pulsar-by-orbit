@@ -62,8 +62,8 @@ final class FloatingPanelController: NSPanel {
             onCaptionHeightChange: { [weak self] height in
                 self?.updateCaptionHeight(height)
             },
-            onFullCaptionHeight: { [weak self] fullHeight in
-                self?.lockPlacement(forFullCaptionHeight: fullHeight)
+            onCaptionText: { [weak self] text in
+                self?.lockPlacement(forFullCaptionHeight: Self.captionContentHeight(for: text))
             }
         )
         contentView = NSHostingView(rootView: rootView)
@@ -99,6 +99,20 @@ final class FloatingPanelController: NSPanel {
     }
 
     // MARK: - Placement lock (decided from the FULL text upfront)
+
+    /// Deterministic full caption height for `text` at the bubble's content width,
+    /// measured with AppKit — no SwiftUI feedback loop (which deadlocked and clipped
+    /// long lines at ~3 rows). Matches the bubble: 12pt medium system font, text
+    /// width = maxWidth − 28 (h-padding), + 9pt vertical padding + 6pt edge padding.
+    static func captionContentHeight(for text: String) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let w = SubtitleBubbleView.maxWidth - 28
+        let r = (text as NSString).boundingRect(
+            with: NSSize(width: w, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font])
+        return ceil(r.height) + 18 + 12 + 8   // 9*2 vpad + 6*2 edge pad + small buffer
+    }
 
     /// Lock the above/below placement from the full line's measured height the
     /// first time it's reported for a line. After this, the box grows only in the
@@ -140,7 +154,12 @@ final class FloatingPanelController: NSPanel {
         let vf = screen.visibleFrame
 
         let headH = Self.headZoneHeight
-        let capH = captionHeight
+        // Size the panel from the FULL text's measured height (measured unconstrained
+        // upfront, reliable) rather than the live revealed height — the live height
+        // fed back THROUGH the panel and deadlocked at ~3 lines, clipping longer
+        // captions (the "cut off at the end" bug). The panel now always fits the whole
+        // line; the bubble still grows visibly within it as the typewriter fills in.
+        let capH = lockedFullHeight ?? captionHeight
 
         // Placement direction is LOCKED from the full text upfront so the box
         // never flips above/below while it grows. Before the lock lands (first

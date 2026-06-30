@@ -408,7 +408,10 @@ actor AudioQueueActor {
             "id": entry.id,
             "voice": entry.voiceLabel,
             "type": entry.isReplay ? "replay" : "speak",
-            "text": String(entry.text.prefix(100)),
+            // FULL line for the read-along caption. `entry.text` is only a 100-char
+            // preview (for the menu bar / history); the caption needs the whole line,
+            // otherwise it's silently cut off at ~3 rows regardless of any UI fix.
+            "text": entry.fullText.isEmpty ? entry.text : entry.fullText,
             "duration": effectiveDuration as Any,
             "envelope": envelope,
             "chunk_ms": chunkMs,

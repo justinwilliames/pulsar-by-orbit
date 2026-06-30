@@ -16,10 +16,16 @@ import SwiftUI
 /// and never flips mid-reveal. Long lines grow the box vertically with NO
 /// truncation; `maxHeight` caps it to the space the panel can give on screen.
 struct SubtitleBubbleView: View {
-    /// The complete line (reserves the box size and ensures no truncation).
+    /// The complete line.
     let fullText: String
-    /// How many characters of `fullText` are currently revealed (typewriter).
-    let revealedCount: Int
+    /// When this caption appeared. The typewriter reveals from here on a LOCAL
+    /// wall-clock, independent of the unreliable playback `elapsed`/`duration` —
+    /// so it always completes, then holds.
+    let startedAt: Date
+    /// When true (speech ended / linger), show the FULL text immediately.
+    let holdFull: Bool
+    /// Reveal pace ≈ the `say -r` speaking rate (words/min → chars/sec).
+    static let charsPerSecond: Double = Double(NativeVoiceClient.defaultRate) / 60.0 * 5.5
     /// Which edge the tail points from — `.top` when below the head, `.bottom`
     /// when above.
     var tailEdge: Edge = .top
@@ -31,9 +37,18 @@ struct SubtitleBubbleView: View {
     private var core: Color { .orbit }        // #6366F1 — matches the head
     private var light: Color { .orbitLight }  // #818CF8 — the head's rim glow tint
 
-    /// The revealed prefix of the full text.
-    private var revealed: String {
-        let n = max(0, min(revealedCount, fullText.count))
+    /// The revealed prefix at time `now`: time-based from `startedAt` (always
+    /// completes), or the full text once `holdFull`. Snapped UP to a word boundary
+    /// so partial words don't flash.
+    private func revealed(at now: Date) -> String {
+        let count = fullText.count
+        guard count > 0 else { return "" }
+        if holdFull { return fullText }
+        let elapsed = max(0, now.timeIntervalSince(startedAt))
+        let target = Int((elapsed * Self.charsPerSecond).rounded(.up))
+        let chars = Array(fullText)
+        var n = min(max(target, 0), count)
+        while n < count && !chars[n].isWhitespace { n += 1 }   // finish the word
         return String(fullText.prefix(n))
     }
 
@@ -50,7 +65,7 @@ struct SubtitleBubbleView: View {
             let bobY = sin(t * 1.1 + 0.6) * 2.5
             let bobX = sin(t * 0.7 + 0.3) * 1.2
 
-            content
+            content(revealed(at: timeline.date))
                 .background(bubbleBackground)
                 .overlay { rimGlow(pulse: pulse) }
                 .overlay(alignment: tailEdge == .top ? .top : .bottom) {
@@ -70,7 +85,7 @@ struct SubtitleBubbleView: View {
     /// Sizes to the REVEALED text so the box grows as the typewriter fills it in.
     /// Placement direction is locked upstream from the full text, so growing here
     /// never causes an above/below flip.
-    private var content: some View {
+    private func content(_ revealed: String) -> some View {
         captionText(revealed)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)

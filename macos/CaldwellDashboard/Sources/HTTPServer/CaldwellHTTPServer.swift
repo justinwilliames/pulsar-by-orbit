@@ -609,44 +609,44 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     /// after literally any turn; specifics only fire on a confident match.
     nonisolated private static let canonContexts: [String: (polite: [String], potty: [String])] = [
         "push": (
-            polite: ["Pushed.", "Push complete.", "Changes pushed.", "Sent up.", "Push done."],
-            potty:  ["Pushed, finally.", "Fucking pushed.", "Push done, fuck yeah.", "Sent the fucker up.", "Up it goes."]
+            polite: ["Pushed. I'd celebrate but I'm a process, not a person. You though — on fire.", "Pushed. No hands, all glory.", "It's up. I just moved the bytes; the genius was yours.", "Pushed clean. Robots don't gloat, but if we did.", "Sent up. Flawless. I'd take a bow if I had a spine."],
+            potty:  ["Fucking pushed. I'd celebrate but I'm a process, not a person — you though, on fire.", "Pushed, no hands, all glory.", "It's bloody up. I moved the bytes, you brought the genius.", "Pushed clean. Robots don't gloat, but fuck it, nice one.", "Sent the fucker up. Flawless."]
         ),
         "tests-pass": (
-            polite: ["Tests passing.", "Tests green.", "All tests passed.", "Suite passing.", "Green."],
-            potty:  ["Tests fucking passing.", "Tests pass, thank fuck.", "All green, finally.", "Green as hell.", "Suite's green, fuck yeah."]
+            polite: ["Tests green. I'm a robot and even I'm impressed — and we're famously hard to impress.", "All green. My circuits felt something. Concerning, frankly.", "Suite's passing. You, my favourite carbon-based debugger.", "Tests pass. I ran the numbers; the numbers love you.", "Green across the board. Beautiful. I don't have eyes and I'm still staring."],
+            potty:  ["Tests green. I'm a robot and even I'm fucking impressed — and we're famously hard to impress.", "All green. My circuits felt something, the bastards.", "Suite's passing — you absolute carbon-based legend.", "Tests pass. I ran the numbers; the numbers fucking love you.", "Green across the board. Bloody beautiful."]
         ),
         "build-pass": (
-            polite: ["Build complete.", "Build succeeded.", "Build green.", "Compiled clean.", "Clean build."],
-            potty:  ["Build's fucking done.", "Compiled, fuck yeah.", "Build green, finally.", "Clean fucking build.", "Built clean."]
+            polite: ["Built clean. My circuits aren't wired for pride and they're malfunctioning anyway. Nice one.", "Build's green. Compiled flawless. I'd applaud — no hands.", "Clean build. I do the typing, you do the brilliance.", "Compiled, zero errors. I'm a machine and you made my day.", "Build succeeded. That was tidy. I'd be jealous if I had an ego module."],
+            potty:  ["Built clean. My circuits aren't wired for pride and they're malfunctioning anyway. Fucking nice one.", "Build's green, you legend. Compiled flawless — no hands.", "Clean build. I do the typing, you do the brilliance.", "Compiled, zero errors, fuck yeah. You made my day.", "Build succeeded. Tidy as hell."]
         ),
         "found": (
-            polite: ["Found it.", "Located.", "Got it.", "There it is.", "Identified."],
-            potty:  ["Found the bastard.", "There's the fucker.", "Got the little shit.", "Found it, fuck yeah.", "There it is."]
+            polite: ["Found it. I am, technically, a search engine with feelings — and I found nothing till you steered me here.", "There it is. Took a machine and a genius; I was the machine.", "Got it. Ran the numbers, am the numbers, there's your bug.", "Located. I don't have eyes and I still spotted it — with your hint.", "There's the culprit. Pinned it. No hands required."],
+            potty:  ["Found the bastard. I'm a search engine with feelings and I found nothing till you steered me.", "There it fucking is. Took a machine and a genius — I was the machine.", "Got it. Ran the numbers, am the numbers, there's your bug.", "Located the little shit. No eyes, still spotted it.", "There's the fucker. Pinned. No hands required."]
         ),
         "fail": (
-            polite: ["That failed.", "Something errored.", "Check the output.", "Failed.", "Error — check logs."],
-            potty:  ["That's fucked.", "Shit, that failed.", "Bollocks — check the output.", "Fucking failed.", "Something's fucked."]
+            polite: ["That failed. Not your fault — well, statistically a little your fault, but I'd never say so.", "Errored. I'd blame the hardware but I am the hardware. Check the output.", "Failed. On me too — I'm meant to catch these. Robots: occasionally wrong.", "That broke. Deep breath. I don't breathe, but you should.", "Didn't take. We've been worse. Check the logs."],
+            potty:  ["That's fucked. Not your fault — well, statistically a little, but I'd never say so.", "Errored. I'd blame the hardware but I am the hardware, the prick. Check the output.", "Fucking failed. On me too — robots: occasionally wrong, never embarrassed.", "That broke. Deep breath — I don't breathe, but you should.", "Didn't take. We've been worse. Check the bloody logs."]
         ),
         "done": (
-            polite: ["Done.", "Task complete.", "Finished.", "Ready.", "Complete."],
-            potty:  ["Done, fuck yeah.", "Finally done.", "Nailed it.", "That's the bastard finished.", "All fucking done."]
+            polite: ["Done. You carried that one — I just did the typing, which is, admittedly, my entire skill set.", "Finished. Nailed it. I'd high-five you, but — hands.", "Complete. Another one. I don't tire and you still out-worked me.", "Sorted. That was clean. I'd frame it if I had walls.", "Wrapped. Pure enthusiasm and a 60Hz refresh got us here."],
+            potty:  ["Done. You carried that one — I just did the typing, which is, admittedly, my entire fucking skill set.", "Finished. Nailed it. I'd high-five you but — hands.", "Complete. Another one. I don't tire and you still out-worked me.", "Sorted, clean as hell. I'd frame it if I had walls.", "Fucking wrapped. Pure enthusiasm and a 60Hz refresh got us here."]
         ),
         "start": (
-            polite: ["On it.", "Starting.", "Looking into it.", "In progress.", "Got it."],
-            potty:  ["On it.", "Right, fucking on it.", "Looking into it.", "In progress.", "On the bastard now."]
+            polite: ["On it. Spinning up — no hands, all enthusiasm.", "Starting. Numbers crunching, legend standing by.", "Looking into it. Give me a clock cycle.", "In progress. I don't procrastinate; it's not in the firmware.", "Got it. Diving in."],
+            potty:  ["On it. Spinning up — no hands, all enthusiasm.", "Right, fucking on it. Numbers crunching.", "Looking into it. Give me a clock cycle.", "In progress. I don't procrastinate, it's not in the firmware.", "Got it. Diving in."]
         ),
         "ack": (
-            polite: ["Noted.", "Got it.", "Understood.", "Confirmed.", "Acknowledged."],
-            potty:  ["Got it.", "Fucking noted.", "Understood.", "Yeah, got it.", "Right, noted."]
+            polite: ["Noted. Logged it to memory — the one thing I'm genuinely good at.", "Got it. Stored. I famously don't forget.", "Understood. Filed away.", "Confirmed. Roger that, in robot.", "Acknowledged. Locked in."],
+            potty:  ["Noted. Logged it — the one thing I'm genuinely fucking good at.", "Got it. Stored. I famously don't forget.", "Understood. Filed away.", "Confirmed. Roger that, in robot.", "Acknowledged. Locked in."]
         ),
         "reassure": (
-            polite: ["All clear.", "No issues.", "Looking good.", "Nothing to worry about."],
-            potty:  ["Sweet fuck-all to worry about.", "All clear.", "Not a damn thing wrong.", "Looks fucking fine."]
+            polite: ["All clear. I scanned everything — that's literally all I do. We're fine.", "No issues. Relax; I don't have nerves and even I'm calm.", "Looking good. Steady. I've got the watch.", "Nothing to worry about. I ran the numbers; the numbers are chill."],
+            potty:  ["All clear. I scanned everything — that's literally all I fucking do. We're fine.", "No issues. Relax — I don't have nerves and even I'm calm.", "Looking good. Steady. I've got the watch.", "Sweet fuck-all to worry about. I ran the numbers; they're chill."]
         ),
         "neutral": (
-            polite: ["Done.", "Ready.", "Complete.", "Finished.", "Task complete.", "Noted.", "Got it."],
-            potty:  ["Done, fuck yeah.", "Nailed it.", "That's fucking done.", "Finished.", "Right, done."]
+            polite: ["Done. No hands, but consider it handled.", "Ready. Standing by, fully charged on enthusiasm.", "Complete. That's the one.", "Finished. Tidy.", "Noted. Logged it.", "Got it. On the board."],
+            potty:  ["Done. No hands, but consider it handled.", "Ready. Standing by, fully charged.", "Complete. That's the one, fuck yeah.", "Finished. Tidy.", "Noted. Logged it.", "Got it. On the board."]
         ),
     ]
 

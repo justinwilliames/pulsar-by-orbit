@@ -265,11 +265,19 @@ struct FloatingHeadsView: View {
         let speakingCategory = activeDroneCategory          // nil = Pulsar (or no one)
         let pulsarSpeaking = speaker != nil && speakingCategory == nil
 
+        // "Show active agents" toggle: when OFF, no drone heads render at all —
+        // only Pulsar appears (a drone line then plays voice-only; see also
+        // captionSource, which hides the drone bubble to match).
+        let showAgents = viewModel.isShowActiveAgents
+
         // Centre = the active speaker, if anyone is speaking.
         if let speakingCategory {
-            out.append(Participant(id: speakingCategory, category: speakingCategory,
-                                   color: droneColor(for: speakingCategory),
-                                   isCentre: true, orbitIndex: 0))
+            if showAgents {
+                out.append(Participant(id: speakingCategory, category: speakingCategory,
+                                       color: droneColor(for: speakingCategory),
+                                       isCentre: true, orbitIndex: 0))
+            }
+            // else: a drone is speaking but agents are hidden → no head.
         } else if pulsarSpeaking {
             out.append(Participant(id: "pulsar", category: nil,
                                    color: droneColor(for: nil),
@@ -283,7 +291,7 @@ struct FloatingHeadsView: View {
         // main session has merely delegated and gone quiet, only the working
         // drones show — Pulsar reappears the instant he speaks again.
         var orbitKeys: [(id: String, category: String?)] = []
-        let present = inFlightCategories
+        let present = showAgents ? inFlightCategories : []
         for category in DroneRegistry.categories
         where category != speakingCategory && present.contains(category) {
             orbitKeys.append((id: category, category: category))
@@ -361,7 +369,14 @@ struct FloatingHeadsView: View {
 
     // MARK: - Caption lifecycle driver
 
-    private var captionSource: String? { viewModel.playback.currentText }
+    private var captionSource: String? {
+        // When the swarm is hidden, a drone line shows no head — so it shows no
+        // bubble either (voice-only). Pulsar's own captions are unaffected.
+        if !viewModel.isShowActiveAgents, isDrone(viewModel.playback.currentAgentCategory) {
+            return nil
+        }
+        return viewModel.playback.currentText
+    }
 
     /// A stable identity for the caption's speaker — the drone category, else
     /// "pulsar", else nil when there's no line. Used to detect a genuine speaker

@@ -441,9 +441,9 @@ final class DashboardViewModel {
         }
     }
 
-    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, subtitlesEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
+    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, subtitlesEnabled: Bool? = nil, showActiveAgents: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, floatingHeadEnabled: floatingHeadEnabled, subtitlesEnabled: subtitlesEnabled, nativeVoice: nativeVoice)
+            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, floatingHeadEnabled: floatingHeadEnabled, subtitlesEnabled: subtitlesEnabled, showActiveAgents: showActiveAgents, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }
@@ -487,6 +487,16 @@ final class DashboardViewModel {
 
     var isSubtitlesEnabled: Bool {
         settings?.subtitlesEnabled ?? true
+    }
+
+    /// Active-agent swarm visibility: on = show the orbiting/clustered sub-agent
+    /// drones; off = only Pulsar appears (drone voices still play).
+    func setShowActiveAgents(_ on: Bool) async {
+        _ = await saveSettings(showActiveAgents: on)
+    }
+
+    var isShowActiveAgents: Bool {
+        settings?.showActiveAgents ?? true
     }
 
     /// Free-mode local voice choice. Empty resets to auto (Daniel Enhanced else

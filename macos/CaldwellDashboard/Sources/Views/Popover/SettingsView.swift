@@ -187,6 +187,21 @@ struct SettingsView: View {
             // Subtitles ride on the head — no head, nothing to caption.
             .disabled(viewModel.settings?.floatingHeadEnabled == false)
 
+            Toggle(isOn: showActiveAgentsBinding) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show active agents")
+                        .font(.caption.weight(.medium))
+                    Text("Show the sub-agent drones swarming around Pulsar while they run. Off shows only Pulsar.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            // The swarm rides on the head — no head, nothing to orbit.
+            .disabled(viewModel.settings?.floatingHeadEnabled == false)
+
             Picker("Voice register", selection: expletivesBinding) {
                 Text("Polite").tag(false)
                 Text("Potty Mouth").tag(true)
@@ -222,6 +237,13 @@ struct SettingsView: View {
         Binding(
             get: { viewModel.settings?.subtitlesEnabled ?? true },
             set: { newValue in Task { await viewModel.setSubtitlesEnabled(newValue) } }
+        )
+    }
+
+    private var showActiveAgentsBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.showActiveAgents ?? true },
+            set: { newValue in Task { await viewModel.setShowActiveAgents(newValue) } }
         )
     }
 

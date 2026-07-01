@@ -102,6 +102,14 @@ final class CaldwellConfig: @unchecked Sendable {
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
+    /// Whether the orbiting/clustered sub-agent "drones" (the active-agent swarm)
+    /// are shown. Default ON. When OFF only Pulsar himself appears; the drones'
+    /// voices still play but no drone heads are rendered.
+    var showActiveAgents: Bool {
+        let val = lock.withLock { _config["CALDWELL_SHOW_AGENTS"] } ?? "1"
+        return !["0", "false", "no", "off", ""].contains(val.lowercased())
+    }
+
     // MARK: - Mutate + reload
 
     /// Re-read config.json from disk. Call after any write.

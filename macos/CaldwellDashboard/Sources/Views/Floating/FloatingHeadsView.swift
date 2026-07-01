@@ -32,9 +32,9 @@ struct FloatingHeadsView: View {
     /// clear of the 40pt thumbnails.
     private let clusterStepDegrees: Double = 34
     /// Grid spacing for the IDLE symmetric cluster (no speaker) — 40pt thumbnails
-    /// with a ~12pt gap. Compact enough to read as a squeezed pod, loose enough
-    /// that the heads + glows don't touch.
-    private let clusterSpacing: CGFloat = 52
+    /// ~8pt apart so they sit snug ("all next to each other") as one oval pod
+    /// without the heads themselves overlapping.
+    private let clusterSpacing: CGFloat = 48
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
@@ -277,13 +277,12 @@ struct FloatingHeadsView: View {
         }
         // else: nobody speaking → no centre occupant; all participants orbit.
 
-        // Orbit = every present participant except the centre speaker, in a
-        // stable order: Pulsar first (when present + not centred), then the
-        // in-flight drone types in canonical order (excluding the centred one).
+        // Orbit = the in-flight drone types (excluding the centred speaker), in
+        // canonical order. Pulsar is NOT added to the orbit: he is a participant
+        // ONLY when he himself is speaking (then he holds the centre). When the
+        // main session has merely delegated and gone quiet, only the working
+        // drones show — Pulsar reappears the instant he speaks again.
         var orbitKeys: [(id: String, category: String?)] = []
-        if viewModel.pulsarIsPresent && !pulsarSpeaking {
-            orbitKeys.append((id: "pulsar", category: nil))
-        }
         let present = inFlightCategories
         for category in DroneRegistry.categories
         where category != speakingCategory && present.contains(category) {
@@ -462,12 +461,13 @@ struct FloatingHeadsView: View {
     }
 
     /// Symmetric-cluster slot offsets for the idle swarm, centred on the head
-    /// zone. Balanced rows (both a horizontal AND a vertical mirror) that adapt
-    /// to the live participant count 1…7 (Pulsar + up to 6 drones):
-    ///   1:[1]  2:[2]  3:[3]  4:[2,2]  5:[2,1,2]  6:[3,3]  7:[3,1,3]
-    /// Each row is horizontally centred; the row COUNTS are a palindrome so the
-    /// pod mirrors top-to-bottom too. Slot order follows participant order, so a
-    /// change in the live set re-packs the pod symmetrically.
+    /// zone. Balanced rows (a horizontal AND a vertical mirror) that adapt to the
+    /// live count 1…7. Rows are chosen so the MIDDLE is the WIDEST and the top /
+    /// bottom taper in — an OVAL/hexagonal blob, not an hourglass "H":
+    ///   1:[1]  2:[2]  3:[3]  4:[2,2]  5:[1,3,1]  6:[3,3]  7:[2,3,2]
+    /// Row counts are a palindrome so the pod mirrors top-to-bottom; each row is
+    /// horizontally centred. Slot order follows participant order, so a change in
+    /// the live set re-packs the pod symmetrically.
     private func symmetricClusterOffsets(_ total: Int) -> [CGSize] {
         let rows: [Int]
         switch max(total, 0) {
@@ -476,9 +476,9 @@ struct FloatingHeadsView: View {
         case 2: rows = [2]
         case 3: rows = [3]
         case 4: rows = [2, 2]
-        case 5: rows = [2, 1, 2]
+        case 5: rows = [1, 3, 1]      // plus/diamond — wide middle, not a pinched X
         case 6: rows = [3, 3]
-        default: rows = [3, 1, 3]   // 7 (Pulsar + all 6 drones) is the ceiling
+        default: rows = [2, 3, 2]     // hexagon+centre oval (7 = the ceiling)
         }
         var offsets: [CGSize] = []
         let rowCount = rows.count

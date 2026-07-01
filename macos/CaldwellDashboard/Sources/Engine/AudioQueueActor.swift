@@ -250,7 +250,62 @@ actor AudioQueueActor {
     /// Currently in-flight sub-agents, keyed by agentId. Populated by
     /// /subagent/start, refreshed by every tagged speak line, cleared by
     /// /subagent/stop or the staleness sweep.
-    private var inFlight: [String: InFlightDrone] = [:]
+    private var inFlight: [String: InFlightDrone] = [:] {
+        didSet { persistInFlight() }
+    }
+
+    /// Agent ids whose /subagent/stop arrived WHILE that drone was the active
+    /// speaker (its line still playing/queued). Removal is deferred until the
+    /// speech finishes so the user never sees a drone vanish mid-sentence; the
+    /// worker fires `flushDeferredRemovals` when the queue drains, and the
+    /// staleness sweep is the backstop if a flush is somehow missed.
+    private var pendingRemoval: Set<String> = []
+
+    // MARK: - In-flight persistence
+
+    /// Codable mirror of an InFlightDrone for the on-disk store.
+    private struct PersistedDrone: Codable {
+        var category: String
+        var lastSeen: Double  // timeIntervalSince1970 — the REAL lastSeen, never refreshed on load
+    }
+
+    /// Durable store for the in-flight set, so a daemon relaunch/reload doesn't
+    /// wipe the swarm (and orphan sub-agents from OTHER sessions whose later
+    /// SubagentStop would no-op on a fresh daemon). Repo-cache-relative, matching
+    /// the phrase/history stores — no sandbox container to reason about.
+    private var dronesStoreURL: URL {
+        CaldwellConfig.shared.cacheDir.appendingPathComponent("drones.json")
+    }
+
+    /// Best-effort write of `inFlight` to disk on every mutation. The map is
+    /// tiny and mutations are infrequent, so a synchronous encode+write is cheap;
+    /// any failure is swallowed so a bad write can never crash or block the actor.
+    private func persistInFlight() {
+        let snapshot = inFlight.mapValues {
+            PersistedDrone(category: $0.category, lastSeen: $0.lastSeen.timeIntervalSince1970)
+        }
+        let url = dronesStoreURL
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url)
+    }
+
+    /// Restore the in-flight set from disk. Preserves the REAL `lastSeen` for
+    /// each drone (NOT refreshed to now) so the 1s sweeper immediately evicts any
+    /// drone that has aged past `droneStaleAfter` while the app was closed — the
+    /// self-healing property the restart path depends on. Best-effort: a missing
+    /// or corrupt store leaves `inFlight` empty. Assigns to the backing storage
+    /// directly to avoid a redundant persist of what we just read.
+    func restoreInFlight() {
+        guard let data = try? Data(contentsOf: dronesStoreURL),
+              let snapshot = try? JSONDecoder().decode([String: PersistedDrone].self, from: data)
+        else { return }
+        inFlight = snapshot.mapValues {
+            InFlightDrone(category: $0.category, lastSeen: Date(timeIntervalSince1970: $0.lastSeen))
+        }
+        NSLog("[AudioQueue] ♻️ restored \(inFlight.count) in-flight drone(s) from disk")
+    }
 
     /// An in-flight drone is evicted if nothing has refreshed it within this
     /// window. This is ONLY a backstop for a lost SubagentStop hook — the normal
@@ -272,9 +327,64 @@ actor AudioQueueActor {
         inFlight[id] = InFlightDrone(category: category, lastSeen: Date())
     }
 
-    /// Remove a finished sub-agent from the in-flight set.
-    func removeInFlightDrone(id: String) {
+    /// Remove a finished sub-agent from the in-flight set — UNLESS that drone is
+    /// the current active speaker (its `--agent` line is still playing or queued),
+    /// in which case removal is DEFERRED until the speech finishes so the user
+    /// never sees a drone disappear mid-sentence. Returns true if the drone was
+    /// removed now (caller re-broadcasts); false if the removal was deferred
+    /// (broadcast happens later, when `flushDeferredRemovals` fires).
+    ///
+    /// Targeted, not a blanket linger: only a drone whose category matches a
+    /// playing/queued line is held back. A deferred removal can't leak — it fires
+    /// when the queue drains (worker → `flushDeferredRemovals`), and the staleness
+    /// sweep is a hard backstop (a pending id ages out on its real `lastSeen`).
+    @discardableResult
+    func removeInFlightDrone(id: String) -> Bool {
+        guard inFlight[id] != nil else {
+            pendingRemoval.remove(id)
+            return false
+        }
+        if isDroneSpeaking(id: id) {
+            pendingRemoval.insert(id)
+            NSLog("[AudioQueue] ⏸ deferred removal of drone \(id) — its line is still speaking")
+            return false
+        }
         inFlight.removeValue(forKey: id)
+        pendingRemoval.remove(id)
+        return true
+    }
+
+    /// True if the drone `id`'s category is the currently-playing line's category
+    /// OR matches any still-queued line — i.e. its speech is live or imminent, so
+    /// removing it now would cut the drone off mid-sentence.
+    private func isDroneSpeaking(id: String) -> Bool {
+        guard let category = inFlight[id]?.category else { return false }
+        if currentEntry?.agentCategory == category { return true }
+        return queue.contains { $0.agentCategory == category }
+    }
+
+    /// Fire any deferred drone removals whose speech has now ended. Called by the
+    /// worker when the queue drains. Returns the post-flush snapshot ONLY when
+    /// something was actually removed (so the caller can re-broadcast); nil when
+    /// nothing was pending or nothing became flushable.
+    func flushDeferredRemovals() -> [String: String]? {
+        guard !pendingRemoval.isEmpty else { return nil }
+        var removedAny = false
+        for id in pendingRemoval {  // Set is a value type — iterating a stable copy while mutating is safe
+            // Only flush ids that are no longer speaking — a fresh line for the
+            // same category may have arrived after the stop, so re-check.
+            if inFlight[id] == nil {
+                pendingRemoval.remove(id)
+                continue
+            }
+            if !isDroneSpeaking(id: id) {
+                inFlight.removeValue(forKey: id)
+                pendingRemoval.remove(id)
+                removedAny = true
+                NSLog("[AudioQueue] ▶︎ flushed deferred removal of drone \(id) — speech ended")
+            }
+        }
+        return removedAny ? inFlight.mapValues(\.category) : nil
     }
 
     /// Refresh an in-flight drone's `lastSeen` by agentId — so an actively
@@ -344,6 +454,7 @@ actor AudioQueueActor {
         guard !stale.isEmpty else { return nil }
         for id in stale.keys {
             inFlight.removeValue(forKey: id)
+            pendingRemoval.remove(id)  // backstop: a pending id that ages out is cleared here too
             NSLog("[AudioQueue] 🫥 swept stale drone \(id) (no Stop within \(Int(Self.droneStaleAfter))s)")
         }
         return inFlight.mapValues(\.category)
@@ -601,6 +712,21 @@ actor AudioQueueActor {
 
             await playEntry(entry)
             currentEntry = nil
+
+            // After EACH line finishes, fire any deferred drone removals whose
+            // speech has now ended. Tying this to per-line completion (not just a
+            // fully-empty queue) matters in a live session: Pulsar speaks every
+            // turn, so the queue may never truly empty — a deferred drone whose
+            // own category has no further queued line must still be released here,
+            // or continuous other traffic would starve it until the 600s sweep.
+            // `flushDeferredRemovals` re-checks isDroneSpeaking per pending id, so
+            // a drone with a still-queued same-category line correctly stays.
+            if let trimmed = flushDeferredRemovals() {
+                let json = (try? JSONSerialization.data(withJSONObject: ["drones": trimmed]))
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? "{\"drones\":{}}"
+                await broadcaster.broadcast(event: "drones_in_flight", json: json)
+            }
+
             NSLog("[AudioQueue] ⏹ done \(entry.id); \(queue.count) waiting")
         }
         currentEntry = nil

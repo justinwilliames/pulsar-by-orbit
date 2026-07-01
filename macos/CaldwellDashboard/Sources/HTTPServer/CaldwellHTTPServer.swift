@@ -34,6 +34,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // History lives in memory and starts empty, so any retained replay
         // audio on disk is orphaned from a prior run — clear it.
         await audioQueue.purgeHistoryAudioStore()
+        // Restore the in-flight drone set persisted by a prior run BEFORE the
+        // server accepts requests, so a daemon relaunch/reload doesn't wipe the
+        // swarm (and orphan sub-agents from other sessions). Broadcast the
+        // restored set so any already-connected overlay re-renders it; the 1s
+        // sweeper then immediately evicts any drone that aged past
+        // droneStaleAfter while the app was closed (restore keeps the real
+        // lastSeen, so a >10min gap self-heals on the first sweep tick).
+        await audioQueue.restoreInFlight()
+        let restored = await audioQueue.inFlightDronesSnapshot()
+        if !restored.isEmpty {
+            await Self.broadcastDrones(restored, sseBroadcaster: sseBroadcaster)
+        }
         startDroneSweeper()
     }
 
@@ -258,9 +270,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse("Invalid JSON — need agent_id"), status: .badRequest)
         }
 
-        await audioQueue.removeInFlightDrone(id: agentId)
+        // Removal is DEFERRED if this drone's line is still speaking (returns
+        // false) — the worker broadcasts the trimmed set when the speech ends, so
+        // the drone doesn't vanish mid-sentence. Either way the snapshot below is
+        // the truthful current set (a deferred drone is still present), so it's
+        // safe to broadcast + return.
+        let removedNow = await audioQueue.removeInFlightDrone(id: agentId)
         let drones = await audioQueue.inFlightDronesSnapshot()
-        await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+        // Only re-broadcast when the set actually changed now; a deferred removal
+        // leaves the set unchanged, and its broadcast comes later from the worker.
+        if removedNow {
+            await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+        }
         return try Self.json(SubagentResponse(ok: true, drones: drones))
     }
 

@@ -127,8 +127,14 @@ struct FloatingHeadsView: View {
     private var headZone: some View {
         ZStack {
             if panelHasContent {
-                // Idle queued voices orbit behind everything.
-                queuedThumbnails
+                // Idle queued voices orbit behind everything — but ONLY when there
+                // is no live drone swarm. Once real drones are in flight, the
+                // participant orbit is the sole representation of who's working; a
+                // background queue-preview thumbnail then reads as a spurious drone
+                // "hiding" behind the swarm. Suppress it whenever drones are present.
+                if !viewModel.hasInFlightDrones {
+                    queuedThumbnails
+                }
 
                 // ONE list of participants — the live team (Pulsar + running
                 // sub-agents). CENTRE = the current speaker; ORBIT = everyone else

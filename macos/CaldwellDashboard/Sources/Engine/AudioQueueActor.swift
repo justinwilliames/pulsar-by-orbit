@@ -140,6 +140,9 @@ struct QueueStatusSnapshotItem: Encodable, Sendable {
     let text: String
     let channel: String?
     let priority: Bool
+    /// Drone category for the line (nil = Pulsar), so a pending thumbnail renders
+    /// the right face. `voice` is a hardcoded "Pulsar" label and can't carry it.
+    let agent: String?
 }
 
 struct QueueStatusHistorySnapshot: Encodable, Sendable {
@@ -385,7 +388,8 @@ actor AudioQueueActor {
                 voice: currentEntry.voiceLabel,
                 text: currentEntry.text,
                 channel: currentEntry.channel,
-                priority: currentEntry.priority
+                priority: currentEntry.priority,
+                agent: currentEntry.agentCategory
             ))
         }
 
@@ -401,7 +405,8 @@ actor AudioQueueActor {
                 voice: entry.voiceLabel,
                 text: entry.text,
                 channel: entry.channel,
-                priority: entry.priority
+                priority: entry.priority,
+                agent: entry.agentCategory
             ))
         }
 

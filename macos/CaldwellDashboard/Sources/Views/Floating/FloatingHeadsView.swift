@@ -548,7 +548,9 @@ struct QueueBubbleView: View {
                 amplitude: 0,
                 size: thumbnailSize,
                 voiceColor: voiceColor,
-                portraitManager: portraitManager
+                portraitManager: portraitManager,
+                // Render the pending line's own drone face (nil agent = Pulsar).
+                droneName: item.agent ?? "pulsar"
             )
             .shadow(color: voiceColor.opacity(0.3), radius: 4)
             .scaleEffect(index == 0 ? 1.05 : 1.0)

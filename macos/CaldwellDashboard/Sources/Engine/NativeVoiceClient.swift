@@ -195,7 +195,13 @@ enum NativeVoiceClient {
             .appendingPathComponent("pulsar-native-\(UUID().uuidString).aiff")
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-        proc.arguments = ["-v", voice, "-r", String(rate), "-o", out.path, text]
+        // Lead with a short silence so the very first phoneme isn't clipped by
+        // `say` synthesis warm-up / afplay's audio-device startup — worst on a
+        // voice's FIRST use (e.g. a drone speaking right after Pulsar, which is
+        // exactly where the clipped-start was heard). afplay plays from byte 0, so
+        // the startup latency now eats the silence instead of the first word. The
+        // lip-sync envelope stays aligned (a closed-mouth lead-in of ~150ms).
+        proc.arguments = ["-v", voice, "-r", String(rate), "-o", out.path, "[[slnc 150]] " + text]
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
         try proc.run()

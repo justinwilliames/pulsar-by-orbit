@@ -99,6 +99,14 @@ struct PortraitView: View {
             .onChange(of: timeline.date) { _, _ in
                 advance(now: t)
             }
+            // The frames are seeded once in init from `droneName`; @State keeps
+            // them across prop changes, so a view whose droneName flips (the centre
+            // going Pulsar→drone, or a recycled slot) would otherwise keep the OLD
+            // face. Reload on any droneName change so the head always matches.
+            .onChange(of: droneName) { _, newName in
+                frames = PortraitView.loadFrames(droneName: newName)
+                blinkFrame = NSImage(named: "\(newName)-blink")
+            }
         }
     }
 

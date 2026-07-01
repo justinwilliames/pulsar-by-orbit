@@ -92,6 +92,19 @@ enum DroneRegistry {
     private static let byCategory: [String: Drone] =
         Dictionary(uniqueKeysWithValues: drones.map { ($0.category, $0) })
 
+    /// Reverse of `voice(for:)` — each drone has a unique macOS voice, so a line's
+    /// voice alone identifies its drone. Lets a pending queue thumbnail (which
+    /// only carries the voice, not the category) render the right face instead of
+    /// defaulting to Pulsar.
+    private static let byVoice: [String: Drone] =
+        Dictionary(drones.map { ($0.voice.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
+
+    /// The drone category whose voice is `voice`, or nil for Pulsar's voice /
+    /// anything unknown.
+    static func category(forVoice voice: String) -> String? {
+        byVoice[voice.lowercased()]?.category
+    }
+
     /// The macOS `say -v` voice for a line tagged with `category`. Returns the
     /// drone's voice for a known drone; otherwise Pulsar's Daniel for
     /// "pulsar", nil, or any unknown/unrecognised category.

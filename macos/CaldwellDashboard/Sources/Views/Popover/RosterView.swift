@@ -32,7 +32,9 @@ struct RosterView: View {
             "echo":     "Writes it up — docs, changelogs, copy, and clear prose.",
             "atlas":    "The all-rounder — picks up whatever general task needs doing.",
         ]
-        for drone in DroneRegistry.drones {
+        // `unknown` is an internal fallback for rendering an unrecognised agent in
+        // the swarm — NOT a showcased team member. Keep it out of "Meet the team".
+        for drone in DroneRegistry.drones where drone.category != "unknown" {
             out.append(CastMember(
                 id: drone.category,
                 name: drone.category.capitalized,

@@ -138,9 +138,16 @@ struct FloatingHeadsView: View {
                 // and the outgoing one travels centre→orbit on the SAME spring
                 // value-change: a genuine pass-the-baton, not a crossfade.
                 ForEach(participants) { p in
-                    participantView(p)
-                        .id(p.id)
-                        .zIndex(p.isCentre ? 20 : Double(7 - p.orbitIndex))
+                    ParticipantSlotView(
+                        participant: p,
+                        speaker: speaker,
+                        orbitOffset: slotOffset(index: p.orbitIndex, total: orbitSlotCount),
+                        thumbnailSize: thumbnailSize,
+                        reduceMotion: reduceMotion,
+                        portraitManager: viewModel.portraitManager
+                    )
+                    .id(p.id)
+                    .zIndex(p.isCentre ? 20 : Double(7 - p.orbitIndex))
                 }
             }
         }
@@ -161,79 +168,14 @@ struct FloatingHeadsView: View {
         .animation(.spring(response: 0.38, dampingFraction: 0.62), value: activeDroneCategory)
     }
 
-    /// Render one participant in its current slot. The CENTRE occupant is the
-    /// full-size speaker portrait (glow tinted to the speaker — Pulsar or a
-    /// drone); ORBIT occupants are small thumbnails — drones, OR Pulsar when he's
-    /// present-but-silent (a peer in the live team, not special).
-    @ViewBuilder
-    private func participantView(_ p: Participant) -> some View {
-        if p.isCentre {
-            // MATCHED ARC: an incoming participant (drone OR Pulsar) ARRIVES from
-            // an orbit slot (insertion offset = that slot) and, when the next
-            // speaker takes over, DEPARTS toward an orbit slot — so consecutive
-            // speakers pass each other rather than cross-fading in place. Pulsar
-            // is a peer here too: he travels in from / out to the orbit like any
-            // drone. Arriving overshoots slightly (presence); departing eases out
-            // slower.
-            let home = homeOrbitOffset(for: p)
-            FloatingPortraitView(
-                voiceName: speaker?.voiceLabel ?? "Pulsar",
-                amplitude: speaker?.amplitude ?? 0,        // the centre is the speaker
-                voiceColor: p.color,
-                portraitManager: viewModel.portraitManager,
-                droneName: p.category ?? "pulsar",
-                glowColor: p.color
-            )
-            // The speaker's name lives as a header pill on the subtitle bubble
-            // (see `nameHeaderPill`), NOT under the chin — that zone is where the
-            // orbit drones + the bubble sit and the card was getting occluded.
-            .transition(.asymmetric(
-                insertion: .offset(home)
-                    .combined(with: .scale(scale: 0.72))   // steps forward from depth
-                    .combined(with: .opacity)
-                    .animation(.spring(response: 0.38, dampingFraction: 0.62)),
-                removal: .offset(home)
-                    .combined(with: .scale(scale: 0.72))
-                    .combined(with: .opacity)
-                    .animation(.spring(response: 0.55, dampingFraction: 0.74))
-            ))
-        } else {
-            FloatingDronePortraitView(
-                category: p.category ?? "pulsar",
-                isActiveSpeaker: false,                    // the speaker is always centre
-                liveAmplitude: 0,
-                thumbnailSize: thumbnailSize,
-                slotOffset: slotOffset(index: p.orbitIndex, total: orbitSlotCount),
-                index: p.orbitIndex,
-                reduceMotion: reduceMotion,
-                portraitManager: viewModel.portraitManager
-            )
-        }
-    }
-
-    /// The orbit-slot offset the centre occupant travels FROM (on arrival) and
-    /// TO (on departure) — the "swap lane" for speaker hand-offs. Each participant
-    /// gets a STABLE arc index derived from its position in DroneRegistry.categories
-    /// (Pulsar = last slot), so incoming and outgoing speakers occupy different
-    /// lanes and pass each other cleanly instead of colliding on index 0.
-    private func homeOrbitOffset(for p: Participant) -> CGSize {
-        let stableIndex = stableArcIndex(for: p)
-        let total = max(DroneRegistry.categories.count + 1, 1)   // +1 for Pulsar's slot
-        let angle = orbitAngle(index: stableIndex, total: total)
-        return CGSize(width: cos(angle) * orbitRadius,
-                      height: sin(angle) * orbitRadius + orbitYOffset)
-    }
-
-    /// Stable arc index for a participant — its position in the canonical category
-    /// list, with Pulsar pinned to the last slot. This is purely for the transition
-    /// "home lane"; it is independent of how many participants are currently in the
-    /// orbit, so it never changes as others join or leave.
-    private func stableArcIndex(for p: Participant) -> Int {
-        guard let category = p.category else {
-            return DroneRegistry.categories.count   // Pulsar = last
-        }
-        return DroneRegistry.categories.firstIndex(of: category) ?? DroneRegistry.categories.count
-    }
+    // NOTE: rendering of each participant now lives in `ParticipantSlotView`
+    // (bottom of this file). That view is a SINGLE stable-identity element per
+    // participant id whose position/scale glide between its orbit slot and the
+    // centre as `isCentre` flips — so a character is NEVER torn down + rebuilt
+    // (and hence never briefly duplicated) when it stops or starts speaking.
+    // The old two-branch approach (FloatingPortraitView with an insert/remove
+    // transition vs FloatingDronePortraitView) is what produced the "two Echoes"
+    // ghost during a swap; it has been removed.
 
     /// The drone category that themes the CAPTION (tint + name pill). Keyed to
     /// the caption's speaker and survives the linger — so the bubble keeps its
@@ -241,10 +183,46 @@ struct FloatingHeadsView: View {
     /// swarm (audio ended). nil = Pulsar (indigo) or no drone line.
     private var captionCategory: String? { viewModel.captionSpeakerCategory }
 
-    /// Idle queued voices keep their existing orbiting thumbnails, behind the drones.
+    /// The set of character keys the PARTICIPANT model already renders (in-flight
+    /// drone categories, plus "pulsar" when Pulsar is a present participant). The
+    /// queued-voices background layer must NOT re-render any of these, or the same
+    /// character shows twice — once as its canonical drone/Pulsar orbit head and
+    /// again as a redundant queued thumbnail behind the swarm (the "duplicates in
+    /// the background" seen when a queued line's category is already an active
+    /// drone). The participant orbit is the canonical representation.
+    private var participantCharacterKeys: Set<String> {
+        Set(participants.map { $0.category?.lowercased() ?? "pulsar" })
+    }
+
+    /// The queued voices eligible for a BACKGROUND thumbnail — the not-playing
+    /// queue, with two dedupes applied so the background can never twin a
+    /// character that's already on screen:
+    ///   1. Drop any whose category is already a live participant (in-flight
+    ///      drone, current speaker, or present Pulsar) — the participant orbit is
+    ///      the canonical head for those.
+    ///   2. Collapse remaining same-category queued items to ONE (a character is
+    ///      a character, never a count), mirroring the participant model.
+    /// Survives for the genuine no-overlap queue-preview case (a queued voice for
+    /// a character with no in-flight drone of that type).
+    private var dedupedQueuedItems: [QueueItem] {
+        var shown = participantCharacterKeys
+        var out: [QueueItem] = []
+        for item in viewModel.queueItems where !item.isPlaying {
+            let key = item.agent?.lowercased() ?? "pulsar"
+            if shown.contains(key) { continue }
+            shown.insert(key)
+            out.append(item)
+        }
+        return Array(out.prefix(5))
+    }
+
+    /// Idle queued voices keep their existing orbiting thumbnails, behind the
+    /// drones — but only the deduped set (see `dedupedQueuedItems`), so a queued
+    /// line whose category is already a live participant never renders a second,
+    /// "background" copy of that character behind the swarm.
     @ViewBuilder
     private var queuedThumbnails: some View {
-        let queued = Array(viewModel.queueItems.filter { !$0.isPlaying }.prefix(5))
+        let queued = dedupedQueuedItems
         ForEach(Array(queued.enumerated()), id: \.element.id) { index, item in
             QueueBubbleView(
                 item: item,
@@ -269,7 +247,7 @@ struct FloatingHeadsView: View {
     /// Identity is stable — Pulsar = "pulsar", a type slot = its category name —
     /// so SwiftUI animates the SAME view between centre and orbit as the speaker
     /// swaps.
-    private struct Participant: Identifiable {
+    struct Participant: Identifiable {
         let id: String          // "pulsar" or the category name
         let category: String?   // nil = Pulsar
         let color: Color
@@ -309,12 +287,26 @@ struct FloatingHeadsView: View {
         }
         // else: nobody speaking → no centre occupant; all participants orbit.
 
-        // Orbit = the in-flight drone types (excluding the centred speaker), in
-        // canonical order. Pulsar is NOT added to the orbit: he is a participant
-        // ONLY when he himself is speaking (then he holds the centre). When the
-        // main session has merely delegated and gone quiet, only the working
-        // drones show — Pulsar reappears the instant he speaks again.
+        // Orbit = every OTHER present participant — the in-flight drone types
+        // (excluding the centred speaker) AND Pulsar himself when he's present
+        // but NOT the centre speaker. Pulsar is a genuine PEER: when a drone
+        // takes the centre (or Pulsar has just finished while drones are still
+        // in-flight), Pulsar occupies an orbit slot and GLIDES centre→orbit as
+        // the SAME single view (see ParticipantSlotView) — he does NOT vanish.
+        // He only leaves the swarm when the whole panel goes idle/hidden, which
+        // `panelShouldBeVisible` / the linger logic decides — untouched here.
         var orbitKeys: [(id: String, category: String?)] = []
+
+        // Pulsar orbits whenever he's present (main session active — drones
+        // in-flight or audio playing) but isn't the one holding the centre.
+        // Gate on `showAgents` too: with agents hidden the swarm is suppressed,
+        // so the peer-orbit Pulsar thumbnail is suppressed with it (only a
+        // speaking Pulsar shows a head then, via the centre branch above).
+        let pulsarOrbits = showAgents && viewModel.pulsarIsPresent && !pulsarSpeaking
+        if pulsarOrbits {
+            orbitKeys.append((id: "pulsar", category: nil))
+        }
+
         let present = showAgents ? inFlightCategories : []
         for category in DroneRegistry.categories
         where category != speakingCategory && present.contains(category) {
@@ -532,6 +524,105 @@ struct FloatingHeadsView: View {
             }
         }
         return offsets
+    }
+}
+
+// MARK: - Participant slot (single stable-identity view: glides centre ↔ orbit)
+
+/// ONE on-screen element per participant id. It is NEVER two mutually-exclusive
+/// branches — instead it layers BOTH representations (the full-size speaker
+/// portrait and the small orbit thumbnail) in a single view and cross-fades
+/// between them by opacity, while the whole element ANIMATES its offset + scale
+/// between the centre and its orbit slot as `isCentre` flips.
+///
+/// Because the view's identity (`.id(p.id)`) is stable across the centre↔orbit
+/// transition, SwiftUI does NOT tear the centre view down and insert a new
+/// thumbnail (the old bug — that overlap rendered the SAME character twice, the
+/// "multiple Echo"). The same element glides: an outgoing speaker travels
+/// centre→its orbit slot while the incoming one travels its slot→centre, and
+/// they pass cleanly — the real "matched arc".
+///
+/// - Centre: full portrait + glow + live lip-sync (amplitude from the speaker),
+///   scale 1, offset .zero.
+/// - Orbit: the drone thumbnail with its signature drift, scaled to the
+///   thumbnail size, offset to its orbit slot.
+private struct ParticipantSlotView: View {
+    let participant: FloatingHeadsView.Participant
+    /// The active speaker snapshot — drives the CENTRE occupant's live amplitude
+    /// (lip-sync) and voice label. Only meaningful while `participant.isCentre`.
+    let speaker: DashboardViewModel.SpeakerSnapshot?
+    /// This participant's orbit-slot offset (arc while a speaker holds the
+    /// centre, cluster when idle) — where the thumbnail sits when NOT centre,
+    /// and where the element rests/departs to.
+    let orbitOffset: CGSize
+    let thumbnailSize: CGFloat
+    let reduceMotion: Bool
+    let portraitManager: PortraitManager
+
+    /// Full centre portrait size (matches FloatingPortraitView.portraitSize).
+    private let centrePortraitSize: CGFloat = 120
+
+    private var isCentre: Bool { participant.isCentre }
+    private var category: String { participant.category ?? "pulsar" }
+
+    /// The scale the ORBIT representation must be drawn at so, together with the
+    /// centre-scale animation, the thumbnail reads at `thumbnailSize`. The centre
+    /// portrait is 120pt; when orbiting we scale the whole element down to the
+    /// thumbnail's fraction of that.
+    private var orbitScale: CGFloat { thumbnailSize / centrePortraitSize }
+
+    var body: some View {
+        ZStack {
+            // CENTRE representation — full portrait + glow + lip-sync. Faded in
+            // only while this participant holds the centre. Rendered at native
+            // 120pt; the element scale stays 1 when centre.
+            FloatingPortraitView(
+                voiceName: speaker?.voiceLabel ?? "Pulsar",
+                amplitude: isCentre ? (speaker?.amplitude ?? 0) : 0,
+                voiceColor: participant.color,
+                portraitManager: portraitManager,
+                droneName: category,
+                glowColor: participant.color
+            )
+            .opacity(isCentre ? 1 : 0)
+            // Don't let the (invisible) centre layer eat layout/hit space while
+            // orbiting — it's purely a crossfade target.
+            .allowsHitTesting(isCentre)
+
+            // ORBIT representation — the drone thumbnail with signature drift.
+            // Faded in only while this participant is orbiting. Its own
+            // slotOffset is ZEROed here because the CONTAINER carries the offset
+            // (so the SAME element glides); the drift still animates locally.
+            FloatingDronePortraitView(
+                category: category,
+                isActiveSpeaker: false,
+                liveAmplitude: 0,
+                thumbnailSize: centrePortraitSize,   // drawn full then element-scaled
+                slotOffset: .zero,
+                index: participant.orbitIndex,
+                reduceMotion: reduceMotion,
+                portraitManager: portraitManager
+            )
+            .opacity(isCentre ? 0 : 1)
+            .allowsHitTesting(!isCentre)
+        }
+        // Element scale: full at centre, thumbnail-fraction when orbiting. The
+        // crossfade above swaps the visible treatment; this scale + the offset
+        // below carry the single element between the two footprints.
+        .scaleEffect(isCentre ? 1 : orbitScale)
+        // Element position: dead-centre when speaking, the orbit slot otherwise.
+        // Animated by the ZStack-level springs in `headZone` (keyed on the
+        // speaker / activeDroneCategory / participant-list), so the glide is a
+        // spring, not a snap.
+        .offset(isCentre ? .zero : orbitOffset)
+        // A participant genuinely JOINING or LEAVING the swarm (a sub-agent
+        // starts / finishes) still animates in/out — but this is entry/exit of
+        // the whole element, NOT the centre↔orbit swap, so it can never produce
+        // a duplicate of an existing character.
+        .transition(.asymmetric(
+            insertion: .scale(scale: 0.1).combined(with: .opacity).combined(with: .offset(y: 30)),
+            removal: .scale(scale: 0.6).combined(with: .opacity).combined(with: .offset(y: -24))
+        ))
     }
 }
 

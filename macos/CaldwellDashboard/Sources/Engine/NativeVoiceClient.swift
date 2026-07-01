@@ -114,7 +114,25 @@ enum NativeVoiceClient {
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }
-        return resolved(base: DroneRegistry.voice(for: category))
+        return englishResolved(base: DroneRegistry.voice(for: category))
+    }
+
+    /// Resolve a base voice but GUARANTEE it speaks English. The floating heads
+    /// are English-only: if a base name resolves to a non-English voice — or can't
+    /// be verified as English (e.g. an ambiguous name that `say` might bind to a
+    /// non-English / Siri variant) — fall back to Pulsar's Daniel rather than let a
+    /// drone speak another language or garble. Every drone voice in the registry is
+    /// a standard English voice, so this only ever triggers on a mis-set / clashing
+    /// voice — exactly the failure we're guarding against.
+    static func englishResolved(base: String) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespaces)
+        let vs = voices()
+        if let v = vs.first(where: { $0.display.caseInsensitiveCompare(trimmed) == .orderedSame }),
+           v.language.hasPrefix("en") {
+            return v.resolved
+        }
+        // Not found as an English voice → force Daniel (always English).
+        return resolved(base: DroneRegistry.pulsarVoice)
     }
 
     // MARK: - Private

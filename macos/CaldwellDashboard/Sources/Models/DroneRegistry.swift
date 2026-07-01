@@ -55,7 +55,10 @@ enum DroneRegistry {
     /// real English voice rather than a non-English one mispronouncing English.
     /// To upgrade any of them: download a premium voice (System Settings → Spoken
     /// Content → System Voice → Manage Voices) and edit the `voice:` string here.
-    ///   • voyager  (M, rugged explorer)      → Aman     (en-IN) — energetic, adventurous
+    ///   • voyager  (explorer)                → Tara     (en-IN) — energetic, adventurous.
+    ///     (Was Aman, but this machine has a DUPLICATE Aman — a Siri variant — and
+    ///     `say -v Aman` picked it and spoke garbled/non-English. Tara is a single
+    ///     clean en-IN voice keeping the same India-accent flavour.)
     ///   • sentinel (F, precise reviewer)     → Karen    (en-AU) — crisp, authoritative
     ///   • nova     (F, eager builder)        → Samantha (en-US) — bright, upbeat
     ///   • nebula   (F, artist)               → Moira    (en-IE) — warm, lyrical
@@ -69,7 +72,7 @@ enum DroneRegistry {
     /// reviewer near-still, builder bouncy, artist smooth/flowing, writer steady,
     /// generalist neutral.
     static let drones: [Drone] = [
-        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Aman",     badge: "E",
+        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Tara",     badge: "E",
               motion: MotionTrait(bobAmplitude: 3.4, bobFrequency: 1.35, activeScale: 2.5)),  // amber — restless, wide, fast
         Drone(category: "sentinel", role: "reviewer",   color: Color(red: 0.42, green: 0.72, blue: 0.92), voice: "Karen",    badge: "R",
               motion: MotionTrait(bobAmplitude: 0.8, bobFrequency: 0.6,  activeScale: 2.3)),  // azure — still, minimal

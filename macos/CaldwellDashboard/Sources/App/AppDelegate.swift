@@ -20,11 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         userDriverDelegate: nil
     )
 
-    // Tail after audio finishes — a brief beat to finish reading the caption
-    // before the head + bubble fade out together, then gone (a long hover after
-    // speaking reads as the speaker overstaying). Matches the caption linger in
-    // FloatingHeadsView so head and subtitle leave in sync.
-    private static let tailAfterIdle: TimeInterval = 3.0
+    // Tail after audio finishes — the head holds ~5s so there's a beat to read
+    // the caption, then fades out (a longer hover reads as the speaker
+    // overstaying). The caption linger in FloatingHeadsView is set LONGER than
+    // this + the 0.9s fade on purpose, so the subtitle stays visible through the
+    // fade and dissolves with the head rather than snapping out first.
+    private static let tailAfterIdle: TimeInterval = 5.0
     // Absolute ceiling on visibility, measured from when the panel was
     // first shown. Hard belt-and-braces against a dropped/missed idle SSE
     // event leaving the portrait stuck on screen forever. Generous enough to

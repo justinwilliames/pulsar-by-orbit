@@ -63,9 +63,13 @@ struct FloatingHeadsView: View {
     /// caption is cleared rather than lingered under a different/idle speaker.
     @State private var captionOwner: String?
 
-    /// Brief linger after a line completes — enough to finish reading, then the
-    /// speaker fades rather than overstaying. Matches AppDelegate.tailAfterIdle.
-    static let lingerAfterIdle: TimeInterval = 3.0
+    /// How long the caption stays after a line completes. Set deliberately LONGER
+    /// than AppDelegate.tailAfterIdle (5s) + the panel's 0.9s fade, so the subtitle
+    /// stays visible right through the head's fade-out and dissolves WITH it —
+    /// rather than snapping out the instant the fade begins (which read as the head
+    /// hovering subtitle-less). The panel's alpha fade carries the caption away
+    /// before this timer ever clears the text.
+    static let lingerAfterIdle: TimeInterval = 6.0
 
     var body: some View {
         VStack(spacing: captionAttachGap) {

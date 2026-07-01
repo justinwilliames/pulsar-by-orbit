@@ -103,7 +103,8 @@ final class FloatingPanelController: NSPanel {
     /// Deterministic full caption height for `text` at the bubble's content width,
     /// measured with AppKit — no SwiftUI feedback loop (which deadlocked and clipped
     /// long lines at ~3 rows). Matches the bubble: 12pt medium system font, text
-    /// width = maxWidth − 28 (h-padding), + 9pt vertical padding + 6pt edge padding.
+    /// width = maxWidth − 28 (h-padding), + 9pt vertical padding + the glow-margin
+    /// edge padding (top+bottom) + the tail height + a small buffer.
     static func captionContentHeight(for text: String) -> CGFloat {
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
         let w = SubtitleBubbleView.maxWidth - 28
@@ -111,7 +112,8 @@ final class FloatingPanelController: NSPanel {
             with: NSSize(width: w, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font])
-        return ceil(r.height) + 18 + 12 + 8   // 9*2 vpad + 6*2 edge pad + small buffer
+        let edgePad = SubtitleBubbleView.glowMargin * 2   // top + bottom glow reserve
+        return ceil(r.height) + 18 + edgePad + 8 + 8      // 9*2 vpad + edge pad + tail + buffer
     }
 
     /// Lock the above/below placement from the full line's measured height the

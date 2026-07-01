@@ -69,12 +69,18 @@ final class DashboardViewModel {
         var isDrone: Bool { category != nil }
     }
 
-    /// The current speaker, recomputed from playback + lipSync each time any
-    /// input changes. Present whenever `currentVoice` is set — so it persists
-    /// through the linger tail after `isPlaying` flips false — and nil only when
-    /// there is genuinely nothing on screen.
+    /// The ACTIVELY-SPEAKING participant — the one whose audio is CURRENTLY
+    /// playing. This drives the big CENTRE slot, and ONLY this: it is gated on
+    /// `isPlaying`, NOT on `currentVoice` (which lingers). The instant audio
+    /// ends, this goes nil → the speaker shrinks back into the swarm and there
+    /// is no big centre. So idle-with-participants = a swarm of small peers, and
+    /// neither Pulsar nor a drone lingers big after its line.
+    ///
+    /// The subtitle bubble lingers independently via the caption lifecycle (it
+    /// reads `currentText` + `captionOwner`), so read-along survives audio-end
+    /// even though the portrait has returned to the swarm.
     var activeSpeaker: SpeakerSnapshot? {
-        guard let voice = playback.currentVoice else { return nil }
+        guard playback.isPlaying, let voice = playback.currentVoice else { return nil }
         // Only a REAL drone category themes the speaker; nil = Pulsar (indigo).
         let cat = isDrone(playback.currentAgentCategory)
             ? playback.currentAgentCategory?.lowercased()
@@ -83,6 +89,14 @@ final class DashboardViewModel {
                                color: droneColor(for: cat),
                                amplitude: lipSync.amplitude,
                                voiceLabel: voice)
+    }
+
+    /// The drone category for the caption's TINT/name while it lingers — keyed to
+    /// the last line's speaker, independent of whether audio is still playing.
+    /// nil = Pulsar (indigo) or no caption. Lets the subtitle keep its speaker
+    /// colour through the linger even after `activeSpeaker` has gone nil.
+    var captionSpeakerCategory: String? {
+        isDrone(playback.currentAgentCategory) ? playback.currentAgentCategory?.lowercased() : nil
     }
 
     /// O(1) lookup: is a given text string present in the phrase cache?

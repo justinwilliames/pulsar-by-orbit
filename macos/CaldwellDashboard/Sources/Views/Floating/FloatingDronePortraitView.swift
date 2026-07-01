@@ -36,8 +36,6 @@ struct FloatingDronePortraitView: View {
     /// This drone's signature motion (amplitude + frequency), Pulsar-neutral for
     /// the orbiting Pulsar thumbnail.
     private var motion: DroneRegistry.MotionTrait { droneMotion(for: category) }
-    /// Role badge letter (nil for Pulsar).
-    private var badge: String? { droneBadge(for: category) }
 
     /// Idle drones animate at ~20fps (cheaper); the active speaker would run
     /// full 60Hz, but it isn't rendered here. Reduce-Motion pauses the clock.
@@ -55,11 +53,16 @@ struct FloatingDronePortraitView: View {
         TimelineView(schedule) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             let phase = Double(index) * 1.7
-            // Per-drone signature bob (frozen under Reduce Motion).
-            let amp = reduceMotion ? 0 : Double(motion.bobAmplitude)
+            // SWARM DRIFT: each drone wanders on its own gentle, slightly
+            // out-of-phase path so the cluster reads as a living pod hovering
+            // together, not icons pinned to a track. Two summed sines per axis at
+            // incommensurate rates give an organic, non-repeating drift; the
+            // amplitude is a touch wider than a simple bob so the group visibly
+            // mingles. Frozen under Reduce Motion.
+            let amp = reduceMotion ? 0 : Double(motion.bobAmplitude) * 1.6
             let f = motion.bobFrequency
-            let bobX = sin(time * 0.9 * f + phase) * amp
-            let bobY = cos(time * 0.7 * f + phase * 0.6) * (amp * 0.75)
+            let driftX = (sin(time * 0.9 * f + phase) + 0.5 * sin(time * 1.7 * f + phase * 2.3)) * amp
+            let driftY = (cos(time * 0.7 * f + phase * 0.6) + 0.5 * cos(time * 1.3 * f + phase * 1.9)) * (amp * 0.85)
 
             PortraitView(
                 voiceName: category,
@@ -69,11 +72,12 @@ struct FloatingDronePortraitView: View {
                 portraitManager: portraitManager,
                 droneName: category
             )
-            .overlay(alignment: .topTrailing) { roleBadge }
-            .shadow(color: color.opacity(0.3), radius: 4)
+            // Each drone keeps its OWN coloured glow so the swarm reads as a
+            // cluster of distinct, glowing characters.
+            .shadow(color: color.opacity(0.45), radius: 6)
             .offset(
-                x: cos(angle) * orbitRadius + bobX,
-                y: sin(angle) * orbitRadius + orbitYOffset + bobY
+                x: cos(angle) * orbitRadius + driftX,
+                y: sin(angle) * orbitRadius + orbitYOffset + driftY
             )
         }
         .transition(
@@ -87,21 +91,5 @@ struct FloatingDronePortraitView: View {
                     .combined(with: .offset(y: -24))
             )
         )
-    }
-
-    /// Tiny role badge in the portrait corner — a non-colour distinguisher so
-    /// the drones are tellable apart even with similar hues (P5). Pulsar = none.
-    @ViewBuilder
-    private var roleBadge: some View {
-        if let badge {
-            Text(badge)
-                .font(.system(size: thumbnailSize * 0.28, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(width: thumbnailSize * 0.42, height: thumbnailSize * 0.42)
-                .background(Circle().fill(color))
-                .overlay(Circle().strokeBorder(.white.opacity(0.85), lineWidth: 1))
-                .offset(x: thumbnailSize * 0.10, y: -thumbnailSize * 0.10)
-                .allowsHitTesting(false)
-        }
     }
 }

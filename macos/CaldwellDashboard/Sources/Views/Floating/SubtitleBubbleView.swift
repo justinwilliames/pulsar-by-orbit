@@ -35,8 +35,15 @@ struct SubtitleBubbleView: View {
     /// drone's colour themes the rim when a sub-agent owns the line.
     var activeColor: Color = .orbitLight
 
-    static let maxWidth: CGFloat = 280
+    /// Bubble box max width. Kept NARROWER than the hosting panel width (280) by
+    /// ≥ the glow/shadow radius on each side, so the outer glow fades fully
+    /// inside the panel and never hard-cuts at the left/right edge.
+    static let maxWidth: CGFloat = 248
     private let tailHeight: CGFloat = 8
+    /// Reserve on every side for the bubble's outer glow/shadow to fade before
+    /// the panel edge (max core-shadow radius ≈ 11pt + rim blur ≈ 6pt). Used by
+    /// the caption zone padding + the panel height math.
+    static let glowMargin: CGFloat = 16
 
     /// True when no drone owns the line (the default Pulsar indigo tint).
     private var isPulsarTint: Bool { activeColor == .orbitLight }

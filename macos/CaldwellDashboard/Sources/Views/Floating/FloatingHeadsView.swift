@@ -16,19 +16,18 @@ struct FloatingHeadsView: View {
     /// long captions at ~3 lines.
     var onCaptionText: ((String) -> Void)?
 
-    private let orbitRadius: CGFloat = 82
+    private let orbitRadius: CGFloat = 74
     private let thumbnailSize: CGFloat = 40
-    /// Lift the whole orbit UP so the drones ring the TOP/sides of the central
-    /// head, leaving the below-head zone clear for the name pill + subtitle.
-    /// Kept modest so even the top-most of 6 slots (radius 82 + this lift + thumb
-    /// half ≈ 108pt) clears the 120pt half-height without clipping.
-    private let orbitYOffset: CGFloat = -6
-    /// Upper arc, in SwiftUI screen degrees (y down): sweeps across the TOP and
-    /// upper sides of the head (sin negative = above centre). Widened to 190°→350°
-    /// so up to SIX distinct-type slots seat with a clean gap (step 32°, adjacent
-    /// centres ≈ 45pt apart > the 40pt thumbnail) instead of overlapping.
-    private let arcStart: Double = 190
-    private let arcEnd: Double = 350
+    /// Lift the whole cluster UP so the swarm hovers over the TOP of the hub,
+    /// leaving the below-head zone clear for the name pill + subtitle.
+    private let orbitYOffset: CGFloat = -8
+    /// The swarm CLUSTERS above the hub rather than fanning across a wide rail:
+    /// slots are placed symmetrically around a hub angle (270° = straight up)
+    /// with a TIGHT per-slot angular step, so they group as a compact pod. The
+    /// per-drone organic drift (FloatingDronePortraitView) then keeps them
+    /// mingling so they never read as rigid, evenly-spaced icons.
+    private let clusterCenterDegrees: Double = 270   // straight up
+    private let clusterStepDegrees: Double = 26      // tight spacing between slots
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
@@ -41,11 +40,17 @@ struct FloatingHeadsView: View {
     static let headZoneWidth: CGFloat = 240
     static let headZoneHeight: CGFloat = 240
 
-    /// Negative overlap so the caption tucks UNDER the head's lower glow tail and
-    /// reads as attached — keeps the caption tight even though the head zone is
-    /// tall enough to clear the glow.
-    private let captionAttachGap: CGFloat = -22
-    private let captionEdgePadding: CGFloat = 6
+    /// Vertical overlap between the head zone and the caption. The head squircle
+    /// (120pt) is centred in the 240pt head zone, so its BOTTOM sits ~60pt above
+    /// the head zone's lower edge. This negative gap pulls the caption up so the
+    /// bubble's tail nearly touches the squircle bottom, leaving only a few px —
+    /// while still reserving `glowMargin` (via captionEdgePadding) so neither
+    /// glow hard-cuts. −54 ⇒ tail ~6px below the squircle after the padding.
+    private let captionAttachGap: CGFloat = -54
+    /// Padding around the caption inside the panel — sized to the bubble's glow
+    /// reserve so the outer glow fades fully before the panel edge (top/bottom +
+    /// the horizontal side that the tail edge doesn't consume).
+    private var captionEdgePadding: CGFloat { SubtitleBubbleView.glowMargin }
 
     // MARK: - Caption lifecycle state
 
@@ -196,6 +201,12 @@ struct FloatingHeadsView: View {
                       height: sin(angle) * orbitRadius + orbitYOffset)
     }
 
+    /// The drone category that themes the CAPTION (tint + name pill). Keyed to
+    /// the caption's speaker and survives the linger — so the bubble keeps its
+    /// speaker colour + name even after the portrait has dropped back into the
+    /// swarm (audio ended). nil = Pulsar (indigo) or no drone line.
+    private var captionCategory: String? { viewModel.captionSpeakerCategory }
+
     /// The speaker's identity as a tinted pill HEADER attached to the TOP edge of
     /// the subtitle bubble — "NAME · ROLE", themed to the speaker's colour, drawn
     /// above the orbit z-order. Co-locating it with the speech keeps the name
@@ -203,7 +214,7 @@ struct FloatingHeadsView: View {
     /// Shown only when a drone holds the line; Pulsar shows nothing.
     @ViewBuilder
     private var nameHeaderPill: some View {
-        if let category = activeDroneCategory {
+        if let category = captionCategory {
             let color = droneColor(for: category)
             let role = droneRole(for: category).uppercased()
             Text(role.isEmpty ? category.uppercased() : "\(category.uppercased()) · \(role)")
@@ -331,7 +342,7 @@ struct FloatingHeadsView: View {
                                    holdFull: !viewModel.playback.isPlaying,
                                    tailEdge: layout.captionEdge == .above ? .bottom : .top,
                                    maxHeight: captionMaxHeight,
-                                   activeColor: speaker?.color ?? .orbitLight)   // P3 single source
+                                   activeColor: droneColor(for: captionCategory))   // caption tint survives linger
                     // Speaker name pill straddling the bubble's TOP edge, above
                     // the orbit z-order so it's never occluded by a drone.
                     .overlay(alignment: .top) {
@@ -376,13 +387,16 @@ struct FloatingHeadsView: View {
 
     private var captionSource: String? { viewModel.playback.currentText }
 
-    /// A stable identity for the CURRENT speaker — the drone category, else
-    /// "pulsar" while Pulsar speaks, else nil when nothing is the active speaker.
-    /// Used to detect a speaker CHANGE so a caption is never lingered under a
-    /// different speaker.
+    /// A stable identity for the caption's speaker — the drone category, else
+    /// "pulsar", else nil when there's no line. Used to detect a genuine speaker
+    /// CHANGE so a caption is never lingered under a DIFFERENT speaker. Keyed to
+    /// the CAPTION signal (which persists through the linger), NOT to
+    /// `activeSpeaker` (which now goes nil the instant audio ends) — otherwise
+    /// audio-end would look like a speaker change and kill the linger.
     private var currentSpeakerKey: String? {
-        guard let s = viewModel.activeSpeaker else { return nil }
-        return s.category ?? "pulsar"
+        // No current line at all → no owner.
+        guard viewModel.playback.currentText?.isEmpty == false else { return nil }
+        return captionCategory ?? "pulsar"
     }
 
     private var subtitlesActive: Bool {
@@ -441,12 +455,17 @@ struct FloatingHeadsView: View {
         }
     }
 
+    /// Place slot `index` of `total` as a COMPACT CLUSTER centred on the hub
+    /// angle (straight up): slots fan symmetrically around the centre with a
+    /// tight fixed step, so a few drones sit as a snug pod rather than spread
+    /// across a wide rail. One slot sits dead-centre; the swarm drift does the
+    /// rest of the mingling.
     private func orbitAngle(index: Int, total: Int) -> Double {
         guard total > 0 else { return 0 }
-        if total == 1 { return ((arcStart + arcEnd) / 2) * .pi / 180 }
-        let span = arcEnd - arcStart
-        let step = span / Double(total - 1)
-        let degrees = arcStart + step * Double(index)
+        // Symmetric offset from centre: e.g. total=3 → offsets -1,0,+1;
+        // total=4 → -1.5,-0.5,+0.5,+1.5.
+        let offset = Double(index) - Double(total - 1) / 2.0
+        let degrees = clusterCenterDegrees + offset * clusterStepDegrees
         return degrees * .pi / 180
     }
 }

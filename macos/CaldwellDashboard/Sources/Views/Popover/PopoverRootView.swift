@@ -6,11 +6,13 @@ import SwiftUI
 private let logger = Logger(subsystem: "team.yourorbit.Pulsar", category: "PopoverRootView")
 
 enum DashboardTab: String, CaseIterable {
+    case roster = "Team"
     case history = "History"
     case settings = "Settings"
 
     var icon: String {
         switch self {
+        case .roster: "person.3"
         case .history: "clock"
         case .settings: "gear"
         }
@@ -223,6 +225,8 @@ struct PopoverRootView: View {
     @ViewBuilder
     private func tabView(for tab: DashboardTab) -> some View {
         switch tab {
+        case .roster:
+            RosterView()
         case .history:
             HistoryPanelView(viewModel: viewModel)
         case .settings:

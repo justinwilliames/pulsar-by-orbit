@@ -29,11 +29,20 @@ final class DashboardViewModel {
     /// Whether PULSAR is a present participant — i.e. the MAIN session is
     /// actively working. Approximated (no new wiring) as: any drone in-flight (a
     /// running sub-agent implies the main session is working) OR Pulsar is
-    /// speaking / within the trailing linger (`currentVoice` stays set through
-    /// the linger after `isPlaying` flips false). When present-but-silent Pulsar
-    /// orbits with the drones; when he speaks he takes the centre.
+    /// actively speaking (`isPlaying`).
+    ///
+    /// CRITICAL: this keys on `isPlaying`, NOT `currentVoice != nil`.
+    /// `currentVoice` persists through the post-line linger (it drives the
+    /// centre-hold, cleared only in AppDelegate.hidePanel). If panel *visibility*
+    /// also read `currentVoice`, the panel would stay "should be visible" for the
+    /// whole linger, so `recomputePanelVisibility` would never see the true→false
+    /// edge, never fire `onPlaybackChanged(false)`, and never schedule the 5s
+    /// hide — leaving the head stuck on screen until the 45s max-visible ceiling.
+    /// Keying on `isPlaying` lets visibility fall the instant audio ends (→ 5s
+    /// hide timer), while `currentVoice` independently holds the centre + caption
+    /// through that 5s + fade. The two mechanisms must stay decoupled.
     var pulsarIsPresent: Bool {
-        hasInFlightDrones || playback.currentVoice != nil
+        hasInFlightDrones || playback.isPlaying
     }
 
     /// The panel is visible while ANY participant is present — Pulsar present OR

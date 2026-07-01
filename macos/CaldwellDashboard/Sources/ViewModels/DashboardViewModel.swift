@@ -200,6 +200,18 @@ final class DashboardViewModel {
         onPlaybackChanged?(visible)
     }
 
+    /// Called by AppDelegate AFTER it takes the panel off screen on its own timer
+    /// (the tail-after-idle hide or the max-visible ceiling) — events the view
+    /// model can't otherwise observe. Without this, `lastPanelVisible` stays stuck
+    /// `true` after an autonomous hide, so the next participant/line computes
+    /// `visible == lastPanelVisible` and the show edge NEVER re-fires: audio keeps
+    /// playing into a dark screen. Resyncing the flag lets the next recompute
+    /// re-show. (The ceiling itself no longer fires while participants are present
+    /// — see AppDelegate.scheduleMaxVisible — so this is mainly a safety resync.)
+    func panelWasHidden() {
+        lastPanelVisible = false
+    }
+
     /// A settings change pushed from the daemon (e.g. mute toggled via the API,
     /// the Stop hook, or say.sh). Refreshes `settings` so `isMuted` — and the
     /// menubar glyph that reads it — update immediately, not just on the next

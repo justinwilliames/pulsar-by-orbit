@@ -143,7 +143,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         maxVisibleWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                self?.hidePanel(reason: "max-visible-ceiling")
+                guard let self else { return }
+                // The ceiling is a safety net for a STUCK panel (a dropped idle
+                // event leaving the overlay up forever) — NOT a cap on legitimate
+                // activity. If participants are genuinely still present (a running
+                // sub-agent drone, or Pulsar mid-line), don't yank the panel; just
+                // re-arm the ceiling. Yanking an active panel was the bug that left
+                // voices playing into a dark screen: the panel hid, the view model
+                // never learned, and with drones permanently present no show edge
+                // could re-fire. Only hide when nothing should be visible anymore.
+                if self.viewModel.panelShouldBeVisible {
+                    self.scheduleMaxVisible()
+                } else {
+                    self.hidePanel(reason: "max-visible-ceiling")
+                }
             }
         }
         maxVisibleWorkItem = item
@@ -161,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel.playback.currentText = nil
             viewModel.playback.currentAgentCategory = nil
             floatingPanel?.resetToBaseSize()
+            viewModel.panelWasHidden()
             return
         }
         // Slow, gentle fade rather than a snap: animate the whole panel's alpha to
@@ -179,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.viewModel.playback.currentVoice = nil
             self.viewModel.playback.currentText = nil
             panel.resetToBaseSize()
+            self.viewModel.panelWasHidden()
         }
         NSLog("[Pulsar] Panel hidden (\(reason))")
     }

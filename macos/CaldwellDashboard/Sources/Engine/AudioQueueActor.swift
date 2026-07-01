@@ -232,8 +232,15 @@ actor AudioQueueActor {
     private var inFlight: [String: InFlightDrone] = [:]
 
     /// An in-flight drone is evicted if nothing has refreshed it within this
-    /// window — covers a lost SubagentStop hook (the overlay would otherwise lie).
-    static let droneStaleAfter: TimeInterval = 90
+    /// window. This is ONLY a backstop for a lost SubagentStop hook — the normal
+    /// removal path is /subagent/stop, which fires reliably on completion. It must
+    /// be generously long: a sub-agent can run for many minutes WITHOUT speaking
+    /// (a silent build/research agent refreshes `lastSeen` only when it emits a
+    /// tagged `--agent` line). At the old 90s a silent long-runner's drone was
+    /// swept mid-task — it popped up, then vanished ~90s later while the agent was
+    /// still very much alive. 30 min comfortably covers any realistic agent while
+    /// still self-healing a genuinely dropped Stop within the session.
+    static let droneStaleAfter: TimeInterval = 1800
 
     /// Record a newly-spawned sub-agent as in-flight under its drone category.
     func addInFlightDrone(id: String, category: String) {

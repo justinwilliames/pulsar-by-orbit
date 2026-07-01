@@ -69,18 +69,19 @@ final class DashboardViewModel {
         var isDrone: Bool { category != nil }
     }
 
-    /// The ACTIVELY-SPEAKING participant — the one whose audio is CURRENTLY
-    /// playing. This drives the big CENTRE slot, and ONLY this: it is gated on
-    /// `isPlaying`, NOT on `currentVoice` (which lingers). The instant audio
-    /// ends, this goes nil → the speaker shrinks back into the swarm and there
-    /// is no big centre. So idle-with-participants = a swarm of small peers, and
-    /// neither Pulsar nor a drone lingers big after its line.
+    /// The participant that HOLDS the big CENTRE slot — the one who spoke the
+    /// current-or-lingering line. Keyed on `currentVoice`, which persists through
+    /// the caption linger (it is cleared only on the idle SSE event, together
+    /// with `currentText`), so the speaker STAYS big + centred for its whole
+    /// line AND its entire fade-wait, then centre + caption fade away together.
+    /// It NEVER flips to Pulsar (or any other participant) mid-linger, and never
+    /// shrinks to the swarm while its caption is still up.
     ///
-    /// The subtitle bubble lingers independently via the caption lifecycle (it
-    /// reads `currentText` + `captionOwner`), so read-along survives audio-end
-    /// even though the portrait has returned to the swarm.
+    /// `amplitude` naturally falls to 0 when audio ends (the envelope is spent),
+    /// so the mouth stills while the portrait stays put. nil only when there is
+    /// genuinely no current-or-lingering speaker → no centre, small swarm.
     var activeSpeaker: SpeakerSnapshot? {
-        guard playback.isPlaying, let voice = playback.currentVoice else { return nil }
+        guard let voice = playback.currentVoice else { return nil }
         // Only a REAL drone category themes the speaker; nil = Pulsar (indigo).
         let cat = isDrone(playback.currentAgentCategory)
             ? playback.currentAgentCategory?.lowercased()
@@ -91,10 +92,9 @@ final class DashboardViewModel {
                                voiceLabel: voice)
     }
 
-    /// The drone category for the caption's TINT/name while it lingers — keyed to
-    /// the last line's speaker, independent of whether audio is still playing.
-    /// nil = Pulsar (indigo) or no caption. Lets the subtitle keep its speaker
-    /// colour through the linger even after `activeSpeaker` has gone nil.
+    /// The drone category that themes the CAPTION (tint + name) — the SAME
+    /// linger-surviving owner the centre uses, so centre + caption share one
+    /// identity for the whole line + fade. nil = Pulsar (indigo) or no caption.
     var captionSpeakerCategory: String? {
         isDrone(playback.currentAgentCategory) ? playback.currentAgentCategory?.lowercased() : nil
     }

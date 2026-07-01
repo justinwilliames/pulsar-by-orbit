@@ -20,10 +20,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         userDriverDelegate: nil
     )
 
-    // Tail after audio finishes — kept long enough to read the final caption
-    // line in full before the head + bubble fade out together. Matches the
-    // caption linger in FloatingHeadsView so head and subtitle leave in sync.
-    private static let tailAfterIdle: TimeInterval = 10.0
+    // Tail after audio finishes — a brief beat to finish reading the caption
+    // before the head + bubble fade out together, then gone (a long hover after
+    // speaking reads as the speaker overstaying). Matches the caption linger in
+    // FloatingHeadsView so head and subtitle leave in sync.
+    private static let tailAfterIdle: TimeInterval = 3.0
     // Absolute ceiling on visibility, measured from when the panel was
     // first shown. Hard belt-and-braces against a dropped/missed idle SSE
     // event leaving the portrait stuck on screen forever. Generous enough to
@@ -157,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             floatingPanel?.orderOut(nil)
             viewModel.playback.currentVoice = nil
             viewModel.playback.currentText = nil
+            viewModel.playback.currentAgentCategory = nil
             floatingPanel?.resetToBaseSize()
             return
         }

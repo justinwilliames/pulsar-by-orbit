@@ -29,11 +29,14 @@ final class PlaybackState {
     func updateFromVoiceActive(_ data: VoiceActiveEvent) {
         stopTimer()
         if data.type == "idle" {
-            // Audio finished. Keep currentVoice + currentText set so the
-            // floating panel keeps rendering the portrait through its
-            // min-visible tail window (~6s after isPlaying flips false).
-            // Otherwise the panel goes blank for most of its visible time
-            // and Sir thinks it never appeared.
+            // Audio finished. Keep currentVoice + currentText AND
+            // currentAgentCategory set so the floating panel keeps rendering the
+            // SPEAKER — the exact participant who spoke — big + centred with its
+            // own caption through the linger/fade. Clearing the category here was
+            // the "flips back to Pulsar after a drone speaks" bug: currentVoice
+            // lingered but the drone identity was wiped, so the centre fell back
+            // to Pulsar (nil category = Pulsar). The category is replaced when the
+            // NEXT line arrives (else branch) or cleared when the panel hides.
             isPlaying = false
             currentId = nil
             currentType = "idle"
@@ -42,7 +45,6 @@ final class PlaybackState {
             offset = 0
             elapsed = 0
             envelope = []
-            currentAgentCategory = nil
         } else {
             isPlaying = true
             currentVoice = data.voice

@@ -63,8 +63,9 @@ struct FloatingHeadsView: View {
     /// caption is cleared rather than lingered under a different/idle speaker.
     @State private var captionOwner: String?
 
-    /// Linger ~10s after a line completes so there's time to finish reading.
-    static let lingerAfterIdle: TimeInterval = 10.0
+    /// Brief linger after a line completes — enough to finish reading, then the
+    /// speaker fades rather than overstaying. Matches AppDelegate.tailAfterIdle.
+    static let lingerAfterIdle: TimeInterval = 3.0
 
     var body: some View {
         VStack(spacing: captionAttachGap) {

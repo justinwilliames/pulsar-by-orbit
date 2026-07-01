@@ -255,9 +255,45 @@ final class DashboardViewModel {
         }
 
         recomputePanelVisibility()
+
+        // Return-to-swarm. When a line ends but a swarm is still in flight, the
+        // finished speaker must shrink back into the orbit after the linger.
+        // `currentVoice` (which pins the big centre) normally clears only in
+        // hidePanel — but with a swarm the panel never hides, so without this the
+        // speaker would stay big forever (caption gone, head still centred). Fires
+        // only with a swarm present; the solo case is left to hidePanel's
+        // hold-then-fade. A new line cancels it (the next speaker takes centre).
+        if playback.isPlaying {
+            returnToSwarmTask?.cancel(); returnToSwarmTask = nil
+        } else {
+            scheduleReturnToSwarm()
+        }
+
         // Queue polling tracks audio activity specifically (not drone presence).
         let audioActive = playback.isPlaying || playback.queuedCount > 0
         updateQueuePolling(isActive: audioActive)
+    }
+
+    /// Delay before a finished speaker rejoins the swarm — matches the caption
+    /// linger so the centre + subtitle leave together, then she's back in orbit.
+    private static let returnToSwarmDelay: TimeInterval = 5.0
+    private var returnToSwarmTask: Task<Void, Never>?
+
+    /// After a line ends with a swarm still present, clear the centre occupant so
+    /// the speaker returns to the hovering swarm. Guards `hasInFlightDrones` at
+    /// BOTH schedule and fire time: if no drones (or they all stopped), the panel
+    /// is hiding and hidePanel owns the clear — don't fight it.
+    private func scheduleReturnToSwarm() {
+        returnToSwarmTask?.cancel()
+        guard hasInFlightDrones else { returnToSwarmTask = nil; return }
+        returnToSwarmTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.returnToSwarmDelay * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            guard !self.playback.isPlaying, self.hasInFlightDrones else { return }
+            self.playback.currentVoice = nil
+            self.playback.currentText = nil
+            self.playback.currentAgentCategory = nil
+        }
     }
 
     private func updateQueuePolling(isActive: Bool) {

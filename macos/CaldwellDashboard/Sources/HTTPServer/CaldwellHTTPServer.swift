@@ -118,7 +118,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
         // POST /speak — TTS enqueue with phrase-cache support
         router.post("/speak") { request, _ -> Response in
-            return try await Self.handleSpeak(request: request, audioQueue: audioQueue)
+            return try await Self.handleSpeak(
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
         }
 
         // GET /history — recent playback history
@@ -230,10 +231,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let rawCategory = (body["category"] as? String).flatMap {
             $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0.lowercased()
         } ?? "atlas"
-        // Defend the daemon against unknown categories: anything not in the
-        // locked taxonomy degrades to "atlas" (the generalist), so a garbage
-        // category renders a real Atlas drone, never a broken indigo monogram.
-        let category = isDrone(rawCategory) ? rawCategory : "atlas"
+        // Accept the explicit "unknown" category as a first-class value (another
+        // package emits it from the hook; the registry defines its look). Any
+        // OTHER category not in the locked taxonomy still degrades to "atlas" (the
+        // generalist), so a garbage category renders a real Atlas drone rather
+        // than a broken monogram. "unknown" passes through untouched: registry
+        // lookups (colour/voice) fall back to Pulsar defaults for it, which is the
+        // correct rendering for a genuinely-unknown drone.
+        let category = (rawCategory == "unknown" || isDrone(rawCategory)) ? rawCategory : "atlas"
 
         await audioQueue.addInFlightDrone(id: agentId, category: category)
         let drones = await audioQueue.inFlightDronesSnapshot()
@@ -694,6 +699,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
         }
 
+        // Keep the icon-state change-tracker in sync with a settings-driven mute
+        // change, so a later /speak doesn't redundantly re-announce (or wrongly
+        // suppress) the same state. The full `settings` event below already
+        // informs the UI, so we only update the tracker here — no second event.
+        if let muted = update.muted {
+            Self.iconStateLock.withLock { Self.lastBroadcastMuted = muted }
+        }
+
         // Broadcast the new settings so connected UIs reflect the change at
         // once. Without this, a config write via the API (say.sh --mute, the
         // Stop hook, any external caller) never reaches the app, leaving the
@@ -920,11 +933,45 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         return s
     }
 
+    // MARK: - Icon-state broadcast (targeted, change-only)
+
+    /// Last muted state we broadcast as an `icon-state` event. A muted `/speak`
+    /// must tell connected UIs the mute state (so the menu-bar glyph doesn't go
+    /// stale), but re-broadcasting the full `/settings` blob on every muted call
+    /// risks an echo-storm. Instead we emit a tiny `{"type":"icon-state",
+    /// "muted":<bool>}` event, and ONLY when the state actually changed since the
+    /// last one we sent — at most one event per real transition. `nil` = never
+    /// broadcast yet, so the first observation always emits. Guarded by
+    /// `iconStateLock` (this path is `nonisolated static`).
+    nonisolated(unsafe) private static var lastBroadcastMuted: Bool?
+    nonisolated private static let iconStateLock = NSLock()
+
+    /// Broadcast a lightweight `icon-state` event iff `muted` differs from the
+    /// last one we sent. Returns without broadcasting when unchanged.
+    nonisolated private static func broadcastIconStateIfChanged(
+        muted: Bool,
+        sseBroadcaster: SSEBroadcaster
+    ) async {
+        let changed = iconStateLock.withLock { () -> Bool in
+            guard lastBroadcastMuted != muted else { return false }
+            lastBroadcastMuted = muted
+            return true
+        }
+        guard changed else { return }
+        // Payload carries `type` too (not just the SSE `event:` field) so a
+        // client that switches on a parsed `data.type` still routes it.
+        await sseBroadcaster.broadcast(
+            event: "icon-state",
+            json: "{\"type\":\"icon-state\",\"muted\":\(muted)}"
+        )
+    }
+
     // MARK: - /speak handler
 
     nonisolated private static func handleSpeak(
         request: Request,
-        audioQueue: AudioQueueActor
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
     ) async throws -> Response {
 
         // Parse body
@@ -944,11 +991,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse("Text too long (max \(maxLen) chars)"), status: .badRequest)
         }
 
-        // Hard mute — return 200 with muted flag; caller won't retry
+        // Hard mute — return 200 with muted flag; caller won't retry. Also tell
+        // connected UIs the mute state so the menu-bar glyph doesn't go stale —
+        // but only as a tiny `icon-state` event, and only when the state changed
+        // (no echo-storm on a burst of muted calls).
         let cfg = CaldwellConfig.shared
         if cfg.isMuted {
+            await Self.broadcastIconStateIfChanged(muted: true, sseBroadcaster: sseBroadcaster)
             return try Self.json(MutedResponse(muted: true, text_preview: String(text.prefix(100))))
         }
+        // Not muted on this call — if we last told clients "muted", correct it now
+        // (state transitioned false) so a stale muted glyph clears via /speak too.
+        await Self.broadcastIconStateIfChanged(muted: false, sseBroadcaster: sseBroadcaster)
 
         // Polite mode: scrub expletives from bespoke lines before they are
         // cached or spoken. The toggle is authoritative — Polite is always clean
@@ -966,11 +1020,25 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let agentCategory = (body["agent"] as? String).flatMap {
             $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
         }
-        // Keep a narrating drone alive: a tagged line refreshes lastSeen for that
-        // category so the staleness sweep never evicts a drone mid-sentence.
-        if let agentCategory, isDrone(agentCategory) {
-            await audioQueue.touchInFlightDrones(category: agentCategory)
+        // Claim-on-speak: a sub-agent reveals its true character only by speaking
+        // with `--agent X`, because the SubagentStart hook carries no task text and
+        // registers every generic worker as an atlas. So when a tagged line comes
+        // in, promote ONE generic in-flight drone's PRESENCE to this category and
+        // re-broadcast the drone set — the swarm re-renders the real character
+        // instead of a wall of identical atlases. If the actor actually promoted a
+        // drone (or one already had this category) it returns true; only then does
+        // the presence differ from the last broadcast, so we re-broadcast.
+        if let agentCategory {
+            let didPromote = await audioQueue.promoteInFlightDrone(toCategory: agentCategory)
+            if didPromote {
+                let drones = await audioQueue.inFlightDronesSnapshot()
+                await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+            }
         }
+        // NOTE: a tagged `/speak` line no longer refreshes drone `lastSeen`. The
+        // old category-wide touch kept a ghost drone (lost SubagentStop) immortal
+        // beside any live same-category sibling. Liveness now rests on a reliable
+        // SubagentStop + the shorter `droneStaleAfter` backstop sweep only.
 
         // macOS local voice — synthesise via `say` to a temp AIFF so it plays
         // through the same envelope/lip-sync path. No network, no API key, no

@@ -147,6 +147,14 @@ struct FloatingHeadsView: View {
         .frame(width: Self.headZoneWidth, height: Self.headZoneHeight)
         .animation(.spring(response: 0.5, dampingFraction: 0.78), value: viewModel.queueItems.map(\.id))
         .animation(.spring(response: 0.5, dampingFraction: 0.78), value: sortedDrones.map(\.id))
+        // Idle cluster repack: when the count changes (drone joins/leaves) the
+        // slot offsets shift. Spring-animate on participant-id list so the repack
+        // is a smooth spring rather than a positional snap.
+        .animation(.spring(response: 0.5, dampingFraction: 0.78), value: participants.map(\.id))
+        // Mode switch speaker→idle (and vice-versa): slotOffset toggles between
+        // arc and cluster layouts. Spring this transition so drones don't teleport
+        // back to the swarm when the centre clears.
+        .animation(.spring(response: 0.48, dampingFraction: 0.74), value: speaker == nil)
         // The swap itself, P1: arriving drone overshoots slightly into the
         // centre (presence); departing Pulsar eases out slower. Both keyed on
         // who holds the centre so they animate as a matched trade.
@@ -204,13 +212,27 @@ struct FloatingHeadsView: View {
     }
 
     /// The orbit-slot offset the centre occupant travels FROM (on arrival) and
-    /// TO (on departure) — the "swap lane" for speaker hand-offs, so the incoming
-    /// and outgoing participants (drones or Pulsar — all peers) pass each other
-    /// along the same arc.
-    private func homeOrbitOffset(for _: Participant) -> CGSize {
-        let angle = orbitAngle(index: 0, total: max(orbitSlotCount, 1))
+    /// TO (on departure) — the "swap lane" for speaker hand-offs. Each participant
+    /// gets a STABLE arc index derived from its position in DroneRegistry.categories
+    /// (Pulsar = last slot), so incoming and outgoing speakers occupy different
+    /// lanes and pass each other cleanly instead of colliding on index 0.
+    private func homeOrbitOffset(for p: Participant) -> CGSize {
+        let stableIndex = stableArcIndex(for: p)
+        let total = max(DroneRegistry.categories.count + 1, 1)   // +1 for Pulsar's slot
+        let angle = orbitAngle(index: stableIndex, total: total)
         return CGSize(width: cos(angle) * orbitRadius,
                       height: sin(angle) * orbitRadius + orbitYOffset)
+    }
+
+    /// Stable arc index for a participant — its position in the canonical category
+    /// list, with Pulsar pinned to the last slot. This is purely for the transition
+    /// "home lane"; it is independent of how many participants are currently in the
+    /// orbit, so it never changes as others join or leave.
+    private func stableArcIndex(for p: Participant) -> Int {
+        guard let category = p.category else {
+            return DroneRegistry.categories.count   // Pulsar = last
+        }
+        return DroneRegistry.categories.firstIndex(of: category) ?? DroneRegistry.categories.count
     }
 
     /// The drone category that themes the CAPTION (tint + name pill). Keyed to
@@ -338,7 +360,10 @@ struct FloatingHeadsView: View {
                                    activeColor: droneColor(for: captionCategory))   // caption tint survives linger
                     .id(caption)
                     .offset(x: layout.captionXOffset)
-                    .padding(.horizontal, captionEdgePadding)
+                    // Use 2× glowMargin horizontally so the plusLighter rim-glow
+                    // (blur radius up to ~6pt, margin = 16pt) has a full margin
+                    // before the panel edge and doesn't hard-clip on either side.
+                    .padding(.horizontal, captionEdgePadding * 2)
                     .padding(layout.captionEdge == .above ? .top : .bottom, captionEdgePadding)
                     .background(
                         GeometryReader { proxy in

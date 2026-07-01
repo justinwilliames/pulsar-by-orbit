@@ -222,9 +222,21 @@ enum NativeVoiceClient {
         proc.arguments = ["-v", voice, "-r", String(rate), "-o", out.path, "[[slnc 150]] " + text]
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
-        try proc.run()
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            Task.detached { proc.waitUntilExit(); cont.resume() }
+        // Wait for `say` WITHOUT parking a cooperative-pool thread. The old
+        // `Task.detached { proc.waitUntilExit() }` blocked a pool thread per
+        // synth on a syscall — reintroducing the exact pool-exhaustion stall the
+        // afplay terminationHandler fix already solved for playback. Resume the
+        // continuation from `terminationHandler` (fired by Foundation off the
+        // pool) instead. The handler is set BEFORE `run()`; if `run()` throws it
+        // never fires, so we resume manually to avoid leaking the continuation.
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            proc.terminationHandler = { _ in cont.resume() }
+            do {
+                try proc.run()
+            } catch {
+                proc.terminationHandler = nil
+                cont.resume(throwing: error)
+            }
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int) ?? nil
         guard proc.terminationStatus == 0, let bytes = size, bytes > 0 else {

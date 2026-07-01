@@ -106,6 +106,12 @@ struct PortraitView: View {
             .onChange(of: droneName) { _, newName in
                 frames = PortraitView.loadFrames(droneName: newName)
                 blinkFrame = NSImage(named: "\(newName)-blink")
+                // Reset blink state so an in-flight blink from the previous face
+                // doesn't fire over the incoming portrait. Defer the next blink
+                // past the swap window (~0.5s) so the eye-open frame settles first.
+                blinkStart = -1
+                let now = Date().timeIntervalSinceReferenceDate
+                nextBlinkAt = now + 0.5 + Double.random(in: 3.5...5.0)
             }
         }
     }

@@ -45,12 +45,30 @@ final class DashboardViewModel {
         hasInFlightDrones || playback.isPlaying
     }
 
-    /// The panel is visible while ANY participant is present — Pulsar present OR
-    /// any drone in-flight — plus the existing trailing linger. Activity-gated,
-    /// not pure speech-gated: the orbit is the live team (Pulsar + running
-    /// sub-agents), shown whenever anyone on it is active.
+    /// True when the floating panel would actually show something renderable.
+    /// When showActiveAgents is OFF, drone heads are suppressed — so a panel
+    /// opened purely for an in-flight drone (no Pulsar speech, no caption) would
+    /// be empty. In that case we require Pulsar to actually be speaking before
+    /// considering the panel visible. The queue-bubble path is audio and always
+    /// renders regardless of the agents toggle.
+    var hasRenderableContent: Bool {
+        let agentsOn = settings?.showActiveAgents ?? true
+        if agentsOn {
+            // Normal: any participant present → something renders.
+            return pulsarIsPresent || hasInFlightDrones || playback.queuedCount > 0
+        } else {
+            // Agents hidden: only Pulsar speech (isPlaying) or a queued line
+            // produces visible output; silent drone-only activity does not.
+            return playback.isPlaying || playback.queuedCount > 0
+        }
+    }
+
+    /// The panel is visible while ANY renderable content is present — Pulsar
+    /// speaking OR (when showActiveAgents is on) any drone in-flight — plus the
+    /// existing trailing linger. When showActiveAgents is OFF, drone-only
+    /// in-flight activity does NOT open the panel (nothing would render).
     var panelShouldBeVisible: Bool {
-        pulsarIsPresent || hasInFlightDrones || playback.queuedCount > 0
+        hasRenderableContent
     }
 
     /// Last value pushed to `onPlaybackChanged`, so we only fire on a real edge.
@@ -290,9 +308,14 @@ final class DashboardViewModel {
             try? await Task.sleep(nanoseconds: UInt64(Self.returnToSwarmDelay * 1_000_000_000))
             guard let self, !Task.isCancelled else { return }
             guard !self.playback.isPlaying, self.hasInFlightDrones else { return }
-            self.playback.currentVoice = nil
-            self.playback.currentText = nil
-            self.playback.currentAgentCategory = nil
+            // Wrap in withAnimation so SwiftUI sees the state change with a spring
+            // rather than a snap — drones animate back to the idle cluster layout
+            // instead of teleporting.
+            withAnimation(.spring(response: 0.48, dampingFraction: 0.74)) {
+                self.playback.currentVoice = nil
+                self.playback.currentText = nil
+                self.playback.currentAgentCategory = nil
+            }
         }
     }
 

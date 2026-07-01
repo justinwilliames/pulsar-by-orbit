@@ -218,6 +218,24 @@ actor AudioQueueActor {
     // worker waits isn't a lost wakeup (worker would otherwise park 30s).
     private var failedIds: Set<String> = []
 
+    /// Delete a synth temp AIFF for `id` (if any) and drop its resolved/failed
+    /// bookkeeping, so an entry removed via ANY path — played, timed out, or
+    /// swept as a stale waiter — never leaks its `say`-produced temp file to disk.
+    /// The detached synth task writes into NSTemporaryDirectory and only ever
+    /// registers the URL via `markReady`; without this, a URL that lands (or has
+    /// already landed) in `resolvedURLs` for a dropped entry is never unlinked.
+    /// Only removes files under NSTemporaryDirectory — a phrase-cache/history mp3
+    /// that reached the queue via a resolved URL is never touched.
+    private func discardResolved(id: String) {
+        if let url = resolvedURLs.removeValue(forKey: id) {
+            let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).standardized.path
+            if url.standardized.path.hasPrefix(tmpDir) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        failedIds.remove(id)
+    }
+
     // MARK: - In-flight sub-agent drones
 
     /// One in-flight sub-agent: its drone category + the last time we heard from
@@ -236,14 +254,18 @@ actor AudioQueueActor {
 
     /// An in-flight drone is evicted if nothing has refreshed it within this
     /// window. This is ONLY a backstop for a lost SubagentStop hook — the normal
-    /// removal path is /subagent/stop, which fires reliably on completion. It must
-    /// be generously long: a sub-agent can run for many minutes WITHOUT speaking
-    /// (a silent build/research agent refreshes `lastSeen` only when it emits a
-    /// tagged `--agent` line). At the old 90s a silent long-runner's drone was
-    /// swept mid-task — it popped up, then vanished ~90s later while the agent was
-    /// still very much alive. 30 min comfortably covers any realistic agent while
-    /// still self-healing a genuinely dropped Stop within the session.
-    static let droneStaleAfter: TimeInterval = 1800
+    /// removal path is /subagent/stop, which fires reliably on completion.
+    ///
+    /// `lastSeen` is now refreshed ONLY by /subagent/start (spawn) and by an
+    /// id-scoped `touchInFlightDrone` — NOT by speech. A speaking `--agent <cat>`
+    /// line carries only a category, not a per-agent id, so the old category-wide
+    /// refresh kept a GHOST (a drone whose Stop was lost) immortal for as long as
+    /// any live sibling of the same category kept speaking. With that refresh
+    /// removed, the backstop no longer needs to cover a silent long-runner via
+    /// speech, so it can be much shorter: 10 min self-heals a genuinely dropped
+    /// Stop quickly while still comfortably outlasting any real gap between a
+    /// spawn and its reliable Stop.
+    static let droneStaleAfter: TimeInterval = 600
 
     /// Record a newly-spawned sub-agent as in-flight under its drone category.
     func addInFlightDrone(id: String, category: String) {
@@ -263,16 +285,51 @@ actor AudioQueueActor {
         inFlight[id]?.lastSeen = Date()
     }
 
-    /// Refresh `lastSeen` for every in-flight drone of a given category. The
-    /// `/speak --agent <cat>` path carries only the category (not an agentId),
-    /// so a narrating drone keeps all same-category siblings alive for the line.
-    func touchInFlightDrones(category: String) {
-        let cat = category.lowercased()
-        let now = Date()
-        for (id, d) in inFlight where d.category == cat {
-            inFlight[id]?.lastSeen = now
+    /// Claim-on-speak promotion. A sub-agent can only reveal its true drone
+    /// category by SPEAKING (`say.sh --agent X`) — the SubagentStart hook carries
+    /// only `agent_type`, so every generic worker registers as `atlas`/`unknown`.
+    /// When such a line arrives, promote ONE generic in-flight drone's PRESENCE to
+    /// category X so the orbiting swarm shows the real character, not a wall of
+    /// identical atlases.
+    ///
+    /// Returns true when presence is consistent with X afterwards — either a drone
+    /// of category X already existed (no dupe made) or one was promoted — so the
+    /// caller knows whether to re-broadcast. Returns false when nothing changed
+    /// (empty/"pulsar" category, or no generic drone available to claim).
+    ///
+    /// At most ONE promotion per call (the "claim"); prefers the most-recently-
+    /// registered generic drone (largest `lastSeen`), matching the intuition that
+    /// the newest just-spawned worker is the one now speaking.
+    func promoteInFlightDrone(toCategory category: String) -> Bool {
+        let trimmed = category.trimmingCharacters(in: .whitespaces).lowercased()
+        // The centre (Pulsar) and an empty tag are never orbit drones — nothing
+        // to promote.
+        guard !trimmed.isEmpty, trimmed != "pulsar" else { return false }
+
+        // Already correctly labelled somewhere in the swarm → presence consistent,
+        // no dupe, nothing mutated → return false so the caller skips the broadcast.
+        if inFlight.contains(where: { $0.value.category == trimmed }) {
+            return false
         }
+
+        // Find the most-recently-registered generic (not-yet-revealed) worker.
+        let generic = inFlight
+            .filter { $0.value.category == "atlas" || $0.value.category == "unknown" }
+            .max(by: { $0.value.lastSeen < $1.value.lastSeen })
+        guard let id = generic?.key else { return false }
+
+        inFlight[id]?.category = trimmed
+        NSLog("[AudioQueue] 🎭 promoted drone \(id) → \(trimmed) (claim-on-speak)")
+        return true
     }
+
+    // NOTE: the old `touchInFlightDrones(category:)` — a category-wide `lastSeen`
+    // refresh driven by every `/speak --agent <cat>` line — was REMOVED. It made
+    // a ghost drone (one whose SubagentStop was lost) immortal: any live sibling
+    // of the same category speaking kept refreshing the ghost too, so it never
+    // aged out. A speaking line carries only a category, not a per-agent id, so
+    // there is no reliable way to id-scope it. Drone liveness now rests solely on
+    // a reliable SubagentStop plus the shorter `droneStaleAfter` backstop sweep.
 
     /// Snapshot of the current in-flight drones (agentId → category).
     func inFlightDronesSnapshot() -> [String: String] {
@@ -333,9 +390,22 @@ actor AudioQueueActor {
     @discardableResult
     private func purgeStaleWaiters(now: Date = Date()) -> Int {
         let before = queue.count
-        queue.removeAll { now.timeIntervalSince($0.enqueuedAt) > Self.staleWaiterSeconds }
-        let purged = before - queue.count
+        var dropped: [AudioEntry] = []
+        queue.removeAll { entry in
+            let stale = now.timeIntervalSince(entry.enqueuedAt) > Self.staleWaiterSeconds
+            if stale { dropped.append(entry) }
+            return stale
+        }
+        let purged = dropped.count
         if purged > 0 {
+            // Drop each straggler's resolved/failed bookkeeping and unlink any
+            // synth temp AIFF it already produced, so a purged waiter never
+            // leaks its `say` output to disk. A late markReady for one of these
+            // ids self-cleans there too (the id is no longer a live waiter).
+            for entry in dropped {
+                readyContinuations.removeValue(forKey: entry.id)
+                discardResolved(id: entry.id)
+            }
             NSLog("[AudioQueue] 🧹 purged \(purged) stale waiter(s) (>\(Int(Self.staleWaiterSeconds))s unplayed)")
         }
         return purged
@@ -343,6 +413,21 @@ actor AudioQueueActor {
 
     /// Called by the background TTS fetch task when audio is ready.
     func markReady(id: String, url: URL) {
+        // The synth task can land AFTER the worker already dropped this entry
+        // (timed out, or swept as a stale waiter). If the id is no longer a
+        // live waiter and isn't the currently-playing entry, its temp AIFF is
+        // an orphan — unlink it now instead of storing it in resolvedURLs where
+        // nothing would ever delete it. This is the disk-leak-per-line fix.
+        let isLiveWaiter = readyContinuations[id] != nil || queue.contains(where: { $0.id == id })
+        let isPlaying = currentEntry?.id == id
+        guard isLiveWaiter || isPlaying else {
+            let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).standardized.path
+            if url.standardized.path.hasPrefix(tmpDir) {
+                try? FileManager.default.removeItem(at: url)
+            }
+            NSLog("[AudioQueue] 🧹 markReady \(id) for a dropped entry — orphan AIFF unlinked")
+            return
+        }
         resolvedURLs[id] = url
         let waiting = readyContinuations[id] != nil
         readyContinuations[id]?.resume()
@@ -538,7 +623,15 @@ actor AudioQueueActor {
     func timeoutEntry(id: String) {
         guard let cont = readyContinuations.removeValue(forKey: id) else { return }
         NSLog("[AudioQueue] ⏱ fetch timeout for \(id) after \(Self.fetchWaitTimeoutSeconds)s — skipping")
+        // The worker resumes into its no-URL fallback and drops this entry; if a
+        // synth URL had already raced into resolvedURLs it would otherwise leak,
+        // so unlink it here. A synth that lands LATER self-cleans in markReady
+        // (the id is no longer a live waiter once the worker moves past it).
         cont.resume()
+        // Note: the resumed worker consumes resolvedURLs[id] itself when a URL is
+        // present (it plays that entry). discardResolved only fires if the URL is
+        // still unclaimed after the worker's synchronous post-resume read — which
+        // can't interleave here (this runs before resume returns to the worker).
     }
 
     /// Terminate a process if it's still running (effective-end cutoff). Actor-

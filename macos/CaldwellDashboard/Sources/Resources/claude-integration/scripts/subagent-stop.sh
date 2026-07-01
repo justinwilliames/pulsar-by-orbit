@@ -7,12 +7,15 @@
 # completion bespoke. This hook only clears drone PRESENCE.
 #
 # Claude Code passes hook JSON on STDIN. We parse with python3 (no jq).
-# Best-effort + silent: if the app is down or anything fails, exit 0.
+# Best-effort: NEVER blocks Claude Code (always exits 0), but the stop POST is
+# retried up to 3 times, and a total failure is logged (not silently dropped) —
+# a swallowed stop is the root of "ghost drones" that never fade out.
 
 set -euo pipefail
 
 SPEAK_PORT="${SPEAK_PORT:-7865}"
 DAEMON="http://127.0.0.1:$SPEAK_PORT"
+FAIL_LOG="${PULSAR_HOOK_LOG:-$HOME/.claude/pulsar-hook-failures.log}"
 
 input=$(cat 2>/dev/null || true)
 
@@ -34,7 +37,24 @@ AGENT_ID=$(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.load(sy
 [ -z "$AGENT_ID" ] && exit 0
 
 # Clear the drone (orbit/swarm presence). NO say.sh call — the agent reports
-# its own completion.
-curl -sf --max-time 2 -X POST -H "Content-Type: application/json" \
-  -d "$BODY" "$DAEMON/subagent/stop" >/dev/null 2>&1 || true
+# its own completion. Retry up to 3 times with a short back-off so a momentary
+# hiccup under load doesn't leave a ghost drone stuck in orbit. Best-effort:
+# on total failure we LOG (never block Claude Code, but no longer silent).
+ok=0
+for attempt in 1 2 3; do
+  if curl -sf --max-time 4 -X POST -H "Content-Type: application/json" \
+       -d "$BODY" "$DAEMON/subagent/stop" >/dev/null 2>&1; then
+    ok=1
+    break
+  fi
+  [ "$attempt" -lt 3 ] && sleep 0.3 2>/dev/null || sleep 1 2>/dev/null || true
+done
+
+if [ "$ok" -ne 1 ]; then
+  { mkdir -p "$(dirname "$FAIL_LOG")" 2>/dev/null || true
+    ts=$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown)
+    printf '%s subagent-stop FAILED after 3 attempts for %s\n' "$ts" "$BODY" \
+      >> "$FAIL_LOG"
+  } 2>/dev/null || true
+fi
 exit 0

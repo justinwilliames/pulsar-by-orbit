@@ -176,7 +176,9 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Show subtitles")
                         .font(.caption.weight(.medium))
-                    Text("Read along — show the line Pulsar is speaking in a caption below the head.")
+                    Text(viewModel.settings?.floatingHeadEnabled == false
+                         ? "Requires Floating Head — enable above."
+                         : "Read along — show the line Pulsar is speaking in a caption below the head.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -191,7 +193,9 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Show active agents")
                         .font(.caption.weight(.medium))
-                    Text("Show the sub-agent drones swarming around Pulsar while they run. Off shows only Pulsar.")
+                    Text(viewModel.settings?.floatingHeadEnabled == false
+                         ? "Requires Floating Head — enable above."
+                         : "Show the sub-agent drones swarming around Pulsar while they run. Off shows only Pulsar.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

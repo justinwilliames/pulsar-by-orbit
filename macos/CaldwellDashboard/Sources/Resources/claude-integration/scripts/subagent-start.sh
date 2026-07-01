@@ -11,7 +11,8 @@
 # Claude Code passes hook JSON on STDIN (fields include agent_id and
 # agent_type, and sometimes a prompt). We parse with python3 (no jq) and POST
 # {agent_id, category} to /subagent/start. NO LLM calls — a static agent_type
-# map, then a keyword match on the prompt, then a fallback of "atlas".
+# map, then a keyword match on the prompt, then a fallback of "unknown"
+# (atlas is RESERVED for general-purpose/generalist agents, not a junk drawer).
 # Best-effort + silent: if the app is down or anything fails, exit 0.
 
 set -euo pipefail
@@ -24,7 +25,8 @@ input=$(cat 2>/dev/null || true)
 # Resolve {agent_id, category} from the hook payload. The category map is the
 # locked drone taxonomy: explorer→voyager, reviewer→sentinel, builder→nova,
 # artist→nebula, writer→echo, generalist→atlas. Unknown agent_types fall back
-# to a keyword match on the prompt, then to "atlas".
+# to a keyword match on the prompt, then to "unknown" (atlas stays reserved for
+# genuine generalists — general-purpose/generalist — never a catch-all).
 PARSED=$(printf '%s' "$input" | python3 -c '
 import json, sys
 
@@ -69,7 +71,10 @@ if not category:
             category = cat
             break
 if not category:
-    category = "atlas"
+    # Genuinely unrecognised: not in TYPE_MAP and no keyword hit. Emit the
+    # distinct "unknown" category (the daemon/registry renders it as a neutral
+    # drone). Atlas is NEVER a fallback — it is reserved for general-purpose.
+    category = "unknown"
 
 print(json.dumps({"agent_id": agent_id, "category": category}))
 ' 2>/dev/null || true)

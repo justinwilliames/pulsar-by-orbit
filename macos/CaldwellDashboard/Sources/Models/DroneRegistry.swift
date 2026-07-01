@@ -67,7 +67,7 @@ enum DroneRegistry {
     /// Colours: voyager/nova/nebula unchanged. echo/sentinel/atlas were
     /// re-separated (the old cyan/teal/slate blurred together) per the colour-
     /// distinctness review — echo → deeper teal, sentinel → bluer azure, atlas →
-    /// a blue-leaning slate, so the three read as clearly different hues.
+    /// warm violet (0.62 R, 0.45 G, 0.85 B), so the three read as clearly different hues.
     /// Motion: each character moves to its persona — explorer restless+fast,
     /// reviewer near-still, builder bouncy, artist smooth/flowing, writer steady,
     /// generalist neutral.
@@ -82,8 +82,15 @@ enum DroneRegistry {
               motion: MotionTrait(bobAmplitude: 2.4, bobFrequency: 0.85, activeScale: 2.4)),  // magenta — smooth, flowing
         Drone(category: "echo",     role: "writer",     color: Color(red: 0.18, green: 0.75, blue: 0.72), voice: "Tessa",    badge: "W",
               motion: MotionTrait(bobAmplitude: 1.6, bobFrequency: 1.0,  activeScale: 2.4)),  // teal — steady
-        Drone(category: "atlas",    role: "generalist", color: Color(red: 0.50, green: 0.55, blue: 0.80), voice: "Rishi",    badge: "G",
-              motion: MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9,  activeScale: 2.4)),  // slate-blue — neutral
+        Drone(category: "atlas",    role: "generalist", color: Color(red: 0.62, green: 0.45, blue: 0.85), voice: "Rishi",    badge: "G",
+              motion: MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9,  activeScale: 2.4)),  // violet — warm, distinct from sentinel azure
+        // "unknown" — a neutral catch-all for unrecognised agent categories.
+        // Desaturated mid-grey rim so it reads as "generic agent" without competing
+        // with any named drone hue. Shares Daniel's voice (Pulsar's) so the portrait
+        // server falls back to Pulsar's portrait frames — no bespoke art needed.
+        // Still/neutral motion so it doesn't draw the eye away from active drones.
+        Drone(category: "unknown",  role: "agent",      color: Color(red: 0.58, green: 0.58, blue: 0.60), voice: "Daniel",   badge: "?",
+              motion: MotionTrait(bobAmplitude: 1.2, bobFrequency: 0.75, activeScale: 2.3)),  // grey — neutral, visually recessive
     ]
 
     /// Pulsar's own neutral motion trait, for when Pulsar drops to an orbit slot.

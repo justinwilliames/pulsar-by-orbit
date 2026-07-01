@@ -7,6 +7,8 @@
 #   • Stop            → chime.sh               (free turn-end sound, no voice)
 #   • SessionStart    → session-start-voice.sh (bespoke turn-end voice directive)
 #   • UserPromptSubmit→ turn-start.sh          (stamps turn start for chime.sh)
+#   • SubagentStart   → subagent-start.sh      (registers a drone's presence)
+#   • SubagentStop    → subagent-stop.sh       (fades a drone out)
 #   • statusLine      → statusline.sh          (Pulsar's persona-aware bar)
 #
 # Together these make Pulsar speak model-side (the model composes a fresh
@@ -22,10 +24,13 @@ STOP_HOOK="$SCRIPT_DIR/stop-hook.sh"
 SESSION_HOOK="$SCRIPT_DIR/session-start-voice.sh"
 CHIME_HOOK="$SCRIPT_DIR/chime.sh"
 TURNSTART_HOOK="$SCRIPT_DIR/turn-start.sh"
+SUBSTART_HOOK="$SCRIPT_DIR/subagent-start.sh"
+SUBSTOP_HOOK="$SCRIPT_DIR/subagent-stop.sh"
 STATUSLINE="$SCRIPT_DIR/statusline.sh"
 SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 
-for f in "$STOP_HOOK" "$SESSION_HOOK" "$CHIME_HOOK" "$TURNSTART_HOOK" "$STATUSLINE"; do
+for f in "$STOP_HOOK" "$SESSION_HOOK" "$CHIME_HOOK" "$TURNSTART_HOOK" \
+         "$SUBSTART_HOOK" "$SUBSTOP_HOOK" "$STATUSLINE"; do
   [ -f "$f" ] || { echo "Error: missing hook script $f" >&2; exit 1; }
   chmod +x "$f"
 done
@@ -37,7 +42,8 @@ mkdir -p "$(dirname "$SETTINGS")"
 cp "$SETTINGS" "$SETTINGS.caldwell-bak.$(date +%s 2>/dev/null || echo bak)" 2>/dev/null || true
 
 STOP_HOOK="$STOP_HOOK" SESSION_HOOK="$SESSION_HOOK" CHIME_HOOK="$CHIME_HOOK" \
-TURNSTART_HOOK="$TURNSTART_HOOK" STATUSLINE="$STATUSLINE" SETTINGS="$SETTINGS" python3 <<'PY'
+TURNSTART_HOOK="$TURNSTART_HOOK" SUBSTART_HOOK="$SUBSTART_HOOK" \
+SUBSTOP_HOOK="$SUBSTOP_HOOK" STATUSLINE="$STATUSLINE" SETTINGS="$SETTINGS" python3 <<'PY'
 import json, os, sys
 
 settings_path = os.environ["SETTINGS"]
@@ -45,6 +51,8 @@ stop_cmd = os.environ["STOP_HOOK"]
 session_cmd = os.environ["SESSION_HOOK"]
 chime_cmd = os.environ["CHIME_HOOK"]
 turnstart_cmd = os.environ["TURNSTART_HOOK"]
+substart_cmd = os.environ["SUBSTART_HOOK"]
+substop_cmd = os.environ["SUBSTOP_HOOK"]
 statusline_cmd = os.environ["STATUSLINE"]
 
 with open(settings_path) as f:
@@ -71,6 +79,11 @@ added_stop = ensure("Stop", stop_cmd, 5)
 added_session = ensure("SessionStart", session_cmd, 5)
 added_chime = ensure("Stop", chime_cmd, 5)
 added_turnstart = ensure("UserPromptSubmit", turnstart_cmd, 5)
+# Drone hooks — appended ADDITIVELY alongside any existing SubagentStart/
+# SubagentStop hooks (e.g. claudata, delegation-ledger). ensure() only adds
+# when this exact command is absent, so re-running is a no-op.
+added_substart = ensure("SubagentStart", substart_cmd, 5)
+added_substop = ensure("SubagentStop", substop_cmd, 5)
 
 # statusLine is a top-level object, not a hook. Set it only if absent or if it
 # already points at a Pulsar statusline script — never clobber a custom one.
@@ -96,6 +109,8 @@ print(f"Stop hook (voice):     {'added' if added_stop else 'already present'}")
 print(f"Stop hook (chime):     {'added' if added_chime else 'already present'}")
 print(f"SessionStart hook:     {'added' if added_session else 'already present'}")
 print(f"UserPromptSubmit hook: {'added' if added_turnstart else 'already present'}")
+print(f"SubagentStart hook:    {'added' if added_substart else 'already present'}")
+print(f"SubagentStop hook:     {'added' if added_substop else 'already present'}")
 print(f"statusLine:            {sl_status}")
 print(f"Settings:              {settings_path}")
 PY

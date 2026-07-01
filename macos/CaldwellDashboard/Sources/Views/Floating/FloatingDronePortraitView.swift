@@ -22,10 +22,10 @@ struct FloatingDronePortraitView: View {
     let liveAmplitude: Float
     /// Resting thumbnail size.
     let thumbnailSize: CGFloat
-    /// Orbit placement around the main head.
-    let orbitRadius: CGFloat
-    let orbitYOffset: CGFloat
-    let angle: Double
+    /// Base slot position relative to the head-zone centre. An arc slot while a
+    /// speaker holds the centre, or a symmetric-cluster slot when the swarm is
+    /// idle. The organic drift is layered on top of this.
+    let slotOffset: CGSize
     /// Stable index for a per-drone bob phase offset.
     let index: Int
     /// Honour Reduce Motion — freeze the bob + pause blink when on.
@@ -76,8 +76,8 @@ struct FloatingDronePortraitView: View {
             // cluster of distinct, glowing characters.
             .shadow(color: color.opacity(0.45), radius: 6)
             .offset(
-                x: cos(angle) * orbitRadius + driftX,
-                y: sin(angle) * orbitRadius + orbitYOffset + driftY
+                x: slotOffset.width + driftX,
+                y: slotOffset.height + driftY
             )
         }
         .transition(

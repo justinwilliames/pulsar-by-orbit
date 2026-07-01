@@ -27,10 +27,14 @@ struct FloatingHeadsView: View {
     /// per-drone organic drift (FloatingDronePortraitView) then keeps them
     /// mingling so they never read as rigid, evenly-spaced icons.
     private let clusterCenterDegrees: Double = 270   // straight up
-    /// Angular gap between adjacent swarm slots. At radius 80 a 34° step puts
-    /// slot centres ~47pt apart — clear of the 40pt thumbnails (was 26° ⇒ ~34pt,
-    /// which overlapped the 40pt heads and bled their glows together).
+    /// Angular gap between adjacent swarm slots while a speaker holds the centre
+    /// (the arc orbit). At radius 80 a 34° step puts slot centres ~47pt apart —
+    /// clear of the 40pt thumbnails.
     private let clusterStepDegrees: Double = 34
+    /// Grid spacing for the IDLE symmetric cluster (no speaker) — 40pt thumbnails
+    /// with a ~12pt gap. Compact enough to read as a squeezed pod, loose enough
+    /// that the heads + glows don't touch.
+    private let clusterSpacing: CGFloat = 52
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
@@ -189,9 +193,7 @@ struct FloatingHeadsView: View {
                 isActiveSpeaker: false,                    // the speaker is always centre
                 liveAmplitude: 0,
                 thumbnailSize: thumbnailSize,
-                orbitRadius: orbitRadius,
-                orbitYOffset: orbitYOffset,
-                angle: orbitAngle(index: p.orbitIndex, total: orbitSlotCount),
+                slotOffset: slotOffset(index: p.orbitIndex, total: orbitSlotCount),
                 index: p.orbitIndex,
                 reduceMotion: reduceMotion,
                 portraitManager: viewModel.portraitManager
@@ -214,33 +216,6 @@ struct FloatingHeadsView: View {
     /// speaker colour + name even after the portrait has dropped back into the
     /// swarm (audio ended). nil = Pulsar (indigo) or no drone line.
     private var captionCategory: String? { viewModel.captionSpeakerCategory }
-
-    /// The speaker's identity as a tinted pill on the subtitle bubble's FAR edge —
-    /// the side opposite the tail, away from the head — "NAME · ROLE", themed to
-    /// the speaker's colour, drawn above the orbit z-order. Sitting on the far edge
-    /// keeps it clear of the tail/head and the orbit drones that crowd the
-    /// near-head zone.
-    /// Shown only when a drone holds the line; Pulsar shows nothing.
-    @ViewBuilder
-    private var nameHeaderPill: some View {
-        if let category = captionCategory {
-            let color = droneColor(for: category)
-            let role = droneRole(for: category).uppercased()
-            Text(role.isEmpty ? category.uppercased() : "\(category.uppercased()) · \(role)")
-                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                .tracking(1.2)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3.5)
-                .background(Capsule().fill(color.opacity(0.92)))
-                // strokeBorder draws INSIDE the edge so a crisp 1pt line survives.
-                .overlay(Capsule().strokeBorder(.white.opacity(0.7), lineWidth: 1))
-                .shadow(color: color.opacity(0.6), radius: 8)
-                .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
-                .transition(.opacity.combined(with: .scale(scale: 0.7)))
-                .allowsHitTesting(false)
-        }
-    }
 
     /// Idle queued voices keep their existing orbiting thumbnails, behind the drones.
     @ViewBuilder
@@ -352,15 +327,6 @@ struct FloatingHeadsView: View {
                                    tailEdge: layout.captionEdge == .above ? .bottom : .top,
                                    maxHeight: captionMaxHeight,
                                    activeColor: droneColor(for: captionCategory))   // caption tint survives linger
-                    // Speaker name pill on the edge OPPOSITE the bubble's tail
-                    // (the far side, away from the head) so it never collides with
-                    // the tail/head — and on the glow-padded edge so it isn't
-                    // clipped. Above the orbit z-order so a drone can't occlude it.
-                    .overlay(alignment: layout.captionEdge == .above ? .top : .bottom) {
-                        nameHeaderPill
-                            .offset(y: layout.captionEdge == .above ? 6 : 10)
-                            .zIndex(40)
-                    }
                     .id(caption)
                     .offset(x: layout.captionXOffset)
                     .padding(.horizontal, captionEdgePadding)
@@ -478,6 +444,52 @@ struct FloatingHeadsView: View {
         let offset = Double(index) - Double(total - 1) / 2.0
         let degrees = clusterCenterDegrees + offset * clusterStepDegrees
         return degrees * .pi / 180
+    }
+
+    /// The base slot offset for orbit participant `index` of `total`. Two modes:
+    ///   • A speaker holds the centre → the ARC orbit above the hub (arriving /
+    ///     departing speakers still pass along it).
+    ///   • Idle (no speaker) → a SYMMETRIC CLUSTER: the whole swarm squeezes into
+    ///     a vertically + horizontally balanced pod centred in the head zone.
+    private func slotOffset(index: Int, total: Int) -> CGSize {
+        if speaker != nil {
+            let angle = orbitAngle(index: index, total: total)
+            return CGSize(width: cos(angle) * orbitRadius,
+                          height: sin(angle) * orbitRadius + orbitYOffset)
+        }
+        let offs = symmetricClusterOffsets(total)
+        return index < offs.count ? offs[index] : .zero
+    }
+
+    /// Symmetric-cluster slot offsets for the idle swarm, centred on the head
+    /// zone. Balanced rows (both a horizontal AND a vertical mirror) that adapt
+    /// to the live participant count 1…7 (Pulsar + up to 6 drones):
+    ///   1:[1]  2:[2]  3:[3]  4:[2,2]  5:[2,1,2]  6:[3,3]  7:[3,1,3]
+    /// Each row is horizontally centred; the row COUNTS are a palindrome so the
+    /// pod mirrors top-to-bottom too. Slot order follows participant order, so a
+    /// change in the live set re-packs the pod symmetrically.
+    private func symmetricClusterOffsets(_ total: Int) -> [CGSize] {
+        let rows: [Int]
+        switch max(total, 0) {
+        case 0: return []
+        case 1: rows = [1]
+        case 2: rows = [2]
+        case 3: rows = [3]
+        case 4: rows = [2, 2]
+        case 5: rows = [2, 1, 2]
+        case 6: rows = [3, 3]
+        default: rows = [3, 1, 3]   // 7 (Pulsar + all 6 drones) is the ceiling
+        }
+        var offsets: [CGSize] = []
+        let rowCount = rows.count
+        for (r, count) in rows.enumerated() {
+            let y = (CGFloat(r) - CGFloat(rowCount - 1) / 2) * clusterSpacing + orbitYOffset
+            for c in 0..<count {
+                let x = (CGFloat(c) - CGFloat(count - 1) / 2) * clusterSpacing
+                offsets.append(CGSize(width: x, height: y))
+            }
+        }
+        return offsets
     }
 }
 

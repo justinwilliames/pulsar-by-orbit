@@ -16,7 +16,7 @@ struct FloatingHeadsView: View {
     /// long captions at ~3 lines.
     var onCaptionText: ((String) -> Void)?
 
-    private let orbitRadius: CGFloat = 74
+    private let orbitRadius: CGFloat = 80
     private let thumbnailSize: CGFloat = 40
     /// Lift the whole cluster UP so the swarm hovers over the TOP of the hub,
     /// leaving the below-head zone clear for the name pill + subtitle.
@@ -27,7 +27,10 @@ struct FloatingHeadsView: View {
     /// per-drone organic drift (FloatingDronePortraitView) then keeps them
     /// mingling so they never read as rigid, evenly-spaced icons.
     private let clusterCenterDegrees: Double = 270   // straight up
-    private let clusterStepDegrees: Double = 26      // tight spacing between slots
+    /// Angular gap between adjacent swarm slots. At radius 80 a 34° step puts
+    /// slot centres ~47pt apart — clear of the 40pt thumbnails (was 26° ⇒ ~34pt,
+    /// which overlapped the 40pt heads and bled their glows together).
+    private let clusterStepDegrees: Double = 34
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the
@@ -212,10 +215,11 @@ struct FloatingHeadsView: View {
     /// swarm (audio ended). nil = Pulsar (indigo) or no drone line.
     private var captionCategory: String? { viewModel.captionSpeakerCategory }
 
-    /// The speaker's identity as a tinted pill HEADER attached to the TOP edge of
-    /// the subtitle bubble — "NAME · ROLE", themed to the speaker's colour, drawn
-    /// above the orbit z-order. Co-locating it with the speech keeps the name
-    /// legible and clear of the orbit drones that crowd the below-head zone.
+    /// The speaker's identity as a tinted pill on the subtitle bubble's FAR edge —
+    /// the side opposite the tail, away from the head — "NAME · ROLE", themed to
+    /// the speaker's colour, drawn above the orbit z-order. Sitting on the far edge
+    /// keeps it clear of the tail/head and the orbit drones that crowd the
+    /// near-head zone.
     /// Shown only when a drone holds the line; Pulsar shows nothing.
     @ViewBuilder
     private var nameHeaderPill: some View {
@@ -348,11 +352,13 @@ struct FloatingHeadsView: View {
                                    tailEdge: layout.captionEdge == .above ? .bottom : .top,
                                    maxHeight: captionMaxHeight,
                                    activeColor: droneColor(for: captionCategory))   // caption tint survives linger
-                    // Speaker name pill straddling the bubble's TOP edge, above
-                    // the orbit z-order so it's never occluded by a drone.
-                    .overlay(alignment: .top) {
+                    // Speaker name pill on the edge OPPOSITE the bubble's tail
+                    // (the far side, away from the head) so it never collides with
+                    // the tail/head — and on the glow-padded edge so it isn't
+                    // clipped. Above the orbit z-order so a drone can't occlude it.
+                    .overlay(alignment: layout.captionEdge == .above ? .top : .bottom) {
                         nameHeaderPill
-                            .offset(y: layout.captionEdge == .above ? 6 : -10)
+                            .offset(y: layout.captionEdge == .above ? 6 : 10)
                             .zIndex(40)
                     }
                     .id(caption)

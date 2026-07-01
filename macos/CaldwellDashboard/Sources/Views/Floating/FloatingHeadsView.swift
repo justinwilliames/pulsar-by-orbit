@@ -17,7 +17,9 @@ struct FloatingHeadsView: View {
     var onCaptionText: ((String) -> Void)?
 
     private let orbitRadius: CGFloat = 80
-    private let thumbnailSize: CGFloat = 40
+    /// In-action sub-agent thumbnail size — bumped ~30% (40→52) so the swarm reads
+    /// bold, not compressed. The cluster spacing + arc step below scale with it.
+    private let thumbnailSize: CGFloat = 52
     /// Lift the whole cluster UP so the swarm hovers over the TOP of the hub,
     /// leaving the below-head zone clear for the name pill + subtitle.
     private let orbitYOffset: CGFloat = -8
@@ -28,13 +30,13 @@ struct FloatingHeadsView: View {
     /// mingling so they never read as rigid, evenly-spaced icons.
     private let clusterCenterDegrees: Double = 270   // straight up
     /// Angular gap between adjacent swarm slots while a speaker holds the centre
-    /// (the arc orbit). At radius 80 a 34° step puts slot centres ~47pt apart —
-    /// clear of the 40pt thumbnails.
-    private let clusterStepDegrees: Double = 34
-    /// Grid spacing for the IDLE symmetric cluster (no speaker) — 40pt thumbnails
-    /// ~8pt apart so they sit snug ("all next to each other") as one oval pod
-    /// without the heads themselves overlapping.
-    private let clusterSpacing: CGFloat = 48
+    /// (the arc orbit). Widened to 44° so the larger 52pt thumbnails still clear
+    /// each other on the arc.
+    private let clusterStepDegrees: Double = 44
+    /// Grid spacing for the IDLE symmetric cluster (no speaker) — sized to the
+    /// larger 52pt thumbnails (~10pt gap) so they sit snug as one oval pod without
+    /// the heads overlapping.
+    private let clusterSpacing: CGFloat = 63
 
     /// Fixed head-zone footprint. The head + its orbiting queue thumbnails + glow
     /// live here; the caption grows ABOVE or BELOW it. Height is sized so the

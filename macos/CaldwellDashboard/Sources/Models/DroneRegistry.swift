@@ -49,16 +49,16 @@ enum DroneRegistry {
     ///
     /// Voice choices — persona + assumed gender → a distinct, genuinely humanoid
     /// ENGLISH voice installed on this machine. This box has only three humanoid
-    /// English MALE voices (Daniel, Rishi, Aman), one of which is Pulsar's, so the
-    /// two rugged males (Voyager, Atlas) take Aman + Rishi and the gender-neutral
-    /// communicator Echo takes a female voice (Tessa) — every character speaks in a
-    /// real English voice rather than a non-English one mispronouncing English.
-    /// To upgrade any of them: download a premium voice (System Settings → Spoken
-    /// Content → System Voice → Manage Voices) and edit the `voice:` string here.
-    ///   • voyager  (explorer)                → Tara     (en-IN) — energetic, adventurous.
-    ///     (Was Aman, but this machine has a DUPLICATE Aman — a Siri variant — and
-    ///     `say -v Aman` picked it and spoke garbled/non-English. Tara is a single
-    ///     clean en-IN voice keeping the same India-accent flavour.)
+    /// Only DEFAULT-installed voices are used — ones macOS enumerates via
+    /// AVSpeechSynthesisVoice (so `say` always finds them). Tara/Aman are NOT
+    /// enumerated / are Siri-clashed, so they silently fell back to Daniel — hence
+    /// this roster sticks to the seven reliable gendered English voices. Each is
+    /// UNIQUE and matches the character's gender + aesthetic. Three male voices
+    /// exist (Daniel, Rishi, Fred), so the three male characters are Pulsar,
+    /// Voyager, Atlas; the four female voices go to the four female characters.
+    ///   • pulsar   (M, orchestrator)         → Daniel   (en-GB) — authoritative conductor
+    ///   • voyager  (M, rugged explorer)      → Fred     (en-US) — gruff, characterful (the
+    ///     only remaining default male; a touch retro, which suits a rugged scout)
     ///   • sentinel (F, precise reviewer)     → Karen    (en-AU) — crisp, authoritative
     ///   • nova     (F, eager builder)        → Samantha (en-US) — bright, upbeat
     ///   • nebula   (F, artist)               → Moira    (en-IE) — warm, lyrical
@@ -72,7 +72,7 @@ enum DroneRegistry {
     /// reviewer near-still, builder bouncy, artist smooth/flowing, writer steady,
     /// generalist neutral.
     static let drones: [Drone] = [
-        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Tara",     badge: "E",
+        Drone(category: "voyager",  role: "explorer",   color: Color(red: 0.95, green: 0.66, blue: 0.23), voice: "Fred",     badge: "E",
               motion: MotionTrait(bobAmplitude: 3.4, bobFrequency: 1.35, activeScale: 2.5)),  // amber — restless, wide, fast
         Drone(category: "sentinel", role: "reviewer",   color: Color(red: 0.42, green: 0.72, blue: 0.92), voice: "Karen",    badge: "R",
               motion: MotionTrait(bobAmplitude: 0.8, bobFrequency: 0.6,  activeScale: 2.3)),  // azure — still, minimal

@@ -617,7 +617,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             id: entryId,
             text: String((meta?.text ?? "(cached phrase)").prefix(100)),
             voiceId: meta?.voice_id ?? "",
-            voiceLabel: meta?.voice_label ?? meta?.voice_id ?? "Caldwell",
+            voiceLabel: meta?.voice_label ?? meta?.voice_id ?? "Pulsar",
             createdAt: Date(),
             channel: nil,
             priority: false,

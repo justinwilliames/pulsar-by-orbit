@@ -30,6 +30,11 @@ final class PulsarHTTPServer: @unchecked Sendable {
     private var droneSweepTask: Task<Void, Never>?
 
     func configure() async {
+        // One-shot Caldwell→Pulsar / legacy-dir config migration. MUST run before
+        // restoreInFlight()/the server arms and before the first /settings POST,
+        // so the merge can't race a live write. Sentinel-gated + fully guarded —
+        // a failed migration never blocks startup (see PulsarConfig).
+        PulsarConfig.shared.migrateLegacyConfigIfNeeded()
         await audioQueue.setBroadcaster(sseBroadcaster)
         // History lives in memory and starts empty, so any retained replay
         // audio on disk is orphaned from a prior run — clear it.

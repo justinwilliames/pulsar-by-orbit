@@ -226,6 +226,91 @@ func runAll() async {
         await expect(await actor.sweepStaleDrones(now: Date()) != nil, "first sweep evicts")
         await expect(await actor.sweepStaleDrones(now: Date()) == nil, "second sweep → nil")
     }
+
+    // MARK: - PulsarConfig: Fix 2 (set() preserves siblings) + Fix 3 (migration)
+    //
+    // These drive the SHARED PulsarConfig.shared singleton. Its storageRoot reads
+    // PULSAR_STORAGE from the env at every access, so each test points it at a
+    // fresh temp dir via `setenv` before writing/reading. All assertions read the
+    // config.json bytes back directly, so they don't depend on the singleton's
+    // in-memory _config (loaded once at process init against whatever env was set
+    // first — see the entry point, which seeds a throwaway dir before anything
+    // touches the singleton).
+
+    await test("set() preserves a Bool-valued sibling key (Fix 2)") {
+        let cfg = PulsarConfig.shared
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cfg-set-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        setenv("PULSAR_STORAGE", dir.path, 1)
+
+        // A config whose sibling holds a real JSON Bool (not a string) — the exact
+        // shape the old strict `as? [String: String]` cast returned nil on, then
+        // clobbered on the next write.
+        let seed: [String: Any] = ["PULSAR_MUTED": true, "PULSAR_NATIVE_VOICE": "Trinoids"]
+        let seedData = try! JSONSerialization.data(withJSONObject: seed)
+        try! seedData.write(to: cfg.configPath)
+
+        try! cfg.set("PULSAR_EXPLETIVES", value: "1")
+
+        let after = try! JSONSerialization.jsonObject(
+            with: Data(contentsOf: cfg.configPath)) as! [String: Any]
+        await expect(after["PULSAR_EXPLETIVES"] as? String == "1", "new key written")
+        // The Bool sibling must survive (coerced to "1"), NOT be wiped.
+        let mutedSurvived = after["PULSAR_MUTED"] != nil
+        await expect(mutedSurvived, "Bool sibling PULSAR_MUTED preserved (not wiped)")
+        await expect(after["PULSAR_NATIVE_VOICE"] as? String == "Trinoids",
+                     "string sibling preserved")
+
+        unsetenv("PULSAR_STORAGE")
+    }
+
+    await test("migration: CALDWELL_* → PULSAR_*, PULSAR_ wins, sentinel gates (Fix 3)") {
+        let cfg = PulsarConfig.shared
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cfg-mig-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        setenv("PULSAR_STORAGE", dir.path, 1)
+
+        // A half-migrated live config exactly like the one found on disk: most
+        // keys still CALDWELL_*, one already re-toggled to PULSAR_EXPLETIVES.
+        let seed: [String: Any] = [
+            "CALDWELL_MUTED": "0",
+            "CALDWELL_NATIVE_VOICE": "Trinoids",
+            "CALDWELL_EXPLETIVES": "0",   // conflicts with the PULSAR_ below
+            "PULSAR_EXPLETIVES": "1",     // post-rename re-toggle — must WIN
+        ]
+        try! JSONSerialization.data(withJSONObject: seed).write(to: cfg.configPath)
+
+        cfg.migrateLegacyConfigIfNeeded()
+
+        let after = try! JSONSerialization.jsonObject(
+            with: Data(contentsOf: cfg.configPath)) as! [String: Any]
+        await expect(after["PULSAR_MUTED"] as? String == "0", "CALDWELL_MUTED → PULSAR_MUTED")
+        await expect(after["PULSAR_NATIVE_VOICE"] as? String == "Trinoids",
+                     "CALDWELL_NATIVE_VOICE → PULSAR_NATIVE_VOICE")
+        await expect(after["PULSAR_EXPLETIVES"] as? String == "1",
+                     "PULSAR_ wins on conflict (kept 1, not overwritten by CALDWELL 0)")
+        let noLegacy = after.keys.contains { $0.hasPrefix("CALDWELL_") } == false
+        await expect(noLegacy, "all CALDWELL_* keys dropped")
+
+        // Sentinel written on success.
+        let sentinel = dir.appendingPathComponent(".migrated")
+        await expect(FileManager.default.fileExists(atPath: sentinel.path),
+                     "sentinel written")
+
+        // Idempotent: re-running does nothing even if we sneak a CALDWELL_ key back.
+        var tampered = after
+        tampered["CALDWELL_SNEAKY"] = "x"
+        try! JSONSerialization.data(withJSONObject: tampered).write(to: cfg.configPath)
+        cfg.migrateLegacyConfigIfNeeded()   // sentinel present → no-op
+        let after2 = try! JSONSerialization.jsonObject(
+            with: Data(contentsOf: cfg.configPath)) as! [String: Any]
+        await expect(after2["CALDWELL_SNEAKY"] as? String == "x",
+                     "sentinel gates re-run (sneaky key untouched, not re-migrated)")
+
+        unsetenv("PULSAR_STORAGE")
+    }
 }
 
 // MARK: - Entry point
@@ -233,6 +318,15 @@ func runAll() async {
 @main
 struct DroneTestMain {
     static func main() async {
+        // Seed PULSAR_STORAGE at a throwaway dir BEFORE any code touches
+        // PulsarConfig.shared, so the singleton's one-time init (and every config
+        // test below) reads/writes an isolated temp config.json — never the real
+        // ~/Library/Application Support/Pulsar/config.json or the running app.
+        let seedDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cfg-seed-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: seedDir, withIntermediateDirectories: true)
+        setenv("PULSAR_STORAGE", seedDir.path, 1)
+
         await runAll()
         let (passed, failed, failures) = await report.summary()
         print("\n─────────────────────────────")

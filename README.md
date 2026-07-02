@@ -19,7 +19,7 @@ Forked from [speak](https://github.com/tomc98/speak) by Thomas Csere.
 ## Requirements
 
 - macOS 26 (Tahoe) or later, on Apple Silicon
-- [Claude Code](https://claude.ai/code) with this skill installed
+- [Claude Code](https://claude.ai/code) — Pulsar installs its skill + hooks into it for you (one click, step 4)
 
 That's the whole list. The voice runs on macOS's built-in `say` — there's no account to create, no key to paste, and no service to reach over the network.
 
@@ -43,7 +43,7 @@ Seven characters, each with its own voice and role:
 - **Echo** — writer. Docs and copy.
 - **Atlas** — the generalist, for everything that doesn't fit the others.
 
-The swarm is wired through Claude Code's `SubagentStart` and `SubagentStop` hooks (installed in step 5). A background sweep clears out any drone whose stop signal never arrived, and the current set survives a restart — so what's on screen matches what's actually running.
+The swarm is wired through Claude Code's `SubagentStart` and `SubagentStop` hooks (installed for you in step 4). A background sweep clears out any drone whose stop signal never arrived, and the current set survives a restart — so what's on screen matches what's actually running.
 
 ---
 
@@ -67,30 +67,13 @@ xattr -dr com.apple.quarantine "/Applications/Pulsar.app"
 
 Then launch from Applications. The menu-bar icon appears.
 
-### 4. Install as a Claude Code skill
+### 4. Connect it to Claude Code (one click — no repo, no Terminal)
 
-```bash
-mkdir -p ~/.claude/skills
-ln -s ~/code/pulsar ~/.claude/skills/pulsar
-```
+Click the **Pulsar** menu-bar icon, open the **Settings** tab, and hit **Set up Pulsar in Claude Code**.
 
-If you haven't cloned the repo yet, do that first:
+That's the whole step. The app installs its skill and every hook straight from its own bundle into `~/.claude/` — it backs up your `settings.json` first, adds only what's missing, and leaves any other hooks you have untouched. Then **restart Claude Code** so it picks everything up. From then on Pulsar composes a custom line each turn, with the cached canon as the floor.
 
-```bash
-git clone https://github.com/justinwilliames/pulsar-by-orbit.git ~/code/pulsar
-mkdir -p ~/.claude/skills
-ln -s ~/code/pulsar ~/.claude/skills/pulsar
-```
-
-Then **restart Claude Code** so it discovers the skill. The shipped [`SKILL.md`](SKILL.md) tells Claude to fire Pulsar at the end of every turn.
-
-### 5. Install the hooks
-
-```bash
-~/code/pulsar/scripts/install-hooks.sh
-```
-
-This is idempotent — it wires the hooks and statusline into your `~/.claude/settings.json` only if they're absent, and leaves your other hooks alone. It sets up:
+What the one-click installer wires up:
 
 - **`SessionStart` → `session-start-voice.sh`** — when the app is running, injects a directive so Claude composes a fresh, *bespoke* line each turn. This rides your own Claude Code session, so there's no extra key. When the app is off, it injects nothing and the voice stays dormant.
 - **`Stop` → `stop-hook.sh`** — plays a cached canonical line as the fallback for any turn Claude doesn't speak on (debounced, so you never get double voice).
@@ -99,7 +82,21 @@ This is idempotent — it wires the hooks and statusline into your `~/.claude/se
 - **`SubagentStart` → `subagent-start.sh`** and **`SubagentStop` → `subagent-stop.sh`** — register and retire the sub-agent drones described above.
 - **`statusLine` → `statusline.sh`** — the Claude Code status line.
 
-**Start a new Claude Code session** after running it. From then on Pulsar composes a custom line each turn, with the cached canon as the floor.
+<details>
+<summary><b>Prefer to install from source?</b> (optional — for contributors)</summary>
+
+If you're building from source or want the scripts in a repo you control, wire it up manually instead of using the in-app button:
+
+```bash
+git clone https://github.com/justinwilliames/pulsar-by-orbit.git ~/code/pulsar
+mkdir -p ~/.claude/skills
+ln -s ~/code/pulsar ~/.claude/skills/pulsar
+~/code/pulsar/scripts/install-hooks.sh
+```
+
+`install-hooks.sh` is idempotent and does the same wiring as the in-app installer — it only adds hooks that are absent and leaves your others alone. Restart Claude Code afterward.
+
+</details>
 
 ---
 

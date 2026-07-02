@@ -24,7 +24,8 @@ input=$(cat 2>/dev/null || true)
 
 # Resolve {agent_id, category} from the hook payload. The category map is the
 # locked drone taxonomy: explorer→voyager, reviewer→sentinel, builder→nova,
-# artist→nebula, writer→echo, generalist→atlas. Unknown agent_types fall back
+# creative (writer + artist: drafting, copy, docs, design, image gen)→nebula,
+# generalist→atlas. Unknown agent_types fall back
 # to a keyword match on the prompt, then to "unknown" (atlas stays reserved for
 # genuine generalists — general-purpose/generalist — never a catch-all).
 PARSED=$(printf '%s' "$input" | AGENT_ID_FALLBACK="$(uuidgen 2>/dev/null || true)" python3 -c '
@@ -58,7 +59,7 @@ TYPE_MAP = {
     "review": "sentinel", "reviewer": "sentinel", "security-review": "sentinel",
     "build": "nova", "builder": "nova", "general-purpose": "atlas",
     "artist": "nebula", "design": "nebula", "designer": "nebula",
-    "write": "echo", "writer": "echo", "scribe": "echo",
+    "write": "nebula", "writer": "nebula", "scribe": "nebula",
     "general": "atlas", "generalist": "atlas",
 }
 
@@ -68,7 +69,7 @@ KEYWORDS = [
     (("review", "audit", "critique", "security", "vulnerab", "lint"), "sentinel"),
     (("build", "implement", "refactor", "compile", "code", "fix"), "nova"),
     (("design", "art", "image", "icon", "visual", "illustrat", "logo"), "nebula"),
-    (("write", "draft", "copy", "doc", "changelog", "prose", "blog"), "echo"),
+    (("write", "draft", "copy", "doc", "changelog", "prose", "blog", "content"), "nebula"),
 ]
 
 category = TYPE_MAP.get(agent_type, "")

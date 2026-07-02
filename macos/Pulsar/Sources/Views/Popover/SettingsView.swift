@@ -20,6 +20,8 @@ struct SettingsView: View {
                 claudeIntegrationSection
                 Divider()
                 personaSection
+                Divider()
+                taskModeSection
                 statusBanner
                 Divider()
                 CheckForUpdatesView(updater: updater)
@@ -169,6 +171,68 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Task Mode (beta)
+
+    @ViewBuilder
+    private var taskModeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("TASK MODE")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: taskModeEnabledBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Task mode (beta)")
+                        .font(.caption.weight(.medium))
+                    Text("Adds a Missions tab — a persistent board of every active Claude Code agent and its status, so you can see at a glance which run needs you. Off by default.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: llmTitlesEnabledBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AI-generated mission names")
+                        .font(.caption.weight(.medium))
+                    Text(viewModel.settings?.taskModeEnabled == false
+                         ? "Requires Task mode — enable above."
+                         : "Off (default): missions are named from your first message, fully on-device. On: your first message is sent to Claude (Haiku) to generate a short title.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            // AI titles ride on Task mode — no board, no missions to name.
+            .disabled(viewModel.settings?.taskModeEnabled == false)
+        }
+    }
+
+    private var taskModeEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.taskModeEnabled ?? false },
+            set: { newValue in Task { await viewModel.setTaskModeEnabled(newValue) } }
+        )
+    }
+
+    private var llmTitlesEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.settings?.llmTitlesEnabled ?? false },
+            set: { newValue in Task { await viewModel.setLlmTitlesEnabled(newValue) } }
+        )
+    }
+
     // MARK: - Persona (copyable prompt for the user's own Claude)
 
     @ViewBuilder
@@ -214,32 +278,15 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .tracking(0.5)
 
-            // Voices are now FIXED per character — Pulsar speaks as Daniel and
-            // each sub-agent drone has its own distinct humanoid voice from the
-            // registry. The user voice-picker has been removed.
-            Text("Pulsar speaks as Daniel (UK). Each sub-agent drone has its own distinct voice.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
             if viewModel.settings?.enhancedInstalled == false {
                 installNudge
             }
 
-            Toggle(isOn: canonEnabledBinding) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Quick cached pings")
-                        .font(.caption.weight(.medium))
-                    Text(canonHint)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-
-            Toggle(isOn: floatingHeadEnabledBinding) {
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: floatingHeadEnabledBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Floating head")
                         .font(.caption.weight(.medium))
@@ -248,11 +295,14 @@ struct SettingsView: View {
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 0)
             }
-            .toggleStyle(.switch)
-            .controlSize(.small)
 
-            Toggle(isOn: subtitlesEnabledBinding) {
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: subtitlesEnabledBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Show subtitles")
                         .font(.caption.weight(.medium))
@@ -263,13 +313,16 @@ struct SettingsView: View {
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 0)
             }
-            .toggleStyle(.switch)
-            .controlSize(.small)
             // Subtitles ride on the head — no head, nothing to caption.
             .disabled(viewModel.settings?.floatingHeadEnabled == false)
 
-            Toggle(isOn: showActiveAgentsBinding) {
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: showActiveAgentsBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Show active agents")
                         .font(.caption.weight(.medium))
@@ -280,9 +333,8 @@ struct SettingsView: View {
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 0)
             }
-            .toggleStyle(.switch)
-            .controlSize(.small)
             // The swarm rides on the head — no head, nothing to orbit.
             .disabled(viewModel.settings?.floatingHeadEnabled == false)
 
@@ -310,13 +362,6 @@ struct SettingsView: View {
         }
     }
 
-    private var canonEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.settings?.canonEnabled ?? true },
-            set: { newValue in Task { await viewModel.setCanonEnabled(newValue) } }
-        )
-    }
-
     private var floatingHeadEnabledBinding: Binding<Bool> {
         Binding(
             get: { viewModel.settings?.floatingHeadEnabled ?? true },
@@ -336,13 +381,6 @@ struct SettingsView: View {
             get: { viewModel.settings?.showActiveAgents ?? true },
             set: { newValue in Task { await viewModel.setShowActiveAgents(newValue) } }
         )
-    }
-
-    private var canonHint: String {
-        if viewModel.settings?.canonEnabled == false {
-            return "Off -- bespoke only: model-composed lines each turn."
-        }
-        return "On -- short cached status pings at turn-end (e.g. \"Done.\", \"Pushed.\")."
     }
 
     private var expletivesBinding: Binding<Bool> {

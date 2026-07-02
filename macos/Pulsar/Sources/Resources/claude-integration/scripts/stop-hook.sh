@@ -18,6 +18,12 @@
 # Stop hooks block Claude Code until they exit, so this is built to be
 # fast (<100ms typical) and silent (all output redirected to /dev/null).
 
+# Recursion guard — the Missions titler (turn-start.sh) invokes `claude` with
+# hooks disabled to generate a session name; if that ever leaks, this env flag
+# set on the naming sub-run keeps its Stop from creating a stray "waiting"
+# mission (or looping). No-op the whole hook for the naming invocation.
+[ -n "$PULSAR_NAMING" ] && exit 0
+
 set -e
 
 DAEMON="http://127.0.0.1:7865"
@@ -35,6 +41,32 @@ fi
 
 # 1. Daemon up?
 curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1 || exit 0
+
+# 1b. Missions board: the turn just ENDED, so this session is now waiting on the
+#     user ("Needs you"). Signal phase:"waiting" — NO user_message (only a real
+#     UserPromptSubmit moves the recency window). Best-effort, backgrounded,
+#     non-fatal, and fired regardless of the mute/busy/debounce backoffs below so
+#     the board's status is always accurate. Parses session_id/cwd from the Stop
+#     event JSON already read into EVENT_JSON above.
+if [ -n "$EVENT_JSON" ]; then
+  S_SID=$(printf '%s' "$EVENT_JSON" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("session_id",""))
+except: print("")' 2>/dev/null || echo "")
+  S_CWD=$(printf '%s' "$EVENT_JSON" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("cwd",""))
+except: print("")' 2>/dev/null || echo "")
+  if [ -n "$S_SID" ]; then
+    S_BODY=$(python3 -c 'import sys,json
+sid,cwd=sys.argv[1],sys.argv[2]
+d={"session_id":sid,"phase":"waiting"}
+if cwd: d["cwd"]=cwd
+print(json.dumps(d))' "$S_SID" "$S_CWD" 2>/dev/null || echo "")
+    if [ -n "$S_BODY" ]; then
+      ( curl -sf --max-time 2 -X POST -H 'Content-Type: application/json' \
+          -d "$S_BODY" "$DAEMON/session/activity" >/dev/null 2>&1 || true ) &
+    fi
+  fi
+fi
 
 # 2. Pull /settings once — check muted state
 SETTINGS=$(curl -sf --connect-timeout 1 "$DAEMON/settings" 2>/dev/null || echo "{}")

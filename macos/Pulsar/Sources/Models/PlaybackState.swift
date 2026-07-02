@@ -130,6 +130,28 @@ struct DronesInFlightEvent: Codable {
     let drones: [String: String]
 }
 
+// MARK: - Session grouping (Missions board)
+
+/// The session-grouping payload — the `sessions` SSE event and the `/sessions`
+/// GET share this exact snake_case shape. Each session nests its drones.
+struct SessionsEnvelope: Codable, Sendable {
+    let sessions: [SessionDTO]
+}
+
+struct SessionDTO: Codable, Sendable {
+    let session_id: String
+    let name: String
+    let label: String
+    let phase: String
+    let last_seen: Int
+    let drones: [SessionDroneDTO]
+}
+
+struct SessionDroneDTO: Codable, Sendable {
+    let agent_id: String
+    let category: String
+}
+
 struct PauseStateEvent: Codable {
     let globalPaused: Bool
     let channelPaused: [String]

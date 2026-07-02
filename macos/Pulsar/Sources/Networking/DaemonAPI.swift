@@ -87,7 +87,7 @@ struct DaemonAPI: Sendable {
         return try JSONDecoder().decode(DaemonSettings.self, from: data)
     }
 
-    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, subtitlesEnabled: Bool? = nil, showActiveAgents: Bool? = nil, nativeVoice: String? = nil) async throws -> SettingsSaveResponse {
+    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, subtitlesEnabled: Bool? = nil, showActiveAgents: Bool? = nil, taskModeEnabled: Bool? = nil, llmTitlesEnabled: Bool? = nil, nativeVoice: String? = nil) async throws -> SettingsSaveResponse {
         var body: [String: Any] = [:]
         if let muted { body["muted"] = muted }
         if let expletivesEnabled { body["expletives_enabled"] = expletivesEnabled }
@@ -95,6 +95,8 @@ struct DaemonAPI: Sendable {
         if let floatingHeadEnabled { body["floating_head_enabled"] = floatingHeadEnabled }
         if let subtitlesEnabled { body["subtitles_enabled"] = subtitlesEnabled }
         if let showActiveAgents { body["show_active_agents"] = showActiveAgents }
+        if let taskModeEnabled { body["task_mode_enabled"] = taskModeEnabled }
+        if let llmTitlesEnabled { body["llm_titles_enabled"] = llmTitlesEnabled }
         if let nativeVoice { body["native_voice"] = nativeVoice }
 
         var request = URLRequest(url: baseURL.appendingPathComponent("settings"))
@@ -104,6 +106,17 @@ struct DaemonAPI: Sendable {
 
         let (data, _) = try await URLSession.shared.data(for: request)
         return try JSONDecoder().decode(SettingsSaveResponse.self, from: data)
+    }
+
+    // MARK: - Sessions (Missions board grouping)
+
+    func fetchSessions() async throws -> SessionsEnvelope {
+        let (data, _) = try await URLSession.shared.data(from: baseURL.appendingPathComponent("sessions"))
+        return try JSONDecoder().decode(SessionsEnvelope.self, from: data)
+    }
+
+    func dismissSession(_ id: String) async throws {
+        try await post("session/dismiss", body: ["session_id": id])
     }
 
     // MARK: - Queue Status

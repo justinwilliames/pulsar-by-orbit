@@ -22,6 +22,9 @@ final class PulsarHTTPServer: @unchecked Sendable {
     private let port: Int
     let audioQueue = AudioQueueActor()
     let sseBroadcaster = SSEBroadcaster()
+    /// Tracks recently-active Claude Code sessions for the Missions board.
+    /// Shared singleton (like PulsarConfig) — the store is process-global state.
+    let sessionRegistry = SessionRegistry.shared
 
     init(port: Int = PulsarHTTPServer.migrationPort) {
         self.port = port
@@ -93,6 +96,7 @@ final class PulsarHTTPServer: @unchecked Sendable {
         let port = self.port
         let audioQueue = self.audioQueue
         let sseBroadcaster = self.sseBroadcaster
+        let sessionRegistry = self.sessionRegistry
 
         serverTask = Task.detached(priority: .userInitiated) {
             do {
@@ -100,7 +104,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 Self.registerRoutes(
                     on: router,
                     audioQueue: audioQueue,
-                    sseBroadcaster: sseBroadcaster
+                    sseBroadcaster: sseBroadcaster,
+                    sessionRegistry: sessionRegistry
                 )
 
                 let app = Application(
@@ -131,7 +136,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
     nonisolated private static func registerRoutes(
         on router: Router<BasicRequestContext>,
         audioQueue: AudioQueueActor,
-        sseBroadcaster: SSEBroadcaster
+        sseBroadcaster: SSEBroadcaster,
+        sessionRegistry: SessionRegistry
     ) {
         // GET /health — parity with Python daemon
         router.get("/health") { _, _ -> Response in
@@ -148,7 +154,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
         // POST /speak — TTS enqueue with phrase-cache support
         router.post("/speak") { request, _ -> Response in
             return try await Self.handleSpeak(
-                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster,
+                sessionRegistry: sessionRegistry)
         }
 
         // GET /history — recent playback history
@@ -164,7 +171,9 @@ final class PulsarHTTPServer: @unchecked Sendable {
 
         // GET /events — server-sent events stream
         router.get("/events") { _, _ -> Response in
-            return try await Self.handleEvents(audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+            return try await Self.handleEvents(
+                audioQueue: audioQueue, sseBroadcaster: sseBroadcaster,
+                sessionRegistry: sessionRegistry)
         }
 
         // GET /cache/phrases — cached phrase metadata
@@ -225,14 +234,39 @@ final class PulsarHTTPServer: @unchecked Sendable {
         // category}. Records it as an in-flight drone and broadcasts the set.
         router.post("/subagent/start") { request, _ -> Response in
             return try await Self.handleSubagentStart(
-                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster,
+                sessionRegistry: sessionRegistry)
         }
 
         // POST /subagent/stop — a sub-agent finished. Body {agent_id}. Removes
         // it from the in-flight set and broadcasts the updated set.
         router.post("/subagent/stop") { request, _ -> Response in
             return try await Self.handleSubagentStop(
-                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster,
+                sessionRegistry: sessionRegistry)
+        }
+
+        // GET /sessions — the current session-grouping payload (same shape as
+        // the "sessions" SSE event). Missions board loads this on appear.
+        router.get("/sessions") { _, _ -> Response in
+            let payload = await Self.buildSessionsPayload(
+                sessionRegistry: sessionRegistry, audioQueue: audioQueue)
+            return try Self.json(payload)
+        }
+
+        // POST /session/activity — a session had activity. Body {session_id,
+        // cwd?, phase?}. Upserts the session and re-broadcasts.
+        router.post("/session/activity") { request, _ -> Response in
+            return try await Self.handleSessionActivity(
+                request: request, sessionRegistry: sessionRegistry,
+                audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+        }
+
+        // POST /session/dismiss — hide a session from the board. Body {session_id}.
+        router.post("/session/dismiss") { request, _ -> Response in
+            return try await Self.handleSessionDismiss(
+                request: request, sessionRegistry: sessionRegistry,
+                audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
         }
     }
 
@@ -250,7 +284,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
     nonisolated private static func handleSubagentStart(
         request: Request,
         audioQueue: AudioQueueActor,
-        sseBroadcaster: SSEBroadcaster
+        sseBroadcaster: SSEBroadcaster,
+        sessionRegistry: SessionRegistry
     ) async throws -> Response {
         guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
               let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
@@ -279,13 +314,22 @@ final class PulsarHTTPServer: @unchecked Sendable {
         await audioQueue.addInFlightDrone(id: agentId, category: category, sessionId: sessionId)
         let drones = await audioQueue.inFlightDronesSnapshot()
         await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+        // A spawned sub-agent means its session is actively working. Track it so
+        // the session appears on the Missions board with its nested drones.
+        if let sessionId {
+            await sessionRegistry.note(sessionId: sessionId, cwd: nil, phase: "working")
+            await Self.broadcastSessions(
+                sessionRegistry: sessionRegistry, audioQueue: audioQueue,
+                sseBroadcaster: sseBroadcaster)
+        }
         return try Self.json(SubagentResponse(ok: true, drones: drones))
     }
 
     nonisolated private static func handleSubagentStop(
         request: Request,
         audioQueue: AudioQueueActor,
-        sseBroadcaster: SSEBroadcaster
+        sseBroadcaster: SSEBroadcaster,
+        sessionRegistry: SessionRegistry
     ) async throws -> Response {
         guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
               let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
@@ -306,7 +350,127 @@ final class PulsarHTTPServer: @unchecked Sendable {
         if removedNow {
             await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
         }
+        // A sub-agent finishing changes the session's nested drone set, and the
+        // session is still working (turn hasn't ended — that's the Stop hook's
+        // job). Refresh it (phase stays "working", window NOT moved) and re-push
+        // the sessions payload so the board drops the departed drone.
+        let sessionId = (body["session_id"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
+        if let sessionId {
+            await sessionRegistry.note(sessionId: sessionId, cwd: nil, phase: "working")
+        }
+        if removedNow || sessionId != nil {
+            await Self.broadcastSessions(
+                sessionRegistry: sessionRegistry, audioQueue: audioQueue,
+                sseBroadcaster: sseBroadcaster)
+        }
         return try Self.json(SubagentResponse(ok: true, drones: drones))
+    }
+
+    // MARK: - /sessions (session grouping)
+
+    /// Build the exact session-grouping wire payload that both the `/sessions`
+    /// GET and the `sessions` SSE event share. For each active session, attach
+    /// the in-flight drones whose sessionId matches. The live-drone set also
+    /// feeds `activeSessions`' guard so a running-but-unmessaged session shows.
+    nonisolated private static func buildSessionsPayload(
+        sessionRegistry: SessionRegistry,
+        audioQueue: AudioQueueActor
+    ) async -> SessionsPayload {
+        let drones = await audioQueue.inFlightDronesDetailedSnapshot()
+        let liveSessionIds = Set(drones.compactMap(\.sessionId))
+        let records = await sessionRegistry.activeSessions(liveSessionIds: liveSessionIds)
+
+        let sessions: [SessionPayload] = records.map { record in
+            let sessionDrones = drones
+                .filter { $0.sessionId == record.sessionId }
+                .sorted { $0.agentId < $1.agentId }
+                .map { SessionDronePayload(agent_id: $0.agentId, category: $0.category) }
+            return SessionPayload(
+                session_id: record.sessionId,
+                name: record.name ?? "",
+                label: record.label,
+                phase: record.phase,
+                last_seen: Int(record.lastSeen.timeIntervalSince1970),
+                drones: sessionDrones)
+        }
+        return SessionsPayload(sessions: sessions)
+    }
+
+    /// Broadcast the current session-grouping payload over SSE (event "sessions").
+    nonisolated private static func broadcastSessions(
+        sessionRegistry: SessionRegistry,
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async {
+        let payload = await buildSessionsPayload(
+            sessionRegistry: sessionRegistry, audioQueue: audioQueue)
+        let json = (try? Self.jsonString(payload)) ?? "{\"sessions\":[]}"
+        await sseBroadcaster.broadcast(event: "sessions", json: json)
+    }
+
+    nonisolated private static func handleSessionActivity(
+        request: Request,
+        sessionRegistry: SessionRegistry,
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async throws -> Response {
+        guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+              let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
+              let sessionId = (body["session_id"] as? String), !sessionId.trimmingCharacters(in: .whitespaces).isEmpty
+        else {
+            return try Self.json(ErrorResponse("Invalid JSON — need session_id"), status: .badRequest)
+        }
+        let cwd = (body["cwd"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
+        let phase = (body["phase"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
+        // `user_message` = true ONLY from the UserPromptSubmit hook — the sole
+        // signal that moves the 7-day recency window + sort. Everything else
+        // (Stop hook, etc.) leaves it false so it drives phase, not the window.
+        let isUserMessage = (body["user_message"] as? Bool) ?? false
+        // Sticky session name from the first user message (registry ignores it
+        // once set), if the hook supplied one.
+        let name = (body["name"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
+        // `name_override` = true ONLY from the async LLM-titler path. The daemon
+        // name is normally sticky (first non-empty wins) so the board title
+        // stays stable across a session's many turns; but the local sync POST
+        // seeds a first-line name immediately, and the opt-in LLM title must be
+        // allowed to REPLACE that one seed. Local/other callers omit it (false),
+        // so nothing else can clobber a name. Never overwrites with empty.
+        let nameOverride = (body["name_override"] as? Bool) ?? false
+
+        await sessionRegistry.note(
+            sessionId: sessionId, cwd: cwd, phase: phase, isUserMessage: isUserMessage,
+            name: name, nameOverride: nameOverride)
+        await Self.broadcastSessions(
+            sessionRegistry: sessionRegistry, audioQueue: audioQueue,
+            sseBroadcaster: sseBroadcaster)
+        return try Self.json(OkResponse(ok: true))
+    }
+
+    nonisolated private static func handleSessionDismiss(
+        request: Request,
+        sessionRegistry: SessionRegistry,
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async throws -> Response {
+        guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+              let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
+              let sessionId = (body["session_id"] as? String), !sessionId.trimmingCharacters(in: .whitespaces).isEmpty
+        else {
+            return try Self.json(ErrorResponse("Invalid JSON — need session_id"), status: .badRequest)
+        }
+        await sessionRegistry.dismiss(sessionId: sessionId)
+        await Self.broadcastSessions(
+            sessionRegistry: sessionRegistry, audioQueue: audioQueue,
+            sseBroadcaster: sseBroadcaster)
+        return try Self.json(OkResponse(ok: true))
     }
 
     // MARK: - /queue handler
@@ -406,7 +570,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
 
     nonisolated private static func handleEvents(
         audioQueue: AudioQueueActor,
-        sseBroadcaster: SSEBroadcaster
+        sseBroadcaster: SSEBroadcaster,
+        sessionRegistry: SessionRegistry
     ) async throws -> Response {
         let state = await audioQueue.statusSnapshot(limit: 20)
         let stateJSON = try Self.jsonString(state)
@@ -415,6 +580,11 @@ final class PulsarHTTPServer: @unchecked Sendable {
         // when the stream dropped.
         let drones = await audioQueue.inFlightDronesSnapshot()
         let dronesJSON = (try? Self.jsonString(DronesInFlightPayload(drones: drones))) ?? "{\"drones\":{}}"
+        // Same for the session grouping — replay the current board so a
+        // reconnecting Missions view rebuilds from scratch.
+        let sessionsPayload = await buildSessionsPayload(
+            sessionRegistry: sessionRegistry, audioQueue: audioQueue)
+        let sessionsJSON = (try? Self.jsonString(sessionsPayload)) ?? "{\"sessions\":[]}"
         let clientStream = await sseBroadcaster.makeStream()
 
         let bodyStream = AsyncStream<ByteBuffer> { continuation in
@@ -422,6 +592,7 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 continuation.yield(ByteBuffer(string: Self.ssePayload(event: "connected", json: "{}")))
                 continuation.yield(ByteBuffer(string: Self.ssePayload(event: "state", json: stateJSON)))
                 continuation.yield(ByteBuffer(string: Self.ssePayload(event: "drones_in_flight", json: dronesJSON)))
+                continuation.yield(ByteBuffer(string: Self.ssePayload(event: "sessions", json: sessionsJSON)))
 
                 for await payload in clientStream {
                     if Task.isCancelled {
@@ -706,6 +877,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 update.floating_head_enabled != nil ||
                 update.subtitles_enabled != nil ||
                 update.show_active_agents != nil ||
+                update.task_mode_enabled != nil ||
+                update.llm_titles_enabled != nil ||
                 update.native_voice != nil
         else {
             return try Self.json(ErrorResponse("No fields to update"), status: .badRequest)
@@ -740,6 +913,12 @@ final class PulsarHTTPServer: @unchecked Sendable {
             }
             if let showAgents = update.show_active_agents {
                 try config.set("PULSAR_SHOW_AGENTS", value: showAgents ? "1" : "0")
+            }
+            if let taskMode = update.task_mode_enabled {
+                try config.set("PULSAR_TASK_MODE", value: taskMode ? "1" : "0")
+            }
+            if let llmTitles = update.llm_titles_enabled {
+                try config.set("PULSAR_LLM_TITLES", value: llmTitles ? "1" : "0")
             }
             if let nv = update.native_voice {
                 // Empty resets to auto; otherwise only accept an installed voice.
@@ -1026,7 +1205,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
     nonisolated private static func handleSpeak(
         request: Request,
         audioQueue: AudioQueueActor,
-        sseBroadcaster: SSEBroadcaster
+        sseBroadcaster: SSEBroadcaster,
+        sessionRegistry: SessionRegistry
     ) async throws -> Response {
 
         // Parse body
@@ -1101,6 +1281,16 @@ final class PulsarHTTPServer: @unchecked Sendable {
         // old category-wide touch kept a ghost drone (lost SubagentStop) immortal
         // beside any live same-category sibling. Liveness now rests on a reliable
         // SubagentStop + the shorter `droneStaleAfter` backstop sweep only.
+
+        // A spoken line means this session is actively working. Track it (phase
+        // "working"; window NOT moved — only a real user message does that) so the
+        // Missions board reflects live work and re-broadcast the sessions payload.
+        if let speakSessionId {
+            await sessionRegistry.note(sessionId: speakSessionId, cwd: nil, phase: "working")
+            await Self.broadcastSessions(
+                sessionRegistry: sessionRegistry, audioQueue: audioQueue,
+                sseBroadcaster: sseBroadcaster)
+        }
 
         // macOS local voice — synthesise via `say` to a temp AIFF so it plays
         // through the same envelope/lip-sync path. No network, no API key, no
@@ -1177,6 +1367,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
             floating_head_enabled: config.floatingHeadEnabled,
             subtitles_enabled: config.subtitlesEnabled,
             show_active_agents: config.showActiveAgents,
+            task_mode_enabled: config.taskModeEnabled,
+            llm_titles_enabled: config.llmTitlesEnabled,
             available_voices: NativeVoiceClient.voiceOptions()
         )
     }
@@ -1411,6 +1603,32 @@ private struct DronesInFlightPayload: Encodable, Sendable {
     let drones: [String: String]
 }
 
+// MARK: - Session grouping wire models
+//
+// snake_case field names ARE the wire shape (no CodingKeys needed) — the app's
+// DTO decodes exactly these keys.
+private struct SessionsPayload: Encodable, Sendable {
+    let sessions: [SessionPayload]
+}
+
+private struct SessionPayload: Encodable, Sendable {
+    let session_id: String
+    let name: String
+    let label: String
+    let phase: String
+    let last_seen: Int
+    let drones: [SessionDronePayload]
+}
+
+private struct SessionDronePayload: Encodable, Sendable {
+    let agent_id: String
+    let category: String
+}
+
+private struct OkResponse: Encodable, Sendable {
+    let ok: Bool
+}
+
 private struct SubagentResponse: Encodable, Sendable {
     let ok: Bool
     let drones: [String: String]
@@ -1433,6 +1651,8 @@ private struct SettingsResponse: Encodable, Sendable {
     let floating_head_enabled: Bool
     let subtitles_enabled: Bool
     let show_active_agents: Bool
+    let task_mode_enabled: Bool
+    let llm_titles_enabled: Bool
     let available_voices: [NativeVoiceClient.VoiceOption]
 }
 
@@ -1443,5 +1663,7 @@ private struct SettingsUpdateRequest: Decodable, Sendable {
     let floating_head_enabled: Bool?
     let subtitles_enabled: Bool?
     let show_active_agents: Bool?
+    let task_mode_enabled: Bool?
+    let llm_titles_enabled: Bool?
     let native_voice: String?
 }

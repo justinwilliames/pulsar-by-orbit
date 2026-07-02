@@ -567,6 +567,21 @@ actor AudioQueueActor {
         inFlight.mapValues(\.category)
     }
 
+    /// One in-flight drone with its owning session, for session-grouped views.
+    struct InFlightDroneInfo: Sendable {
+        let agentId: String
+        let category: String
+        let sessionId: String?
+    }
+
+    /// Detailed snapshot carrying each drone's session id — used by the session
+    /// grouping payload to nest drones under their parent session. The lossy
+    /// `inFlightDronesSnapshot()` above is preserved for callers that only need
+    /// agentId→category.
+    func inFlightDronesDetailedSnapshot() -> [InFlightDroneInfo] {
+        inFlight.map { InFlightDroneInfo(agentId: $0.key, category: $0.value.category, sessionId: $0.value.sessionId) }
+    }
+
     // MARK: - Test seams (in-flight)
     //
     // These exist ONLY to let the test suite drive the drone lifecycle without

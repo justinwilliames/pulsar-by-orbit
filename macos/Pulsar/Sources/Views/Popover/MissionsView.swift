@@ -1,0 +1,274 @@
+import SwiftUI
+
+/// The Task Mode "Missions" board — live Claude Code work grouped BY SESSION.
+/// Each session is a Pulsar orchestrator parent row with its sub-agent drones
+/// nested beneath. Shows sessions the user messaged in the last 7 days (plus any
+/// with live drones); each has a dismiss (x) to hide it. A "Needs you" session
+/// (its turn ended, waiting on the user) is tinted so it's impossible to miss.
+struct MissionsView: View {
+    let viewModel: DashboardViewModel
+
+    private var sessions: [MissionSession] {
+        viewModel.missionSessions.sorted {
+            // Needs-you floats to the top; then most-recent first.
+            if ($0.phase == .waiting) != ($1.phase == .waiting) {
+                return $0.phase == .waiting
+            }
+            return $0.lastSeen > $1.lastSeen
+        }
+    }
+
+    /// "N sessions · M paused" summary from live counts, with the paused
+    /// segment rendered in the waiting-phase ORANGE so it actually reads (plain
+    /// .secondary made it invisible). Composed as a single Text so the two tints
+    /// sit on one line.
+    private var summaryLine: Text {
+        let count = sessions.count
+        let paused = sessions.filter { $0.phase == .waiting }.count
+        var line = Text("\(count) session\(count == 1 ? "" : "s")")
+            .foregroundColor(.secondary)
+        if paused > 0 {
+            line = line
+                + Text(" · ").foregroundColor(.secondary)
+                + Text("\(paused) paused").foregroundColor(.orange)
+        }
+        return line
+    }
+
+    var body: some View {
+        if sessions.isEmpty {
+            emptyState
+                .task { await viewModel.loadSessions() }
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    header
+                    ForEach(sessions) { session in
+                        sessionGroup(session)
+                    }
+                }
+                .padding(16)
+            }
+            .task { await viewModel.loadSessions() }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("MISSIONS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+            summaryLine
+                .font(.caption.weight(.semibold))
+                .tracking(0.5)
+        }
+        .padding(.bottom, 2)
+    }
+
+    // MARK: - Session group (parent + nested drones)
+
+    private func sessionGroup(_ session: MissionSession) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            parentRow(session)
+            if !session.drones.isEmpty {
+                nestedDrones(session)
+            }
+        }
+    }
+
+    /// The orchestrator (Pulsar) parent row: brand mark + session name/label +
+    /// phase status pill + dismiss button. Waiting sessions get an orange wash.
+    private func parentRow(_ session: MissionSession) -> some View {
+        HStack(spacing: 10) {
+            PulsarMark(size: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.displayTitle)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(secondaryLine(for: session))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            statusPill(session.phase)
+
+            Button {
+                Task { await viewModel.dismissSession(session.id) }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this session")
+        }
+        .padding(8)
+        .background(
+            (session.phase == .waiting ? Color.orange.opacity(0.10) : Color.orbit.opacity(0.08)),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+    }
+
+    /// Secondary line under the session title — the repo/cwd label, plus the
+    /// drone count when the session has agents running.
+    private func secondaryLine(for session: MissionSession) -> String {
+        let count = session.drones.count
+        if count > 0 {
+            return "\(session.label) · orchestrating \(count) agent\(count == 1 ? "" : "s")"
+        }
+        return session.phase == .waiting ? session.label : "\(session.label) · working"
+    }
+
+    private func statusPill(_ phase: MissionSession.Phase) -> some View {
+        Label(phase.label, systemImage: phase.systemImage)
+            .font(.caption2)
+            .foregroundStyle(phase.tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(phase.tint.opacity(0.15), in: Capsule())
+    }
+
+    // MARK: - Nested drones
+
+    private func nestedDrones(_ session: MissionSession) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            // Left rail — a thin indigo spine tying the drones to their parent,
+            // topped with a small cap so it reads as a tree BRANCH rather than a
+            // free-floating bar. Centred under the parent mark: the parentRow has
+            // 8pt padding + a 24pt PulsarMark, so the mark's centre sits ~20pt
+            // from the group's leading edge; a 2pt rail centres there at 19pt
+            // leading. Colour raised to orbitLight.opacity(0.5) so it's visible
+            // on the dark popover (the old 0.3 washed out).
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(Color.orbitLight.opacity(0.5))
+                    .frame(width: 6, height: 6)
+                Rectangle()
+                    .fill(Color.orbitLight.opacity(0.5))
+                    .frame(width: 2)
+            }
+            .padding(.leading, 19)   // centres the 2pt rail under the parent mark
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(session.drones) { drone in
+                    droneRow(drone)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    /// One nested drone row — the drone's static portrait + its NAME + a
+    /// "Role · detail" secondary line + a status pill. Restores per-drone
+    /// personality WITHOUT gaudiness: the pill and a thin leading accent both
+    /// carry the drone's OWN hue, and a running portrait breathes gently so live
+    /// work reads as alive. Calm on purpose — this is a menu-bar list.
+    private func droneRow(_ task: MissionTask) -> some View {
+        let category = task.category
+        let name = (category ?? "pulsar").capitalized
+        let role = DroneRegistry.role(for: category).capitalized
+        let hue = droneColor(for: category)
+        // The pill uses the drone's own hue while running so the cast is
+        // distinguishable at a glance; terminal states keep their semantic
+        // colour (done=secondary, blocked=red, paused=orange).
+        let pillTint = task.status == .running ? hue : task.status.tint
+
+        return HStack(spacing: 10) {
+            dronePortrait(category, running: task.status == .running)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.caption.weight(.semibold))
+                Text(role.isEmpty ? task.detail : "\(role) · \(task.detail)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: 8)
+
+            Label(task.status.label, systemImage: task.status.systemImage)
+                .font(.caption2)
+                .foregroundStyle(pillTint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(pillTint.opacity(0.15), in: Capsule())
+        }
+        .padding(.vertical, 4)
+        .padding(.leading, 8)
+        .background(alignment: .leading) {
+            // A thin left-edge accent in the drone's hue — a subtle presence
+            // that lets the crew read as distinct characters, not identical rows.
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(hue.opacity(0.55))
+                .frame(width: 3)
+        }
+    }
+
+    /// Small static drone portrait (mouth-0 frame), colour-bordered by drone hue.
+    /// Falls back to the Pulsar frame for unknown/nil categories. A `running`
+    /// portrait breathes — a gentle scale+opacity oscillation — so live work
+    /// feels alive without turning the list into a toy.
+    private func dronePortrait(_ category: String?, running: Bool) -> some View {
+        let key = category ?? "pulsar"
+        let image = NSImage(named: "\(key)-mouth-0")
+            ?? NSImage(named: "pulsar-mouth-0")
+            ?? NSImage()
+        return Image(nsImage: image)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+            .frame(width: 26, height: 26)
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(droneColor(for: category), lineWidth: 1.5)
+            )
+            .modifier(BreathingModifier(active: running))
+    }
+
+    /// A calm "breathing" pulse for a running drone portrait — a small
+    /// scale + opacity oscillation that reads as living work, not a toy. Inert
+    /// (identity) when `active` is false, so paused/done/blocked drones sit still.
+    private struct BreathingModifier: ViewModifier {
+        let active: Bool
+        @State private var breathe = false
+
+        func body(content: Content) -> some View {
+            content
+                .scaleEffect(active && breathe ? 1.06 : 1.0)
+                .opacity(active && breathe ? 0.82 : 1.0)
+                .animation(
+                    active
+                        ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
+                        : .default,
+                    value: breathe)
+                .onAppear { if active { breathe = true } }
+                .onChange(of: active) { _, isActive in breathe = isActive }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 28))
+                .foregroundStyle(Color.orbit)
+            Text("No active missions")
+                .font(.caption.weight(.medium))
+            Text("When Claude Code sessions run, they'll appear here grouped by session.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+    }
+}

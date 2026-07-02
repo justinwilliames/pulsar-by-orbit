@@ -7,13 +7,13 @@ private let logger = Logger(subsystem: "team.yourorbit.Pulsar", category: "Popov
 
 enum DashboardTab: String, CaseIterable {
     case roster = "Team"
-    case history = "History"
+    case missions = "Missions"
     case settings = "Settings"
 
     var icon: String {
         switch self {
         case .roster: "person.3"
-        case .history: "clock"
+        case .missions: "list.bullet.rectangle"
         case .settings: "gear"
         }
     }
@@ -60,6 +60,11 @@ struct PopoverRootView: View {
     @State private var selectedTab: DashboardTab = .roster
     @State private var navigatingForward = true
 
+    // Tabs visible in the picker. Missions is hidden unless Task Mode is on.
+    private var visibleTabs: [DashboardTab] {
+        DashboardTab.allCases.filter { $0 != .missions || viewModel.isTaskModeEnabled }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -70,6 +75,13 @@ struct PopoverRootView: View {
         .frame(width: 360, height: 540)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .onChange(of: viewModel.isTaskModeEnabled) { _, enabled in
+            // If Task Mode is switched off while its tab is selected, fall back
+            // to the roster so we never render a now-hidden tab.
+            if !enabled, selectedTab == .missions {
+                selectedTab = .roster
+            }
+        }
     }
 
     private var header: some View {
@@ -189,7 +201,7 @@ struct PopoverRootView: View {
 
     private var tabPicker: some View {
         HStack(spacing: 4) {
-            ForEach(DashboardTab.allCases, id: \.self) { tab in
+            ForEach(visibleTabs, id: \.self) { tab in
                 let isSelected = selectedTab == tab
                 Button {
                     guard tab != selectedTab else { return }
@@ -234,8 +246,8 @@ struct PopoverRootView: View {
         switch tab {
         case .roster:
             RosterView()
-        case .history:
-            HistoryPanelView(viewModel: viewModel)
+        case .missions:
+            MissionsView(viewModel: viewModel)
         case .settings:
             SettingsView(viewModel: viewModel, updater: updater)
         }

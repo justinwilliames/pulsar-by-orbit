@@ -19,6 +19,12 @@ struct DaemonSettings: Codable, Sendable {
     /// are shown. Default true; when false only Pulsar himself appears. Pulsar's
     /// own voice + head are unaffected.
     let showActiveAgents: Bool?
+    /// Whether Task Mode is enabled — reveals the persistent Missions board tab.
+    /// Default false (opt-in).
+    let taskModeEnabled: Bool?
+    /// Whether AI-generated mission titles are enabled. Default false — local
+    /// first-line naming is canonical; the LLM title is a disclosed opt-in.
+    let llmTitlesEnabled: Bool?
     /// Installed local voices usable in free mode (drives the voice picker),
     /// each with a "Name (Language, Region)" label.
     let availableVoices: [NativeVoiceClient.VoiceOption]?
@@ -32,6 +38,8 @@ struct DaemonSettings: Codable, Sendable {
         case floatingHeadEnabled = "floating_head_enabled"
         case subtitlesEnabled = "subtitles_enabled"
         case showActiveAgents = "show_active_agents"
+        case taskModeEnabled = "task_mode_enabled"
+        case llmTitlesEnabled = "llm_titles_enabled"
         case availableVoices = "available_voices"
     }
 
@@ -45,6 +53,8 @@ struct DaemonSettings: Codable, Sendable {
         self.floatingHeadEnabled = try container.decodeIfPresent(Bool.self, forKey: .floatingHeadEnabled)
         self.subtitlesEnabled = try container.decodeIfPresent(Bool.self, forKey: .subtitlesEnabled)
         self.showActiveAgents = try container.decodeIfPresent(Bool.self, forKey: .showActiveAgents)
+        self.taskModeEnabled = try container.decodeIfPresent(Bool.self, forKey: .taskModeEnabled)
+        self.llmTitlesEnabled = try container.decodeIfPresent(Bool.self, forKey: .llmTitlesEnabled)
         self.availableVoices = try container.decodeIfPresent([NativeVoiceClient.VoiceOption].self, forKey: .availableVoices)
     }
 }

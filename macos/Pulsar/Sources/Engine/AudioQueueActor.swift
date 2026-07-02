@@ -184,6 +184,42 @@ private final class ContinuationBox: @unchecked Sendable {
     }
 }
 
+// MARK: - Live-audio process registry (teardown-safe)
+
+/// Process-global handle to the single live audio child (`afplay` or the `say`
+/// fallback). Lives OUTSIDE the actor so app teardown — `applicationWillTerminate`
+/// on the main actor — can kill the child SYNCHRONOUSLY without awaiting the
+/// actor (the app may `exit()` before an actor hop completes).
+///
+/// WHY THIS EXISTS: a `Process` spawned by the app is an INDEPENDENT child. When
+/// the app process exits, that child (afplay) is NOT auto-killed — it plays the
+/// AIFF to completion, so speech outlived the quit. Registering the live child
+/// here lets `terminateAll()` stop it the instant the app starts tearing down.
+///
+/// Thread-safe via a plain lock; the actor registers/clears its `currentProcess`
+/// here as it spawns/reaps, and teardown calls `terminateAll()`.
+final class LiveAudioProcesses: @unchecked Sendable {
+    static let shared = LiveAudioProcesses()
+    private let lock = NSLock()
+    private var processes: [Process] = []
+
+    func register(_ p: Process) {
+        lock.withLock { processes.append(p) }
+    }
+
+    func unregister(_ p: Process) {
+        lock.withLock { processes.removeAll { $0 === p } }
+    }
+
+    /// Synchronously terminate every live audio child. Called from app teardown
+    /// so speech never outlives the app. Idempotent + best-effort.
+    func terminateAll() {
+        let live = lock.withLock { let copy = processes; processes.removeAll(); return copy }
+        for p in live where p.isRunning { p.terminate() }
+        if !live.isEmpty { NSLog("[Pulsar] 🛑 terminated \(live.count) live audio process(es) on teardown") }
+    }
+}
+
 // MARK: - AudioQueueActor
 
 /// Serial audio playback queue. One utterance plays at a time via `afplay`.
@@ -560,6 +596,9 @@ actor AudioQueueActor {
     /// The lastSeen for an id, for asserting restore/round-trip fidelity.
     func _test_lastSeen(id: String) -> Date? { inFlight[id]?.lastSeen }
 
+    /// Current waiting-queue depth, for asserting `muteNow` drops queued lines.
+    func _test_queueDepth() -> Int { queue.count }
+
     /// Whether an id is currently marked pending-removal (deferred).
     func _test_isPending(id: String) -> Bool { pendingRemoval.contains(id) }
 
@@ -690,6 +729,33 @@ actor AudioQueueActor {
 
     func stopCurrent() {
         currentProcess?.terminate()
+    }
+
+    /// Immediate mute: terminate the currently-playing audio process (afplay or
+    /// the `say` fallback) RIGHT NOW so a mid-line mute goes quiet within a
+    /// fraction of a second, and drop every still-queued waiter so nothing else
+    /// sounds while muted. The worker's per-entry mute-gate (`playEntry` /
+    /// `speakNative`) is the belt to this braces — it silences any line that was
+    /// already dequeued/in-flight when the mute landed.
+    ///
+    /// Killing `currentProcess` resumes the worker's playback continuation via the
+    /// process terminationHandler; the worker then finds the queue empty (we clear
+    /// it here) and idles. Unmute simply resumes normal behaviour for new lines.
+    func muteNow() {
+        currentProcess?.terminate()
+        if !queue.isEmpty {
+            // Unlink any synth temp AIFF the dropped waiters already produced, and
+            // clear their resolved/failed bookkeeping, so a mute never leaks temp
+            // files to disk (mirrors purgeStaleWaiters' cleanup).
+            for entry in queue {
+                readyContinuations.removeValue(forKey: entry.id)
+                discardResolved(id: entry.id)
+            }
+            NSLog("[AudioQueue] 🔇 muteNow — killed current playback + dropped \(queue.count) queued line(s)")
+            queue.removeAll()
+        } else {
+            NSLog("[AudioQueue] 🔇 muteNow — killed current playback")
+        }
     }
 
     func setBroadcaster(_ broadcaster: any SSEBroadcasterProtocol) {
@@ -927,6 +993,9 @@ actor AudioQueueActor {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         currentProcess = process
+        // Register the live child so app teardown can kill it synchronously.
+        LiveAudioProcesses.shared.register(process)
+        defer { LiveAudioProcesses.shared.unregister(process) }
         do {
             // Same non-blocking wait as playEntry: resume from the termination
             // handler, never from a blocking `waitUntilExit()` on a pool thread.
@@ -948,6 +1017,26 @@ actor AudioQueueActor {
     }
 
     private func playEntry(_ entry: AudioEntry) async {
+        // Mute-gate: a line can reach here AFTER the user muted (it was already
+        // dequeued / mid-resolve when the mute landed, so it never hit the
+        // upstream /speak enqueue guard). Muting is an immediate, real mute — so
+        // drop this line silently rather than play into a muted session. `muteNow`
+        // handles the ONE line that was already sounding through afplay; this
+        // guard handles the next-in-line that the killed worker would otherwise
+        // advance to.
+        guard !PulsarConfig.shared.isMuted else {
+            NSLog("[AudioQueue] 🔇 playEntry \(entry.id) suppressed — muted")
+            // Unlink a temp AIFF this entry produced so a muted drop doesn't leak.
+            if let url = entry.audioURL {
+                let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).standardized.path
+                if url.standardized.path.hasPrefix(tmpDir) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+            await broadcastIdleIfQueueEmpty()
+            return
+        }
+
         guard !entry.fetchFailed, let audioURL = entry.audioURL else {
             // ElevenLabs synthesis was unavailable (missing/invalid key,
             // exhausted quota, or invalid audio). Rather than go mute, speak the
@@ -999,6 +1088,10 @@ actor AudioQueueActor {
         process.standardOutput = FileHandle.nullDevice
         process.standardError  = FileHandle.nullDevice
         currentProcess = process
+        // Register the live child so app teardown can kill it synchronously —
+        // otherwise afplay outlives the quit and keeps talking.
+        LiveAudioProcesses.shared.register(process)
+        defer { LiveAudioProcesses.shared.unregister(process) }
 
         do {
             // Wait for afplay WITHOUT blocking a cooperative-pool thread.

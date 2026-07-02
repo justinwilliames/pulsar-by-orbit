@@ -227,6 +227,31 @@ func runAll() async {
         await expect(await actor.sweepStaleDrones(now: Date()) == nil, "second sweep → nil")
     }
 
+    // MARK: - Mute: immediate silence (BUG 2)
+    //
+    // `muteNow` is the actor half of the immediate-mute path: kill the current
+    // playback (no live process in a test, so that's a no-op) AND drop every
+    // still-queued waiter so nothing sounds while muted. We seed the queue via the
+    // same `_test_appendQueuedCategory` seam the deferral tests use (appends
+    // without starting the real afplay worker) and assert the queue is emptied.
+
+    await test("muteNow drops all queued lines (immediate silence)") {
+        let (actor, _) = await makeActor()
+        await actor._test_appendQueuedCategory("voyager")
+        await actor._test_appendQueuedCategory("nova")
+        await actor._test_appendQueuedCategory("echo")
+        await expect(await actor._test_queueDepth() == 3, "three lines queued")
+        await actor.muteNow()
+        await expect(await actor._test_queueDepth() == 0, "muteNow cleared the queue")
+    }
+
+    await test("muteNow on an empty queue is a safe no-op") {
+        let (actor, _) = await makeActor()
+        await expect(await actor._test_queueDepth() == 0, "starts empty")
+        await actor.muteNow()  // must not crash / underflow
+        await expect(await actor._test_queueDepth() == 0, "still empty, no throw")
+    }
+
     // MARK: - PulsarConfig: Fix 2 (set() preserves siblings) + Fix 3 (migration)
     //
     // These drive the SHARED PulsarConfig.shared singleton. Its storageRoot reads
@@ -236,6 +261,37 @@ func runAll() async {
     // in-memory _config (loaded once at process init against whatever env was set
     // first — see the entry point, which seeds a throwaway dir before anything
     // touches the singleton).
+
+    // Default native voice (BUG 1): out-of-box, no PULSAR_NATIVE_VOICE is set, so
+    // `nativeVoiceChoice` is empty → the resolver falls through to the BASE name
+    // (Daniel), never an Enhanced/Premium variant a stock Mac lacks. This asserts
+    // the config precondition that keeps the default a base voice; the resolver
+    // itself (NativeVoiceClient, AVFoundation-backed) can't run in this harness.
+    await test("default native voice is unset → base (BUG 1)") {
+        let cfg = PulsarConfig.shared
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cfg-voice-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        setenv("PULSAR_STORAGE", dir.path, 1)
+        unsetenv("PULSAR_NATIVE_VOICE")  // no env override either
+
+        // A fresh config with NO voice key — the stock out-of-box shape.
+        let seed: [String: Any] = ["PULSAR_MUTED": "0"]
+        try! JSONSerialization.data(withJSONObject: seed).write(to: cfg.configPath)
+        cfg.reload()
+
+        await expect(cfg.nativeVoiceChoice.isEmpty,
+                     "no explicit choice → empty (resolver uses base Daniel, not Enhanced)")
+
+        // An EXPLICIT opt-in is preserved verbatim (honoured only if installed at
+        // speak time — checked in NativeVoiceClient.resolvedRespectingChoice).
+        try! cfg.set("PULSAR_NATIVE_VOICE", value: "Daniel (Enhanced)")
+        cfg.reload()
+        await expect(cfg.nativeVoiceChoice == "Daniel (Enhanced)",
+                     "explicit Enhanced opt-in is retained")
+
+        unsetenv("PULSAR_STORAGE")
+    }
 
     await test("set() preserves a Bool-valued sibling key (Fix 2)") {
         let cfg = PulsarConfig.shared

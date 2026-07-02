@@ -80,6 +80,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Stop speech FIRST — synchronously — so a mid-line quit goes quiet
+        // immediately and no afplay/say child outlives the app. The audio child
+        // is an INDEPENDENT process; without this it keeps playing to completion
+        // after we exit. `terminateAll` reaches it via the teardown-safe global
+        // registry (no actor await, which might not finish before the process
+        // exits). Then stop the HTTP server so no new line can enqueue.
+        LiveAudioProcesses.shared.terminateAll()
         httpServer?.stop()
     }
 

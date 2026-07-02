@@ -9,9 +9,11 @@ import Foundation
 /// The catalogue is filtered + deduped for the picker:
 ///   • novelty voices (Bad News, Bells, Zarvox…) report `.unspecified` gender —
 ///     dropped entirely.
-///   • a voice and its "(Enhanced)"/"(Premium)" variant collapse to ONE entry;
-///     the app resolves to the highest-quality installed variant automatically
-///     (so "Daniel" plays as "Daniel (Enhanced)" when that's downloaded).
+///   • a voice and its "(Enhanced)"/"(Premium)" variant collapse to ONE entry
+///     under the BASE name. The app speaks the BASE variant by default (always
+///     present on a stock Mac); the Enhanced/Premium variant — a manual download
+///     absent on most machines — is only spoken when the user EXPLICITLY opts
+///     into it (see `resolvedRespectingChoice`).
 enum NativeVoiceClient {
 
     /// Default speaking pace (words/min). Enhanced voices honour `-r`.
@@ -37,8 +39,9 @@ enum NativeVoiceClient {
     ]
 
     private struct ResolvedVoice {
-        let display: String    // base name shown + stored, e.g. "Daniel"
-        let resolved: String   // actual say -v name, e.g. "Daniel (Enhanced)"
+        let display: String    // base name shown + stored + spoken, e.g. "Daniel"
+        let resolved: String   // best installed variant, e.g. "Daniel (Enhanced)" — used
+                               // ONLY when the user explicitly opted into it
         let label: String      // "Daniel (English, UK)"
         let language: String   // "en-GB"
     }
@@ -82,28 +85,62 @@ enum NativeVoiceClient {
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }
-        return resolved(base: DroneRegistry.pulsarVoice)
+        // Default = base Daniel (always present); an explicit Enhanced/Premium
+        // opt-in via PULSAR_NATIVE_VOICE is honoured, otherwise base.
+        return resolvedRespectingChoice(base: DroneRegistry.pulsarVoice)
     }
 
-    /// Resolve a base voice name (e.g. "Daniel", "Thomas", "Karen") to its best
-    /// installed `say -v` variant (e.g. "Daniel (Enhanced)"). Falls back to the
-    /// raw base name if it isn't in the catalogue — `say` may still know it even
-    /// when `AVSpeechSynthesisVoice` doesn't enumerate it — and finally to
-    /// Pulsar's Daniel, then anything installed.
+    /// Resolve a base voice name (e.g. "Daniel", "Thomas", "Karen") to the `say -v`
+    /// name to actually speak with.
+    ///
+    /// DEFAULT = the BASE name, never the "(Enhanced)"/"(Premium)" variant.
+    /// Enhanced/Premium voices are a MANUAL macOS download; a stock Mac does not
+    /// have them, so resolving to `Daniel (Enhanced)` (the old behaviour) made
+    /// `say -v "Daniel (Enhanced)"` fail / fall back on most machines. The base
+    /// `Daniel` is guaranteed present on a stock macOS, so it's always the safe
+    /// default and fallback.
+    ///
+    /// The ONLY time we speak an Enhanced/Premium variant is when the user has
+    /// EXPLICITLY chosen it (their `nativeVoiceChoice` names that exact variant,
+    /// e.g. "Daniel (Enhanced)") AND it's installed — honoured by
+    /// `resolvedRespectingChoice`, not here.
+    ///
+    /// Falls back to the raw base name if it isn't in the catalogue — `say` may
+    /// still know it even when `AVSpeechSynthesisVoice` doesn't enumerate it —
+    /// and finally to Pulsar's Daniel, then anything installed (base name).
     static func resolved(base: String) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         let vs = voices()
         if !trimmed.isEmpty,
            let v = vs.first(where: { $0.display.caseInsensitiveCompare(trimmed) == .orderedSame }) {
-            return v.resolved
+            return v.display
         }
         // Not enumerated by AVSpeechSynthesisVoice — trust `say` to know the name
         // (it lists more voices than AVSpeech does). Use it verbatim.
         if !trimmed.isEmpty { return trimmed }
         if let daniel = vs.first(where: { $0.display.caseInsensitiveCompare("Daniel") == .orderedSame }) {
-            return daniel.resolved
+            return daniel.display
         }
-        return vs.first?.resolved ?? "Daniel"
+        return vs.first?.display ?? "Daniel"
+    }
+
+    /// The base name resolved for a chosen voice, but honouring an EXPLICIT
+    /// user opt-in to a specific installed Enhanced/Premium variant.
+    ///
+    /// If the user's `PULSAR_NATIVE_VOICE` names an exact installed `say -v`
+    /// variant (base OR Enhanced/Premium), speak THAT verbatim. Otherwise fall
+    /// through to `resolved(base:)`, which always returns a base name. This is
+    /// what lets a user who deliberately downloaded + selected "Daniel
+    /// (Enhanced)" get it, while every out-of-box user speaks the base "Daniel".
+    static func resolvedRespectingChoice(base: String) -> String {
+        let choice = PulsarConfig.shared.nativeVoiceChoice
+        if !choice.isEmpty,
+           AVSpeechSynthesisVoice.speechVoices().contains(where: {
+               $0.name.caseInsensitiveCompare(choice) == .orderedSame
+           }) {
+            return choice
+        }
+        return resolved(base: base)
     }
 
     /// The `say -v` voice for a line tagged with drone `category`. Pulsar / nil /
@@ -129,9 +166,10 @@ enum NativeVoiceClient {
         let vs = voices()
         if let v = vs.first(where: { $0.display.caseInsensitiveCompare(trimmed) == .orderedSame }),
            v.language.hasPrefix("en") {
-            return v.resolved
+            // Base name, not the Enhanced/Premium variant — see `resolved(base:)`.
+            return v.display
         }
-        // Not found as an English voice → force Daniel (always English).
+        // Not found as an English voice → force Daniel (always English, base).
         return resolved(base: DroneRegistry.pulsarVoice)
     }
 

@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .worklog/
+
+# Internal engineering/team-review artifacts — never publish (contain internal notes)
+design/pulsar-team-*/
+design/team-review-*/

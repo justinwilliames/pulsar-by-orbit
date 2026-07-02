@@ -20,11 +20,20 @@ struct FloatingPortraitView: View {
     let amplitude: Float
     let voiceColor: Color            // kept for API parity; NOT used for the glow
     let portraitManager: PortraitManager
+    /// Which frame set the CENTRE occupant renders. "pulsar" = the main head
+    /// (default, indigo); a drone category swaps in that drone's frames so the
+    /// active drone can take the central slot at full Pulsar size during a swap.
+    var droneName: String = "pulsar"
+    /// Glow tint for the aura / rim / ripples. Pulsar = indigo (`.orbitLight`);
+    /// a speaking drone in the centre tints its glow to its own colour so the
+    /// central occupant is unmistakably that character.
+    var glowColor: Color = .orbitLight
 
     private let portraitSize: CGFloat = 120
 
-    /// Pulsar beat period, seconds. One "pulse" per beat.
-    private let beatPeriod: Double = 1.4
+    /// Pulsar beat period, seconds. One "pulse" per beat. Sourced from the shared
+    /// `PulsarPulse` so the caption bubble breathes on the exact same beat.
+    private let beatPeriod: Double = PulsarPulse.beatPeriod
 
     /// Continuous-curvature corner radius for the portrait squircle — kept in
     /// lockstep with `PortraitView.squircle` (size * 0.22) so every glow layer
@@ -35,10 +44,13 @@ struct FloatingPortraitView: View {
     /// same squircle proportions as the portrait.
     private let cornerRatio: CGFloat = 0.22
 
-    // Fixed Pulsar palette.
-    private var core: Color { .orbit }        // #6366F1
-    private var light: Color { .orbitLight }  // #818CF8
-    private var muted: Color { .orbitMuted }  // #A5B4FC
+    // Glow palette. Pulsar keeps its exact three-indigo recipe; a drone in the
+    // centre tints all three glow layers to its own colour so the central
+    // occupant reads unmistakably as that character.
+    private var isPulsar: Bool { droneName == "pulsar" }
+    private var core: Color { isPulsar ? .orbit : glowColor }        // #6366F1 for Pulsar
+    private var light: Color { isPulsar ? .orbitLight : glowColor }  // #818CF8 for Pulsar
+    private var muted: Color { isPulsar ? .orbitMuted : glowColor }  // #A5B4FC for Pulsar
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -61,7 +73,8 @@ struct FloatingPortraitView: View {
                     amplitude: amplitude,
                     size: portraitSize,
                     voiceColor: voiceColor,
-                    portraitManager: portraitManager
+                    portraitManager: portraitManager,
+                    droneName: droneName
                 )
             }
             // Gentle time-driven bob + a soft amplitude scale-pulse, plus a tiny
@@ -77,14 +90,10 @@ struct FloatingPortraitView: View {
     // MARK: - Heartbeat shape
 
     /// Maps a 0…1 beat phase to a 0…1 intensity with a fast attack and a soft
-    /// exponential decay — the characteristic pulsar "throb".
+    /// exponential decay — the characteristic pulsar "throb". Delegates to the
+    /// shared `PulsarPulse` so the caption glow uses the identical curve.
     private func heartbeat(_ phase: Double) -> Double {
-        // Quick rise over the first ~12% of the beat, then decay.
-        if phase < 0.12 {
-            return phase / 0.12                      // 0 → 1 attack
-        }
-        let decay = (phase - 0.12) / 0.88            // 0 → 1 over the rest
-        return exp(-decay * 3.2)                     // 1 → ~0.04 fade
+        PulsarPulse.heartbeat(phase)
     }
 
     // MARK: - Soft squircle aura (behind the head)

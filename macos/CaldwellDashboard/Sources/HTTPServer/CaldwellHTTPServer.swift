@@ -27,11 +27,56 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         self.port = port
     }
 
+    private var droneSweepTask: Task<Void, Never>?
+
     func configure() async {
         await audioQueue.setBroadcaster(sseBroadcaster)
         // History lives in memory and starts empty, so any retained replay
         // audio on disk is orphaned from a prior run — clear it.
         await audioQueue.purgeHistoryAudioStore()
+        // Restore the in-flight drone set persisted by a prior run BEFORE the
+        // server accepts requests, so a daemon relaunch/reload doesn't wipe the
+        // swarm (and orphan sub-agents from other sessions). Broadcast the
+        // restored set so any already-connected overlay re-renders it; the 1s
+        // sweeper then immediately evicts any drone that aged past
+        // droneStaleAfter while the app was closed (restore keeps the real
+        // lastSeen, so a >10min gap self-heals on the first sweep tick).
+        await audioQueue.restoreInFlight()
+        let restored = await audioQueue.inFlightDronesSnapshot()
+        if !restored.isEmpty {
+            await Self.broadcastDrones(restored, sseBroadcaster: sseBroadcaster)
+        }
+        startDroneSweeper()
+    }
+
+    /// ~1Hz staleness sweep: evict in-flight drones whose sub-agent never sent a
+    /// SubagentStop (a dropped hook would otherwise leave a ghost orbiting
+    /// forever). On any eviction, re-broadcast the trimmed set so connected UIs
+    /// fade the ghost out. Cheap when nothing is in-flight (empty filter).
+    private func startDroneSweeper() {
+        guard droneSweepTask == nil else { return }
+        let audioQueue = self.audioQueue
+        let sseBroadcaster = self.sseBroadcaster
+        droneSweepTask = Task.detached(priority: .utility) {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if let trimmed = await audioQueue.sweepStaleDrones() {
+                    await Self.broadcastDrones(trimmed, sseBroadcaster: sseBroadcaster)
+                }
+            }
+        }
+    }
+
+    /// Bring the server fully online: restore persisted state FIRST, then start
+    /// accepting requests. Ordering is load-bearing — a `/subagent/stop` that
+    /// arrives before `restoreInFlight()` completes would be a no-op, and then
+    /// restore would RESURRECT the just-stopped drone. By awaiting `configure()`
+    /// before the listener is armed, the restore is always complete before any
+    /// route can mutate `inFlight`. This is the single entry point the app
+    /// should call.
+    func startup() async {
+        await configure()
+        start()
     }
 
     func start() {
@@ -70,6 +115,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     }
 
     func stop() {
+        droneSweepTask?.cancel()
+        droneSweepTask = nil
         serverTask?.cancel()
         serverTask = nil
     }
@@ -95,7 +142,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
         // POST /speak — TTS enqueue with phrase-cache support
         router.post("/speak") { request, _ -> Response in
-            return try await Self.handleSpeak(request: request, audioQueue: audioQueue)
+            return try await Self.handleSpeak(
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
         }
 
         // GET /history — recent playback history
@@ -166,6 +214,93 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         router.get("/queue") { request, _ -> Response in
             return try await Self.handleQueue(request: request, audioQueue: audioQueue)
         }
+
+        // POST /subagent/start — a sub-agent was spawned. Body {agent_id,
+        // category}. Records it as an in-flight drone and broadcasts the set.
+        router.post("/subagent/start") { request, _ -> Response in
+            return try await Self.handleSubagentStart(
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+        }
+
+        // POST /subagent/stop — a sub-agent finished. Body {agent_id}. Removes
+        // it from the in-flight set and broadcasts the updated set.
+        router.post("/subagent/stop") { request, _ -> Response in
+            return try await Self.handleSubagentStop(
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
+        }
+    }
+
+    // MARK: - /subagent handlers
+
+    /// Drone-set SSE payload: {"drones": {agentId: category, ...}}.
+    nonisolated private static func broadcastDrones(
+        _ drones: [String: String],
+        sseBroadcaster: SSEBroadcaster
+    ) async {
+        let json = (try? Self.jsonString(DronesInFlightPayload(drones: drones))) ?? "{\"drones\":{}}"
+        await sseBroadcaster.broadcast(event: "drones_in_flight", json: json)
+    }
+
+    nonisolated private static func handleSubagentStart(
+        request: Request,
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async throws -> Response {
+        guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+              let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
+              let agentId = body["agent_id"] as? String, !agentId.isEmpty
+        else {
+            return try Self.json(ErrorResponse("Invalid JSON — need agent_id"), status: .badRequest)
+        }
+        let rawCategory = (body["category"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0.lowercased()
+        } ?? "atlas"
+        // Accept the explicit "unknown" category as a first-class value (another
+        // package emits it from the hook; the registry defines its look). Any
+        // OTHER category not in the locked taxonomy still degrades to "atlas" (the
+        // generalist), so a garbage category renders a real Atlas drone rather
+        // than a broken monogram. "unknown" passes through untouched: registry
+        // lookups (colour/voice) fall back to Pulsar defaults for it, which is the
+        // correct rendering for a genuinely-unknown drone.
+        let category = (rawCategory == "unknown" || isDrone(rawCategory)) ? rawCategory : "atlas"
+        // Session that spawned this sub-agent, if the hook supplied it. Stored so
+        // claim-on-speak promotion can be session-scoped (a line from session A
+        // shouldn't claim session B's generic drone). Absent → nil, best-effort.
+        let sessionId = (body["session_id"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
+
+        await audioQueue.addInFlightDrone(id: agentId, category: category, sessionId: sessionId)
+        let drones = await audioQueue.inFlightDronesSnapshot()
+        await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+        return try Self.json(SubagentResponse(ok: true, drones: drones))
+    }
+
+    nonisolated private static func handleSubagentStop(
+        request: Request,
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
+    ) async throws -> Response {
+        guard let bodyData = try? await request.body.collect(upTo: 64 * 1024),
+              let body = try? JSONSerialization.jsonObject(with: Data(buffer: bodyData)) as? [String: Any],
+              let agentId = body["agent_id"] as? String, !agentId.isEmpty
+        else {
+            return try Self.json(ErrorResponse("Invalid JSON — need agent_id"), status: .badRequest)
+        }
+
+        // Removal is DEFERRED if this drone's line is still speaking (returns
+        // false) — the worker broadcasts the trimmed set when the speech ends, so
+        // the drone doesn't vanish mid-sentence. Either way the snapshot below is
+        // the truthful current set (a deferred drone is still present), so it's
+        // safe to broadcast + return.
+        let removedNow = await audioQueue.removeInFlightDrone(id: agentId)
+        let drones = await audioQueue.inFlightDronesSnapshot()
+        // Only re-broadcast when the set actually changed now; a deferred removal
+        // leaves the set unchanged, and its broadcast comes later from the worker.
+        if removedNow {
+            await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+        }
+        return try Self.json(SubagentResponse(ok: true, drones: drones))
     }
 
     // MARK: - /queue handler
@@ -269,12 +404,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     ) async throws -> Response {
         let state = await audioQueue.statusSnapshot(limit: 20)
         let stateJSON = try Self.jsonString(state)
+        // Replay the current in-flight drones too, so a RECONNECTING UI rebuilds
+        // the live set from scratch instead of trusting whatever ghosts it had
+        // when the stream dropped.
+        let drones = await audioQueue.inFlightDronesSnapshot()
+        let dronesJSON = (try? Self.jsonString(DronesInFlightPayload(drones: drones))) ?? "{\"drones\":{}}"
         let clientStream = await sseBroadcaster.makeStream()
 
         let bodyStream = AsyncStream<ByteBuffer> { continuation in
             let task = Task {
                 continuation.yield(ByteBuffer(string: Self.ssePayload(event: "connected", json: "{}")))
                 continuation.yield(ByteBuffer(string: Self.ssePayload(event: "state", json: stateJSON)))
+                continuation.yield(ByteBuffer(string: Self.ssePayload(event: "drones_in_flight", json: dronesJSON)))
 
                 for await payload in clientStream {
                     if Task.isCancelled {
@@ -515,7 +656,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             id: entryId,
             text: String((meta?.text ?? "(cached phrase)").prefix(100)),
             voiceId: meta?.voice_id ?? "",
-            voiceLabel: meta?.voice_label ?? meta?.voice_id ?? "Caldwell",
+            voiceLabel: meta?.voice_label ?? meta?.voice_id ?? "Pulsar",
             createdAt: Date(),
             channel: nil,
             priority: false,
@@ -556,6 +697,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 update.expletives_enabled != nil ||
                 update.canon_enabled != nil ||
                 update.floating_head_enabled != nil ||
+                update.subtitles_enabled != nil ||
+                update.show_active_agents != nil ||
                 update.native_voice != nil
         else {
             return try Self.json(ErrorResponse("No fields to update"), status: .badRequest)
@@ -576,6 +719,12 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             if let floatingHead = update.floating_head_enabled {
                 try config.set("CALDWELL_FLOATING_HEAD", value: floatingHead ? "1" : "0")
             }
+            if let subtitles = update.subtitles_enabled {
+                try config.set("CALDWELL_SUBTITLES", value: subtitles ? "1" : "0")
+            }
+            if let showAgents = update.show_active_agents {
+                try config.set("CALDWELL_SHOW_AGENTS", value: showAgents ? "1" : "0")
+            }
             if let nv = update.native_voice {
                 // Empty resets to auto; otherwise only accept an installed voice.
                 let trimmed = nv.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -587,6 +736,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             }
         } catch {
             return try Self.json(ErrorResponse(error.localizedDescription), status: .internalServerError)
+        }
+
+        // Keep the icon-state change-tracker in sync with a settings-driven mute
+        // change, so a later /speak doesn't redundantly re-announce (or wrongly
+        // suppress) the same state. The full `settings` event below already
+        // informs the UI, so we only update the tracker here — no second event.
+        if let muted = update.muted {
+            Self.iconStateLock.withLock { Self.lastBroadcastMuted = muted }
         }
 
         // Broadcast the new settings so connected UIs reflect the change at
@@ -815,11 +972,45 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         return s
     }
 
+    // MARK: - Icon-state broadcast (targeted, change-only)
+
+    /// Last muted state we broadcast as an `icon-state` event. A muted `/speak`
+    /// must tell connected UIs the mute state (so the menu-bar glyph doesn't go
+    /// stale), but re-broadcasting the full `/settings` blob on every muted call
+    /// risks an echo-storm. Instead we emit a tiny `{"type":"icon-state",
+    /// "muted":<bool>}` event, and ONLY when the state actually changed since the
+    /// last one we sent — at most one event per real transition. `nil` = never
+    /// broadcast yet, so the first observation always emits. Guarded by
+    /// `iconStateLock` (this path is `nonisolated static`).
+    nonisolated(unsafe) private static var lastBroadcastMuted: Bool?
+    nonisolated private static let iconStateLock = NSLock()
+
+    /// Broadcast a lightweight `icon-state` event iff `muted` differs from the
+    /// last one we sent. Returns without broadcasting when unchanged.
+    nonisolated private static func broadcastIconStateIfChanged(
+        muted: Bool,
+        sseBroadcaster: SSEBroadcaster
+    ) async {
+        let changed = iconStateLock.withLock { () -> Bool in
+            guard lastBroadcastMuted != muted else { return false }
+            lastBroadcastMuted = muted
+            return true
+        }
+        guard changed else { return }
+        // Payload carries `type` too (not just the SSE `event:` field) so a
+        // client that switches on a parsed `data.type` still routes it.
+        await sseBroadcaster.broadcast(
+            event: "icon-state",
+            json: "{\"type\":\"icon-state\",\"muted\":\(muted)}"
+        )
+    }
+
     // MARK: - /speak handler
 
     nonisolated private static func handleSpeak(
         request: Request,
-        audioQueue: AudioQueueActor
+        audioQueue: AudioQueueActor,
+        sseBroadcaster: SSEBroadcaster
     ) async throws -> Response {
 
         // Parse body
@@ -839,11 +1030,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse("Text too long (max \(maxLen) chars)"), status: .badRequest)
         }
 
-        // Hard mute — return 200 with muted flag; caller won't retry
+        // Hard mute — return 200 with muted flag; caller won't retry. Also tell
+        // connected UIs the mute state so the menu-bar glyph doesn't go stale —
+        // but only as a tiny `icon-state` event, and only when the state changed
+        // (no echo-storm on a burst of muted calls).
         let cfg = CaldwellConfig.shared
         if cfg.isMuted {
+            await Self.broadcastIconStateIfChanged(muted: true, sseBroadcaster: sseBroadcaster)
             return try Self.json(MutedResponse(muted: true, text_preview: String(text.prefix(100))))
         }
+        // Not muted on this call — if we last told clients "muted", correct it now
+        // (state transitioned false) so a stale muted glyph clears via /speak too.
+        await Self.broadcastIconStateIfChanged(muted: false, sseBroadcaster: sseBroadcaster)
 
         // Polite mode: scrub expletives from bespoke lines before they are
         // cached or spoken. The toggle is authoritative — Polite is always clean
@@ -855,6 +1053,38 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
         let channel  = body["channel"]  as? String
         let priority = body["priority"] as? Bool ?? false
+        // Optional drone attribution. A drone category (e.g. "voyager") makes
+        // that sibling drone the active speaker for this line; nil/"pulsar"
+        // keeps the main Pulsar head speaking.
+        let agentCategory = (body["agent"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
+        // The speaking sub-agent's session, from say.sh (CLAUDE_CODE_SESSION_ID).
+        // Session-scopes the claim-on-speak promotion below. Absent → nil, and
+        // promotion falls back to the old cross-session behaviour.
+        let speakSessionId = (body["session_id"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
+        // Claim-on-speak: a sub-agent reveals its true character only by speaking
+        // with `--agent X`, because the SubagentStart hook carries no task text and
+        // registers every generic worker as an atlas. So when a tagged line comes
+        // in, promote ONE generic in-flight drone's PRESENCE to this category and
+        // re-broadcast the drone set — the swarm re-renders the real character
+        // instead of a wall of identical atlases. If the actor actually promoted a
+        // drone (or one already had this category) it returns true; only then does
+        // the presence differ from the last broadcast, so we re-broadcast.
+        if let agentCategory {
+            let didPromote = await audioQueue.promoteInFlightDrone(
+                toCategory: agentCategory, sessionId: speakSessionId)
+            if didPromote {
+                let drones = await audioQueue.inFlightDronesSnapshot()
+                await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
+            }
+        }
+        // NOTE: a tagged `/speak` line no longer refreshes drone `lastSeen`. The
+        // old category-wide touch kept a ghost drone (lost SubagentStop) immortal
+        // beside any live same-category sibling. Liveness now rests on a reliable
+        // SubagentStop + the shorter `droneStaleAfter` backstop sweep only.
 
         // macOS local voice — synthesise via `say` to a temp AIFF so it plays
         // through the same envelope/lip-sync path. No network, no API key, no
@@ -864,7 +1094,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             id: entryId, text: String(text.prefix(100)), voiceId: "native",
             voiceLabel: "Pulsar", createdAt: Date(), channel: channel,
             priority: priority, fullText: text, isReplay: false,
-            audioURL: nil, engine: "native")
+            audioURL: nil, engine: "native", agentCategory: agentCategory)
         guard let position = await audioQueue.enqueue(entry) else {
             return try Self.json(SpeakResponse(
                 id: entryId, position: nil, voice: "native",
@@ -872,9 +1102,10 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
         let idCopy = entryId
         let textCopy = text
+        let agentCopy = agentCategory
         Task.detached {
             do {
-                let url = try await NativeVoiceClient.synth(text: textCopy)
+                let url = try await NativeVoiceClient.synth(text: textCopy, agent: agentCopy)
                 await audioQueue.markReady(id: idCopy, url: url)
             } catch {
                 NSLog("[PulsarHTTP] native synth failed for \(idCopy): \(error)")
@@ -928,6 +1159,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             enhanced_installed: NativeVoiceClient.enhancedInstalled(),
             canon_enabled: config.canonEnabled,
             floating_head_enabled: config.floatingHeadEnabled,
+            subtitles_enabled: config.subtitlesEnabled,
+            show_active_agents: config.showActiveAgents,
             available_voices: NativeVoiceClient.voiceOptions()
         )
     }
@@ -1158,6 +1391,15 @@ private struct ReplayResponse: Encodable, Sendable {
     let dropped: Bool?
 }
 
+private struct DronesInFlightPayload: Encodable, Sendable {
+    let drones: [String: String]
+}
+
+private struct SubagentResponse: Encodable, Sendable {
+    let ok: Bool
+    let drones: [String: String]
+}
+
 private struct CanonPickResponse: Encodable, Sendable {
     let id: String
     let played: String
@@ -1173,6 +1415,8 @@ private struct SettingsResponse: Encodable, Sendable {
     let enhanced_installed: Bool
     let canon_enabled: Bool
     let floating_head_enabled: Bool
+    let subtitles_enabled: Bool
+    let show_active_agents: Bool
     let available_voices: [NativeVoiceClient.VoiceOption]
 }
 
@@ -1181,5 +1425,7 @@ private struct SettingsUpdateRequest: Decodable, Sendable {
     let expletives_enabled: Bool?
     let canon_enabled: Bool?
     let floating_head_enabled: Bool?
+    let subtitles_enabled: Bool?
+    let show_active_agents: Bool?
     let native_voice: String?
 }

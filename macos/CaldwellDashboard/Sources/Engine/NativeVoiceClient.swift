@@ -73,29 +73,66 @@ enum NativeVoiceClient {
         }
     }
 
-    /// The `say -v` name to actually speak with: env override → the user's pick
-    /// resolved to its best installed variant → Daniel → first available.
+    /// The `say -v` name to actually speak with for the DEFAULT (Pulsar) voice:
+    /// env override → Daniel (the fixed default) resolved to its best installed
+    /// variant → first available. The user voice-picker is gone — every line is
+    /// spoken in a character voice (Pulsar = Daniel, drones from the registry).
     static func bestVoice() -> String {
         if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }
+        return resolved(base: DroneRegistry.pulsarVoice)
+    }
+
+    /// Resolve a base voice name (e.g. "Daniel", "Thomas", "Karen") to its best
+    /// installed `say -v` variant (e.g. "Daniel (Enhanced)"). Falls back to the
+    /// raw base name if it isn't in the catalogue — `say` may still know it even
+    /// when `AVSpeechSynthesisVoice` doesn't enumerate it — and finally to
+    /// Pulsar's Daniel, then anything installed.
+    static func resolved(base: String) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespaces)
         let vs = voices()
-        let choice = CaldwellConfig.shared.nativeVoiceChoice
-        if !choice.isEmpty,
-           let v = vs.first(where: { $0.display.caseInsensitiveCompare(choice) == .orderedSame }) {
+        if !trimmed.isEmpty,
+           let v = vs.first(where: { $0.display.caseInsensitiveCompare(trimmed) == .orderedSame }) {
             return v.resolved
         }
-        // Out-of-box default (no saved choice): Trinoids — Pulsar opens robotic.
-        // A user's saved pick is never overridden because `choice` is non-empty
-        // once they choose. Fall through to Daniel, then anything installed.
-        if let trinoids = vs.first(where: { $0.display.caseInsensitiveCompare("Trinoids") == .orderedSame }) {
-            return trinoids.resolved
-        }
+        // Not enumerated by AVSpeechSynthesisVoice — trust `say` to know the name
+        // (it lists more voices than AVSpeech does). Use it verbatim.
+        if !trimmed.isEmpty { return trimmed }
         if let daniel = vs.first(where: { $0.display.caseInsensitiveCompare("Daniel") == .orderedSame }) {
             return daniel.resolved
         }
         return vs.first?.resolved ?? "Daniel"
+    }
+
+    /// The `say -v` voice for a line tagged with drone `category`. Pulsar / nil /
+    /// unknown → Daniel; a drone → its registry voice, each resolved to the best
+    /// installed variant. An env override still wins (debug/global force).
+    static func voice(forAgent category: String?) -> String {
+        if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
+           !override.trimmingCharacters(in: .whitespaces).isEmpty {
+            return override
+        }
+        return englishResolved(base: DroneRegistry.voice(for: category))
+    }
+
+    /// Resolve a base voice but GUARANTEE it speaks English. The floating heads
+    /// are English-only: if a base name resolves to a non-English voice — or can't
+    /// be verified as English (e.g. an ambiguous name that `say` might bind to a
+    /// non-English / Siri variant) — fall back to Pulsar's Daniel rather than let a
+    /// drone speak another language or garble. Every drone voice in the registry is
+    /// a standard English voice, so this only ever triggers on a mis-set / clashing
+    /// voice — exactly the failure we're guarding against.
+    static func englishResolved(base: String) -> String {
+        let trimmed = base.trimmingCharacters(in: .whitespaces)
+        let vs = voices()
+        if let v = vs.first(where: { $0.display.caseInsensitiveCompare(trimmed) == .orderedSame }),
+           v.language.hasPrefix("en") {
+            return v.resolved
+        }
+        // Not found as an English voice → force Daniel (always English).
+        return resolved(base: DroneRegistry.pulsarVoice)
     }
 
     // MARK: - Private
@@ -168,18 +205,38 @@ enum NativeVoiceClient {
     }
 
     /// Synthesise `text` to a temp AIFF and return its URL. Caller owns the file.
-    static func synth(text: String, rate: Int = defaultRate) async throws -> URL {
-        let voice = bestVoice()
+    /// `agent` selects the character voice: nil/"pulsar" → Daniel; a drone
+    /// category → that drone's registry voice.
+    static func synth(text: String, agent: String? = nil, rate: Int = defaultRate) async throws -> URL {
+        let voice = voice(forAgent: agent)
         let out = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("pulsar-native-\(UUID().uuidString).aiff")
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-        proc.arguments = ["-v", voice, "-r", String(rate), "-o", out.path, text]
+        // Lead with a short silence so the very first phoneme isn't clipped by
+        // `say` synthesis warm-up / afplay's audio-device startup — worst on a
+        // voice's FIRST use (e.g. a drone speaking right after Pulsar, which is
+        // exactly where the clipped-start was heard). afplay plays from byte 0, so
+        // the startup latency now eats the silence instead of the first word. The
+        // lip-sync envelope stays aligned (a closed-mouth lead-in of ~150ms).
+        proc.arguments = ["-v", voice, "-r", String(rate), "-o", out.path, "[[slnc 150]] " + text]
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
-        try proc.run()
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            Task.detached { proc.waitUntilExit(); cont.resume() }
+        // Wait for `say` WITHOUT parking a cooperative-pool thread. The old
+        // `Task.detached { proc.waitUntilExit() }` blocked a pool thread per
+        // synth on a syscall — reintroducing the exact pool-exhaustion stall the
+        // afplay terminationHandler fix already solved for playback. Resume the
+        // continuation from `terminationHandler` (fired by Foundation off the
+        // pool) instead. The handler is set BEFORE `run()`; if `run()` throws it
+        // never fires, so we resume manually to avoid leaking the continuation.
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            proc.terminationHandler = { _ in cont.resume() }
+            do {
+                try proc.run()
+            } catch {
+                proc.terminationHandler = nil
+                cont.resume(throwing: error)
+            }
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: out.path)[.size] as? Int) ?? nil
         guard proc.terminationStatus == 0, let bytes = size, bytes > 0 else {

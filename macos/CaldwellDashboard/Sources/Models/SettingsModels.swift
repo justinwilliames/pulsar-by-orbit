@@ -13,6 +13,12 @@ struct DaemonSettings: Codable, Sendable {
     /// Whether the animated floating Pulsar head is shown on screen while it
     /// speaks. Default true.
     let floatingHeadEnabled: Bool?
+    /// Whether the read-along caption bubble shows below the head. Default true.
+    let subtitlesEnabled: Bool?
+    /// Whether the orbiting/clustered sub-agent "drones" (the active-agent swarm)
+    /// are shown. Default true; when false only Pulsar himself appears. Pulsar's
+    /// own voice + head are unaffected.
+    let showActiveAgents: Bool?
     /// Installed local voices usable in free mode (drives the voice picker),
     /// each with a "Name (Language, Region)" label.
     let availableVoices: [NativeVoiceClient.VoiceOption]?
@@ -24,6 +30,8 @@ struct DaemonSettings: Codable, Sendable {
         case enhancedInstalled = "enhanced_installed"
         case canonEnabled = "canon_enabled"
         case floatingHeadEnabled = "floating_head_enabled"
+        case subtitlesEnabled = "subtitles_enabled"
+        case showActiveAgents = "show_active_agents"
         case availableVoices = "available_voices"
     }
 
@@ -35,6 +43,8 @@ struct DaemonSettings: Codable, Sendable {
         self.enhancedInstalled = try container.decodeIfPresent(Bool.self, forKey: .enhancedInstalled)
         self.canonEnabled = try container.decodeIfPresent(Bool.self, forKey: .canonEnabled)
         self.floatingHeadEnabled = try container.decodeIfPresent(Bool.self, forKey: .floatingHeadEnabled)
+        self.subtitlesEnabled = try container.decodeIfPresent(Bool.self, forKey: .subtitlesEnabled)
+        self.showActiveAgents = try container.decodeIfPresent(Bool.self, forKey: .showActiveAgents)
         self.availableVoices = try container.decodeIfPresent([NativeVoiceClient.VoiceOption].self, forKey: .availableVoices)
     }
 }

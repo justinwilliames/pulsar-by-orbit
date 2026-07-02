@@ -6,11 +6,13 @@ import SwiftUI
 private let logger = Logger(subsystem: "team.yourorbit.Pulsar", category: "PopoverRootView")
 
 enum DashboardTab: String, CaseIterable {
+    case roster = "Team"
     case history = "History"
     case settings = "Settings"
 
     var icon: String {
         switch self {
+        case .roster: "person.3"
         case .history: "clock"
         case .settings: "gear"
         }
@@ -52,7 +54,10 @@ struct PopoverRootView: View {
     let viewModel: DashboardViewModel
     let updater: SPUUpdater
 
-    @State private var selectedTab: DashboardTab = .history
+    // Default to the Team/Roster tab on first open (history is empty then) so
+    // new users immediately see the drone roster rather than an empty clock panel.
+    // Once history has entries the user has already discovered the app.
+    @State private var selectedTab: DashboardTab = .roster
     @State private var navigatingForward = true
 
     var body: some View {
@@ -77,6 +82,10 @@ struct PopoverRootView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Pulsar")
                     .font(.title3.weight(.semibold))
+                Text("Your AI tells you when it's done — stop watching the screen.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
@@ -223,6 +232,8 @@ struct PopoverRootView: View {
     @ViewBuilder
     private func tabView(for tab: DashboardTab) -> some View {
         switch tab {
+        case .roster:
+            RosterView()
         case .history:
             HistoryPanelView(viewModel: viewModel)
         case .settings:

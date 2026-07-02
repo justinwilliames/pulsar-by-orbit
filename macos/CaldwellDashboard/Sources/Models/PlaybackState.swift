@@ -16,6 +16,9 @@ final class PlaybackState {
     var chunkMs: Int = 50
     var queuedCount: Int = 0
     var channel: String?
+    /// Drone category attributed to the currently-speaking line (e.g. "voyager").
+    /// nil = the main Pulsar head is speaking.
+    var currentAgentCategory: String?
 
     var globalPaused = false
     var channelPaused: [String] = []
@@ -26,11 +29,14 @@ final class PlaybackState {
     func updateFromVoiceActive(_ data: VoiceActiveEvent) {
         stopTimer()
         if data.type == "idle" {
-            // Audio finished. Keep currentVoice + currentText set so the
-            // floating panel keeps rendering the portrait through its
-            // min-visible tail window (~6s after isPlaying flips false).
-            // Otherwise the panel goes blank for most of its visible time
-            // and Sir thinks it never appeared.
+            // Audio finished. Keep currentVoice + currentText AND
+            // currentAgentCategory set so the floating panel keeps rendering the
+            // SPEAKER — the exact participant who spoke — big + centred with its
+            // own caption through the linger/fade. Clearing the category here was
+            // the "flips back to Pulsar after a drone speaks" bug: currentVoice
+            // lingered but the drone identity was wiped, so the centre fell back
+            // to Pulsar (nil category = Pulsar). The category is replaced when the
+            // NEXT line arrives (else branch) or cleared when the panel hides.
             isPlaying = false
             currentId = nil
             currentType = "idle"
@@ -52,6 +58,7 @@ final class PlaybackState {
             envelope = data.envelope ?? []
             chunkMs = data.chunkMs ?? 50
             channel = data.channel
+            currentAgentCategory = data.agent
             startTimer()
         }
         queuedCount = data.queued ?? 0
@@ -98,13 +105,14 @@ struct VoiceActiveEvent: Codable {
     let queued: Int?
     let channel: String?
     let priority: Bool?
+    let agent: String?
 
     enum CodingKeys: String, CodingKey {
         case id, voice, type, text, duration
         case totalDuration = "total_duration"
         case offset, segments, envelope
         case chunkMs = "chunk_ms"
-        case queued, channel, priority
+        case queued, channel, priority, agent
     }
 }
 
@@ -114,6 +122,12 @@ struct DialogueSegment: Codable {
     let chars: Int
     let start: Double?
     let end: Double?
+}
+
+/// The set of currently in-flight sub-agent drones, pushed over SSE whenever a
+/// sub-agent starts or stops. Maps agentId → drone category.
+struct DronesInFlightEvent: Codable {
+    let drones: [String: String]
 }
 
 struct PauseStateEvent: Codable {

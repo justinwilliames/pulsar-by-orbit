@@ -17,6 +17,115 @@ final class DashboardViewModel {
     var cacheTotalBytes: Int = 0
     var cacheMaxBytes: Int = 0
 
+    /// In-flight sub-agent drones (agentId → drone category). Driven by the
+    /// "drones_in_flight" SSE event; rendered as orbiting drones around Pulsar.
+    var inFlightDrones: [String: String] = [:]
+
+    /// True while any sub-agent is running (SubagentStart → SubagentStop). A
+    /// running sub-agent means the live team is at work; each such drone is a
+    /// present participant (it orbits, and centres when it speaks).
+    var hasInFlightDrones: Bool { !inFlightDrones.isEmpty }
+
+    /// Whether PULSAR is a present participant — i.e. the MAIN session is
+    /// actively working. Approximated (no new wiring) as: any drone in-flight (a
+    /// running sub-agent implies the main session is working) OR Pulsar is
+    /// actively speaking (`isPlaying`).
+    ///
+    /// CRITICAL: this keys on `isPlaying`, NOT `currentVoice != nil`.
+    /// `currentVoice` persists through the post-line linger (it drives the
+    /// centre-hold, cleared only in AppDelegate.hidePanel). If panel *visibility*
+    /// also read `currentVoice`, the panel would stay "should be visible" for the
+    /// whole linger, so `recomputePanelVisibility` would never see the true→false
+    /// edge, never fire `onPlaybackChanged(false)`, and never schedule the 5s
+    /// hide — leaving the head stuck on screen until the 45s max-visible ceiling.
+    /// Keying on `isPlaying` lets visibility fall the instant audio ends (→ 5s
+    /// hide timer), while `currentVoice` independently holds the centre + caption
+    /// through that 5s + fade. The two mechanisms must stay decoupled.
+    var pulsarIsPresent: Bool {
+        hasInFlightDrones || playback.isPlaying
+    }
+
+    /// True when the floating panel would actually show something renderable.
+    /// When showActiveAgents is OFF, drone heads are suppressed — so a panel
+    /// opened purely for an in-flight drone (no Pulsar speech, no caption) would
+    /// be empty. In that case we require Pulsar to actually be speaking before
+    /// considering the panel visible. The queue-bubble path is audio and always
+    /// renders regardless of the agents toggle.
+    var hasRenderableContent: Bool {
+        let agentsOn = settings?.showActiveAgents ?? true
+        if agentsOn {
+            // Normal: any participant present → something renders.
+            return pulsarIsPresent || hasInFlightDrones || playback.queuedCount > 0
+        } else {
+            // Agents hidden: only Pulsar speech (isPlaying) or a queued line
+            // produces visible output; silent drone-only activity does not.
+            return playback.isPlaying || playback.queuedCount > 0
+        }
+    }
+
+    /// The panel is visible while ANY renderable content is present — Pulsar
+    /// speaking OR (when showActiveAgents is on) any drone in-flight — plus the
+    /// existing trailing linger. When showActiveAgents is OFF, drone-only
+    /// in-flight activity does NOT open the panel (nothing would render).
+    var panelShouldBeVisible: Bool {
+        hasRenderableContent
+    }
+
+    /// Last value pushed to `onPlaybackChanged`, so we only fire on a real edge.
+    private var lastPanelVisible = false
+
+    /// ONE coherent snapshot of who is speaking right now, collapsing the four
+    /// previously-independent signals (currentAgentCategory, inFlightDrones,
+    /// amplitude, currentVoice) into a single source of truth. The floating
+    /// views read ONLY this for the centre occupant, name card, and subtitle
+    /// tint — so they can never desync or flicker against each other.
+    ///
+    /// nil = nothing is speaking. A `category` of nil inside the snapshot means
+    /// Pulsar is the speaker (indigo); a real drone category means that drone.
+    struct SpeakerSnapshot: Equatable {
+        /// The drone category, or nil when Pulsar is speaking.
+        let category: String?
+        /// Resolved theme colour (drone colour, else Pulsar indigo).
+        let color: Color
+        /// Live mouth amplitude for the speaker.
+        let amplitude: Float
+        /// Pulsar's raw voice label (for the centre portrait's fallback monogram).
+        let voiceLabel: String
+
+        /// True when a real drone (not Pulsar) holds the line.
+        var isDrone: Bool { category != nil }
+    }
+
+    /// The participant that HOLDS the big CENTRE slot — the one who spoke the
+    /// current-or-lingering line. Keyed on `currentVoice`, which persists through
+    /// the caption linger (it is cleared only on the idle SSE event, together
+    /// with `currentText`), so the speaker STAYS big + centred for its whole
+    /// line AND its entire fade-wait, then centre + caption fade away together.
+    /// It NEVER flips to Pulsar (or any other participant) mid-linger, and never
+    /// shrinks to the swarm while its caption is still up.
+    ///
+    /// `amplitude` naturally falls to 0 when audio ends (the envelope is spent),
+    /// so the mouth stills while the portrait stays put. nil only when there is
+    /// genuinely no current-or-lingering speaker → no centre, small swarm.
+    var activeSpeaker: SpeakerSnapshot? {
+        guard let voice = playback.currentVoice else { return nil }
+        // Only a REAL drone category themes the speaker; nil = Pulsar (indigo).
+        let cat = isDrone(playback.currentAgentCategory)
+            ? playback.currentAgentCategory?.lowercased()
+            : nil
+        return SpeakerSnapshot(category: cat,
+                               color: droneColor(for: cat),
+                               amplitude: lipSync.amplitude,
+                               voiceLabel: voice)
+    }
+
+    /// The drone category that themes the CAPTION (tint + name) — the SAME
+    /// linger-surviving owner the centre uses, so centre + caption share one
+    /// identity for the whole line + fade. nil = Pulsar (indigo) or no caption.
+    var captionSpeakerCategory: String? {
+        isDrone(playback.currentAgentCategory) ? playback.currentAgentCategory?.lowercased() : nil
+    }
+
     /// O(1) lookup: is a given text string present in the phrase cache?
     var cachedTextIndex: [String: CachedPhrase] {
         Dictionary(cachedPhrases.map { ($0.text, $0) }, uniquingKeysWith: { first, _ in first })
@@ -82,9 +191,43 @@ final class DashboardViewModel {
             handleHistoryUpdateEvent(data)
         case "settings":
             handleSettingsEvent(data)
+        case "drones_in_flight":
+            handleDronesInFlightEvent(data)
         default:
             break
         }
+    }
+
+    /// A change to the set of in-flight sub-agent drones, pushed whenever a
+    /// sub-agent starts or stops. Decodes {"drones": {agentId: category}}.
+    /// Drives the panel directly: a silently-running sub-agent must show its
+    /// drone even with nothing speaking (and the last despawn lets it hide).
+    private func handleDronesInFlightEvent(_ data: Data) {
+        guard let payload = try? decoder.decode(DronesInFlightEvent.self, from: data) else { return }
+        inFlightDrones = payload.drones
+        recomputePanelVisibility()
+    }
+
+    /// Fire `onPlaybackChanged` only when the should-be-visible edge flips, so
+    /// the AppDelegate shows the panel (drones present OR speaking) and starts
+    /// the hide linger when BOTH clear. Idempotent across redundant SSE events.
+    private func recomputePanelVisibility() {
+        let visible = panelShouldBeVisible
+        guard visible != lastPanelVisible else { return }
+        lastPanelVisible = visible
+        onPlaybackChanged?(visible)
+    }
+
+    /// Called by AppDelegate AFTER it takes the panel off screen on its own timer
+    /// (the tail-after-idle hide or the max-visible ceiling) — events the view
+    /// model can't otherwise observe. Without this, `lastPanelVisible` stays stuck
+    /// `true` after an autonomous hide, so the next participant/line computes
+    /// `visible == lastPanelVisible` and the show edge NEVER re-fires: audio keeps
+    /// playing into a dark screen. Resyncing the flag lets the next recompute
+    /// re-show. (The ceiling itself no longer fires while participants are present
+    /// — see AppDelegate.scheduleMaxVisible — so this is mainly a safety resync.)
+    func panelWasHidden() {
+        lastPanelVisible = false
     }
 
     /// A settings change pushed from the daemon (e.g. mute toggled via the API,
@@ -99,13 +242,11 @@ final class DashboardViewModel {
     private func handleStateEvent(_ data: Data) {
         guard let state = try? decoder.decode(QueueStatusResponse.self, from: data) else { return }
         applyQueueStatus(state)
-        let isActive = state.playing || state.queued > 0
-        onPlaybackChanged?(isActive)
+        recomputePanelVisibility()
     }
 
     private func handleVoiceActiveEvent(_ data: Data) {
         guard let event = try? decoder.decode(VoiceActiveEvent.self, from: data) else { return }
-        let wasActive = playback.isPlaying || playback.queuedCount > 0
         let previousQueuedCount = playback.queuedCount
         let previousCurrentId = playback.currentId
         playback.updateFromVoiceActive(event)
@@ -131,11 +272,51 @@ final class DashboardViewModel {
             requestQueueRefresh()
         }
 
-        let isActive = playback.isPlaying || playback.queuedCount > 0
-        if isActive != wasActive {
-            onPlaybackChanged?(isActive)
+        recomputePanelVisibility()
+
+        // Return-to-swarm. When a line ends but a swarm is still in flight, the
+        // finished speaker must shrink back into the orbit after the linger.
+        // `currentVoice` (which pins the big centre) normally clears only in
+        // hidePanel — but with a swarm the panel never hides, so without this the
+        // speaker would stay big forever (caption gone, head still centred). Fires
+        // only with a swarm present; the solo case is left to hidePanel's
+        // hold-then-fade. A new line cancels it (the next speaker takes centre).
+        if playback.isPlaying {
+            returnToSwarmTask?.cancel(); returnToSwarmTask = nil
+        } else {
+            scheduleReturnToSwarm()
         }
-        updateQueuePolling(isActive: isActive)
+
+        // Queue polling tracks audio activity specifically (not drone presence).
+        let audioActive = playback.isPlaying || playback.queuedCount > 0
+        updateQueuePolling(isActive: audioActive)
+    }
+
+    /// Delay before a finished speaker rejoins the swarm — matches the caption
+    /// linger so the centre + subtitle leave together, then she's back in orbit.
+    private static let returnToSwarmDelay: TimeInterval = 5.0
+    private var returnToSwarmTask: Task<Void, Never>?
+
+    /// After a line ends with a swarm still present, clear the centre occupant so
+    /// the speaker returns to the hovering swarm. Guards `hasInFlightDrones` at
+    /// BOTH schedule and fire time: if no drones (or they all stopped), the panel
+    /// is hiding and hidePanel owns the clear — don't fight it.
+    private func scheduleReturnToSwarm() {
+        returnToSwarmTask?.cancel()
+        guard hasInFlightDrones else { returnToSwarmTask = nil; return }
+        returnToSwarmTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.returnToSwarmDelay * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            guard !self.playback.isPlaying, self.hasInFlightDrones else { return }
+            // Wrap in withAnimation so SwiftUI sees the state change with a spring
+            // rather than a snap — drones animate back to the idle cluster layout
+            // instead of teleporting.
+            withAnimation(.spring(response: 0.48, dampingFraction: 0.74)) {
+                self.playback.currentVoice = nil
+                self.playback.currentText = nil
+                self.playback.currentAgentCategory = nil
+            }
+        }
     }
 
     private func updateQueuePolling(isActive: Bool) {
@@ -283,9 +464,9 @@ final class DashboardViewModel {
         }
     }
 
-    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
+    func saveSettings(muted: Bool? = nil, expletivesEnabled: Bool? = nil, canonEnabled: Bool? = nil, floatingHeadEnabled: Bool? = nil, subtitlesEnabled: Bool? = nil, showActiveAgents: Bool? = nil, nativeVoice: String? = nil) async -> SaveResult {
         do {
-            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, floatingHeadEnabled: floatingHeadEnabled, nativeVoice: nativeVoice)
+            let response = try await api.saveSettings(muted: muted, expletivesEnabled: expletivesEnabled, canonEnabled: canonEnabled, floatingHeadEnabled: floatingHeadEnabled, subtitlesEnabled: subtitlesEnabled, showActiveAgents: showActiveAgents, nativeVoice: nativeVoice)
             if let error = response.error {
                 return .failure(error)
             }
@@ -319,6 +500,26 @@ final class DashboardViewModel {
 
     var isFloatingHeadEnabled: Bool {
         settings?.floatingHeadEnabled ?? true
+    }
+
+    /// Read-along caption bubble: on = show the spoken line below the head;
+    /// off = head only. Gated by the floating head being visible.
+    func setSubtitlesEnabled(_ on: Bool) async {
+        _ = await saveSettings(subtitlesEnabled: on)
+    }
+
+    var isSubtitlesEnabled: Bool {
+        settings?.subtitlesEnabled ?? true
+    }
+
+    /// Active-agent swarm visibility: on = show the orbiting/clustered sub-agent
+    /// drones; off = only Pulsar appears (drone voices still play).
+    func setShowActiveAgents(_ on: Bool) async {
+        _ = await saveSettings(showActiveAgents: on)
+    }
+
+    var isShowActiveAgents: Bool {
+        settings?.showActiveAgents ?? true
     }
 
     /// Free-mode local voice choice. Empty resets to auto (Daniel Enhanced else

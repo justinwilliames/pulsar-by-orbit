@@ -24,11 +24,28 @@ struct PortraitView: View {
     let size: CGFloat
     let voiceColor: Color
     let portraitManager: PortraitManager
+    /// Which frame set to load: `"<droneName>-mouth-0…4"` + `"<droneName>-blink"`.
+    /// Defaults to "pulsar" so existing callers render Pulsar unchanged; a drone
+    /// category (e.g. "voyager") swaps in that drone's frames.
+    var droneName: String = "pulsar"
 
     /// The 5 rendered mouth frames, loaded once (closed → full open).
-    @State private var frames: [NSImage] = PortraitView.loadFrames()
+    @State private var frames: [NSImage]
     /// The blink frame (eyes closed). Optional — blink simply no-ops if absent.
-    @State private var blinkFrame: NSImage? = NSImage(named: "pulsar-blink")
+    @State private var blinkFrame: NSImage?
+
+    init(voiceName: String, amplitude: Float, size: CGFloat, voiceColor: Color,
+         portraitManager: PortraitManager, droneName: String = "pulsar") {
+        self.voiceName = voiceName
+        self.amplitude = amplitude
+        self.size = size
+        self.voiceColor = voiceColor
+        self.portraitManager = portraitManager
+        self.droneName = droneName
+        _frames = State(initialValue: PortraitView.loadFrames(droneName: droneName))
+        let resolvedBlink = droneName == "unknown" ? "pulsar" : droneName
+        _blinkFrame = State(initialValue: NSImage(named: "\(resolvedBlink)-blink"))
+    }
 
     /// Exponentially-smoothed amplitude in 0…1, used to position across frames.
     @State private var smoothedAmp: CGFloat = 0
@@ -82,6 +99,21 @@ struct PortraitView: View {
             }
             .onChange(of: timeline.date) { _, _ in
                 advance(now: t)
+            }
+            // The frames are seeded once in init from `droneName`; @State keeps
+            // them across prop changes, so a view whose droneName flips (the centre
+            // going Pulsar→drone, or a recycled slot) would otherwise keep the OLD
+            // face. Reload on any droneName change so the head always matches.
+            .onChange(of: droneName) { _, newName in
+                frames = PortraitView.loadFrames(droneName: newName)
+                let resolvedBlink = newName == "unknown" ? "pulsar" : newName
+                blinkFrame = NSImage(named: "\(resolvedBlink)-blink")
+                // Reset blink state so an in-flight blink from the previous face
+                // doesn't fire over the incoming portrait. Defer the next blink
+                // past the swap window (~0.5s) so the eye-open frame settles first.
+                blinkStart = -1
+                let now = Date().timeIntervalSinceReferenceDate
+                nextBlinkAt = now + 0.5 + Double.random(in: 3.5...5.0)
             }
         }
     }
@@ -168,12 +200,16 @@ struct PortraitView: View {
 
     // MARK: - Loading
 
-    /// Loads pulsar-mouth-0…4 from the bundle. Returns an empty array if any
-    /// frame is missing, which triggers the fallback monogram.
-    private static func loadFrames() -> [NSImage] {
+    /// Loads `<droneName>-mouth-0…4` from the bundle. Returns an empty array if
+    /// any frame is missing, which triggers the fallback monogram.
+    ///
+    /// `"unknown"` has no portrait art — it maps to the `"pulsar"` frame set so
+    /// the swarm renders a real neutral face instead of a broken monogram.
+    private static func loadFrames(droneName: String = "pulsar") -> [NSImage] {
+        let name = droneName == "unknown" ? "pulsar" : droneName
         var out: [NSImage] = []
         for i in 0..<5 {
-            guard let img = NSImage(named: "pulsar-mouth-\(i)") else { return [] }
+            guard let img = NSImage(named: "\(name)-mouth-\(i)") else { return [] }
             out.append(img)
         }
         return out

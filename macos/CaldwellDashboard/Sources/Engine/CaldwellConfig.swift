@@ -21,7 +21,11 @@ final class CaldwellConfig: @unchecked Sendable {
     // MARK: - Paths
 
     /// Repo root: honour CALDWELL_REPO_ROOT env var first, then default to
-    /// ~/code/caldwell-speak (matches what the install scripts assume).
+    /// ~/code/caldwell-speak. This locates BUNDLED CODE ASSETS (e.g. the drone
+    /// portrait frames under assets/portraits) — NOT mutable app state. Mutable
+    /// state (config.json, cache/) lives under `storageRoot` in Application
+    /// Support so the app works for DMG users with no checkout. Keep this here
+    /// only for read-only asset lookups relative to the source tree.
     var repoRoot: URL {
         if let env = ProcessInfo.processInfo.environment["CALDWELL_REPO_ROOT"],
            !env.isEmpty {
@@ -31,12 +35,79 @@ final class CaldwellConfig: @unchecked Sendable {
             .appendingPathComponent("code/caldwell-speak")
     }
 
+    /// Mutable app-state root. Defaults to a per-user Application Support dir
+    /// (`~/Library/Application Support/Pulsar/`) so state lives OUTSIDE the code
+    /// checkout — the app runs identically for DMG users with no source tree.
+    /// Dev override: set `PULSAR_STORAGE` (or the legacy `CALDWELL_REPO_ROOT`)
+    /// to point storage at a checkout's `cache/`+`config.json` instead.
+    ///
+    /// Directory is created on first access (best-effort). On first use we also
+    /// migrate an existing legacy `~/code/caldwell-speak` install's state across
+    /// so upgraders keep their config + cached audio.
+    var storageRoot: URL {
+        // Dev overrides win, in priority order.
+        if let env = ProcessInfo.processInfo.environment["PULSAR_STORAGE"],
+           !env.isEmpty {
+            let url = URL(fileURLWithPath: env)
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
+        if let env = ProcessInfo.processInfo.environment["CALDWELL_REPO_ROOT"],
+           !env.isEmpty {
+            let url = URL(fileURLWithPath: env)
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
+
+        let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first!
+            .appendingPathComponent("Pulsar", isDirectory: true)
+        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        migrateLegacyStateIfNeeded(into: appSupport)
+        return appSupport
+    }
+
+    /// Legacy checkout path we may have written state into before the move to
+    /// Application Support. Read-only source for the one-time migration.
+    private var legacyStorageRoot: URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("code/caldwell-speak")
+    }
+
+    /// Best-effort, one-time state migration from the old in-checkout location
+    /// (`~/code/caldwell-speak/{config.json,cache/}`) into Application Support.
+    /// Runs only when the new location has NO config.json and NO cache/ yet, so
+    /// it never clobbers live state. Every step is `try?` — a failed migration
+    /// must never crash the app or block startup; worst case is a fresh state.
+    private func migrateLegacyStateIfNeeded(into dest: URL) {
+        let fm = FileManager.default
+        let destConfig = dest.appendingPathComponent("config.json")
+        let destCache = dest.appendingPathComponent("cache")
+        // Already populated → nothing to do (idempotent on every launch).
+        if fm.fileExists(atPath: destConfig.path) || fm.fileExists(atPath: destCache.path) {
+            return
+        }
+        let legacy = legacyStorageRoot
+        let legacyConfig = legacy.appendingPathComponent("config.json")
+        let legacyCache = legacy.appendingPathComponent("cache")
+        let haveLegacy = fm.fileExists(atPath: legacyConfig.path)
+            || fm.fileExists(atPath: legacyCache.path)
+        guard haveLegacy else { return }
+        if fm.fileExists(atPath: legacyConfig.path) {
+            try? fm.copyItem(at: legacyConfig, to: destConfig)
+        }
+        if fm.fileExists(atPath: legacyCache.path) {
+            try? fm.copyItem(at: legacyCache, to: destCache)
+        }
+    }
+
     var configPath: URL {
-        repoRoot.appendingPathComponent("config.json")
+        storageRoot.appendingPathComponent("config.json")
     }
 
     var cacheDir: URL {
-        repoRoot.appendingPathComponent("cache")
+        storageRoot.appendingPathComponent("cache")
     }
 
     var phraseCacheDir: URL {

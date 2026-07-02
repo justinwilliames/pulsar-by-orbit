@@ -71,15 +71,15 @@ Then launch from Applications. The menu-bar icon appears.
 
 ```bash
 mkdir -p ~/.claude/skills
-ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak
+ln -s ~/code/pulsar ~/.claude/skills/pulsar
 ```
 
 If you haven't cloned the repo yet, do that first:
 
 ```bash
-git clone https://github.com/justinwilliames/pulsar-by-orbit.git ~/code/caldwell-speak
+git clone https://github.com/justinwilliames/pulsar-by-orbit.git ~/code/pulsar
 mkdir -p ~/.claude/skills
-ln -s ~/code/caldwell-speak ~/.claude/skills/caldwell-speak
+ln -s ~/code/pulsar ~/.claude/skills/pulsar
 ```
 
 Then **restart Claude Code** so it discovers the skill. The shipped [`SKILL.md`](SKILL.md) tells Claude to fire Pulsar at the end of every turn.
@@ -87,7 +87,7 @@ Then **restart Claude Code** so it discovers the skill. The shipped [`SKILL.md`]
 ### 5. Install the hooks
 
 ```bash
-~/code/caldwell-speak/scripts/install-hooks.sh
+~/code/pulsar/scripts/install-hooks.sh
 ```
 
 This is idempotent — it wires the hooks and statusline into your `~/.claude/settings.json` only if they're absent, and leaves your other hooks alone. It sets up:

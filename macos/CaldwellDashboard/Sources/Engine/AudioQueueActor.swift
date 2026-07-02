@@ -281,12 +281,19 @@ actor AudioQueueActor {
         var sessionId: String?  // optional — absent in stores written by older builds
     }
 
+    /// Test seam: when set, the in-flight store lives here instead of the real
+    /// repo-cache `drones.json`. Lets a test suite persist/restore against a temp
+    /// dir without ever touching the live daemon's store. nil in production — the
+    /// app never sets it, so behaviour is byte-identical to before.
+    var dronesStoreOverrideURL: URL?
+
     /// Durable store for the in-flight set, so a daemon relaunch/reload doesn't
     /// wipe the swarm (and orphan sub-agents from OTHER sessions whose later
     /// SubagentStop would no-op on a fresh daemon). Repo-cache-relative, matching
     /// the phrase/history stores — no sandbox container to reason about.
     private var dronesStoreURL: URL {
-        CaldwellConfig.shared.cacheDir.appendingPathComponent("drones.json")
+        dronesStoreOverrideURL
+            ?? CaldwellConfig.shared.cacheDir.appendingPathComponent("drones.json")
     }
 
     /// True while a coalesced persist is already scheduled, so a burst of
@@ -523,6 +530,46 @@ actor AudioQueueActor {
     func inFlightDronesSnapshot() -> [String: String] {
         inFlight.mapValues(\.category)
     }
+
+    // MARK: - Test seams (in-flight)
+    //
+    // These exist ONLY to let the test suite drive the drone lifecycle without
+    // spinning up the real audio worker (which spawns `afplay`/`say`). They are
+    // never called by the app. Kept `internal` so `@testable import` reaches them.
+
+    /// Force a "currently speaking" category so `isDroneSpeaking` reports live —
+    /// the same signal a playing `--agent <cat>` line gives, without playback.
+    func _test_setSpeakingCategory(_ category: String?) {
+        currentEntry = category.map {
+            AudioEntry(
+                id: "test-current", text: "", voiceId: "", voiceLabel: "",
+                createdAt: Date(), channel: nil, priority: false, fullText: "",
+                isReplay: false, agentCategory: $0)
+        }
+    }
+
+    /// Enqueue a bare marker entry carrying only an agentCategory, so a
+    /// still-queued same-category line keeps a drone "speaking" for deferral tests.
+    func _test_appendQueuedCategory(_ category: String) {
+        queue.append(AudioEntry(
+            id: "test-queued-\(category)-\(queue.count)", text: "", voiceId: "",
+            voiceLabel: "", createdAt: Date(), channel: nil, priority: false,
+            fullText: "", isReplay: false, agentCategory: category))
+    }
+
+    /// The lastSeen for an id, for asserting restore/round-trip fidelity.
+    func _test_lastSeen(id: String) -> Date? { inFlight[id]?.lastSeen }
+
+    /// Whether an id is currently marked pending-removal (deferred).
+    func _test_isPending(id: String) -> Bool { pendingRemoval.contains(id) }
+
+    /// Point the drone persistence store at a test-owned URL (actor-isolated set).
+    func setDronesStoreOverride(_ url: URL?) { dronesStoreOverrideURL = url }
+
+    /// Synchronously flush the in-flight set to disk, bypassing the coalesced
+    /// `schedulePersist` timing so a test can restore immediately afterwards
+    /// without racing the scheduled write. Writes the exact same format.
+    func flushPersistForTests() { persistInFlight() }
 
     /// Evict any in-flight drone not seen within `droneStaleAfter`. Returns the
     /// post-sweep snapshot ONLY when something was evicted (so the caller can

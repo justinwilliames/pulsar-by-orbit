@@ -19,15 +19,20 @@ FAIL_LOG="${PULSAR_HOOK_LOG:-$HOME/.claude/pulsar-hook-failures.log}"
 
 input=$(cat 2>/dev/null || true)
 
-BODY=$(printf '%s' "$input" | python3 -c '
-import json, sys
+BODY=$(printf '%s' "$input" | AGENT_ID_FALLBACK="$(uuidgen 2>/dev/null || true)" python3 -c '
+import json, os, sys
 
 try:
     d = json.load(sys.stdin)
 except Exception:
     d = {}
 
-agent_id = str(d.get("agent_id") or d.get("agentId") or d.get("session_id") or "").strip()
+# agent_id: prefer the real per-agent id. NEVER fall back to session_id — two
+# siblings share one session_id, so a session_id-keyed stop would evict BOTH
+# drones (one sibling finishing kills the other). A generated uuid can never
+# collide: worst case the stop no-ops (the staleness sweep is the backstop),
+# which is strictly safer than a shared-id double-eviction.
+agent_id = str(d.get("agent_id") or d.get("agentId") or os.environ.get("AGENT_ID_FALLBACK") or "").strip()
 print(json.dumps({"agent_id": agent_id}))
 ' 2>/dev/null || true)
 

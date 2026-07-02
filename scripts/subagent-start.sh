@@ -27,15 +27,22 @@ input=$(cat 2>/dev/null || true)
 # artist→nebula, writer→echo, generalist→atlas. Unknown agent_types fall back
 # to a keyword match on the prompt, then to "unknown" (atlas stays reserved for
 # genuine generalists — general-purpose/generalist — never a catch-all).
-PARSED=$(printf '%s' "$input" | python3 -c '
-import json, sys
+PARSED=$(printf '%s' "$input" | AGENT_ID_FALLBACK="$(uuidgen 2>/dev/null || true)" python3 -c '
+import json, os, sys
 
 try:
     d = json.load(sys.stdin)
 except Exception:
     d = {}
 
-agent_id = str(d.get("agent_id") or d.get("agentId") or d.get("session_id") or "").strip()
+# agent_id: prefer the real per-agent id. NEVER fall back to session_id — two
+# sibling sub-agents share one session_id, so that fallback would collapse them
+# onto a single drone (one Stop then clears BOTH). A generated uuid keeps every
+# agent distinct even in the (unobserved) case where agent_id is missing.
+agent_id = str(d.get("agent_id") or d.get("agentId") or os.environ.get("AGENT_ID_FALLBACK") or "").strip()
+# session_id is captured SEPARATELY (not as an agent_id fallback) so the daemon
+# can session-scope claim-on-speak promotion.
+session_id = str(d.get("session_id") or d.get("sessionId") or "").strip()
 agent_type = str(d.get("agent_type") or d.get("agentType") or d.get("subagent_type") or "").strip().lower()
 prompt = ""
 for k in ("description", "prompt", "task", "message"):
@@ -76,7 +83,10 @@ if not category:
     # drone). Atlas is NEVER a fallback — it is reserved for general-purpose.
     category = "unknown"
 
-print(json.dumps({"agent_id": agent_id, "category": category}))
+out = {"agent_id": agent_id, "category": category}
+if session_id:
+    out["session_id"] = session_id
+print(json.dumps(out))
 ' 2>/dev/null || true)
 
 [ -z "$PARSED" ] && exit 0

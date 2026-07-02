@@ -158,20 +158,23 @@ struct FloatingHeadsView: View {
             }
         }
         .frame(width: Self.headZoneWidth, height: Self.headZoneHeight)
-        .animation(.spring(response: 0.5, dampingFraction: 0.78), value: viewModel.queueItems.map(\.id))
-        .animation(.spring(response: 0.5, dampingFraction: 0.78), value: sortedDrones.map(\.id))
+        // [FIX 3 — Reduce Motion] All slot-glide springs are gated on
+        // `reduceMotion`. When on, animations are nil (instant snap) so
+        // participants teleport rather than spring — no vestibular motion.
+        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.78), value: viewModel.queueItems.map(\.id))
+        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.78), value: sortedDrones.map(\.id))
         // Idle cluster repack: when the count changes (drone joins/leaves) the
         // slot offsets shift. Spring-animate on participant-id list so the repack
         // is a smooth spring rather than a positional snap.
-        .animation(.spring(response: 0.5, dampingFraction: 0.78), value: participants.map(\.id))
+        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.78), value: participants.map(\.id))
         // Mode switch speaker→idle (and vice-versa): slotOffset toggles between
         // arc and cluster layouts. Spring this transition so drones don't teleport
         // back to the swarm when the centre clears.
-        .animation(.spring(response: 0.48, dampingFraction: 0.74), value: speaker == nil)
+        .animation(reduceMotion ? nil : .spring(response: 0.48, dampingFraction: 0.74), value: speaker == nil)
         // The swap itself, P1: arriving drone overshoots slightly into the
         // centre (presence); departing Pulsar eases out slower. Both keyed on
         // who holds the centre so they animate as a matched trade.
-        .animation(.spring(response: 0.38, dampingFraction: 0.62), value: activeDroneCategory)
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.62), value: activeDroneCategory)
     }
 
     // NOTE: rendering of each participant now lives in `ParticipantSlotView`
@@ -582,18 +585,31 @@ private struct ParticipantSlotView: View {
             // CENTRE representation — full portrait + glow + lip-sync. Faded in
             // only while this participant holds the centre. Rendered at native
             // 120pt; the element scale stays 1 when centre.
-            FloatingPortraitView(
-                voiceName: speaker?.voiceLabel ?? "Pulsar",
-                amplitude: isCentre ? (speaker?.amplitude ?? 0) : 0,
-                voiceColor: participant.color,
-                portraitManager: portraitManager,
-                droneName: category,
-                glowColor: participant.color
-            )
-            .opacity(isCentre ? 1 : 0)
-            // Don't let the (invisible) centre layer eat layout/hit space while
-            // orbiting — it's purely a crossfade target.
-            .allowsHitTesting(isCentre)
+            // [FIX 1 — perf] Only run the expensive 60Hz FloatingPortraitView
+            // (aura/glow/bob TimelineView) for the centre participant. Orbiting
+            // participants are opacity-0 here anyway, so there is no visual change
+            // — but previously 7 slots × 60Hz ran simultaneously. Now only the
+            // active centre fires; the orbit uses the cheap thumbnail below.
+            // [FIX 2 — voiceLabel] Use the participant's OWN identity for the
+            // fallback initial rather than the active speaker's label. Without
+            // this, all orbit heads show the speaker's initial on portrait
+            // fallback, which is wrong even at opacity-0 (it leaks through the
+            // crossfade).
+            if isCentre {
+                FloatingPortraitView(
+                    voiceName: speaker?.voiceLabel ?? (participant.category?.capitalized ?? "Pulsar"),
+                    amplitude: speaker?.amplitude ?? 0,
+                    voiceColor: participant.color,
+                    portraitManager: portraitManager,
+                    droneName: category,
+                    glowColor: participant.color
+                )
+                .allowsHitTesting(true)
+                // Explicit opacity transition so the portrait fades in/out cleanly
+                // as a participant enters/leaves the centre, matching the thumbnail
+                // fade on the orbit layer below.
+                .transition(.opacity)
+            }
 
             // ORBIT representation — the drone thumbnail with signature drift.
             // Faded in only while this participant is orbiting. Its own

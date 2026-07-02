@@ -67,6 +67,18 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         }
     }
 
+    /// Bring the server fully online: restore persisted state FIRST, then start
+    /// accepting requests. Ordering is load-bearing — a `/subagent/stop` that
+    /// arrives before `restoreInFlight()` completes would be a no-op, and then
+    /// restore would RESURRECT the just-stopped drone. By awaiting `configure()`
+    /// before the listener is armed, the restore is always complete before any
+    /// route can mutate `inFlight`. This is the single entry point the app
+    /// should call.
+    func startup() async {
+        await configure()
+        start()
+    }
+
     func start() {
         guard serverTask == nil else {
             NSLog("[PulsarHTTP] start() called while already running — ignoring")
@@ -251,8 +263,14 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // lookups (colour/voice) fall back to Pulsar defaults for it, which is the
         // correct rendering for a genuinely-unknown drone.
         let category = (rawCategory == "unknown" || isDrone(rawCategory)) ? rawCategory : "atlas"
+        // Session that spawned this sub-agent, if the hook supplied it. Stored so
+        // claim-on-speak promotion can be session-scoped (a line from session A
+        // shouldn't claim session B's generic drone). Absent → nil, best-effort.
+        let sessionId = (body["session_id"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
 
-        await audioQueue.addInFlightDrone(id: agentId, category: category)
+        await audioQueue.addInFlightDrone(id: agentId, category: category, sessionId: sessionId)
         let drones = await audioQueue.inFlightDronesSnapshot()
         await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)
         return try Self.json(SubagentResponse(ok: true, drones: drones))
@@ -1041,6 +1059,12 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let agentCategory = (body["agent"] as? String).flatMap {
             $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
         }
+        // The speaking sub-agent's session, from say.sh (CLAUDE_CODE_SESSION_ID).
+        // Session-scopes the claim-on-speak promotion below. Absent → nil, and
+        // promotion falls back to the old cross-session behaviour.
+        let speakSessionId = (body["session_id"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
+        }
         // Claim-on-speak: a sub-agent reveals its true character only by speaking
         // with `--agent X`, because the SubagentStart hook carries no task text and
         // registers every generic worker as an atlas. So when a tagged line comes
@@ -1050,7 +1074,8 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // drone (or one already had this category) it returns true; only then does
         // the presence differ from the last broadcast, so we re-broadcast.
         if let agentCategory {
-            let didPromote = await audioQueue.promoteInFlightDrone(toCategory: agentCategory)
+            let didPromote = await audioQueue.promoteInFlightDrone(
+                toCategory: agentCategory, sessionId: speakSessionId)
             if didPromote {
                 let drones = await audioQueue.inFlightDronesSnapshot()
                 await Self.broadcastDrones(drones, sseBroadcaster: sseBroadcaster)

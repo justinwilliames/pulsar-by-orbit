@@ -67,7 +67,8 @@ enum DroneRegistry {
     /// Colours: voyager/nova/nebula unchanged. echo/sentinel/atlas were
     /// re-separated (the old cyan/teal/slate blurred together) per the colour-
     /// distinctness review — echo → deeper teal, sentinel → bluer azure, atlas →
-    /// warm violet (0.62 R, 0.45 G, 0.85 B), so the three read as clearly different hues.
+    /// deep grape #8040C0 (0.50 R, 0.25 G, 0.75 B), ΔE76 ≥ 34 from both
+    /// pulsar-indigo (#818CF8) and nebula-magenta (#E95CD1) at thumbnail size.
     /// Motion: each character moves to its persona — explorer restless+fast,
     /// reviewer near-still, builder bouncy, artist smooth/flowing, writer steady,
     /// generalist neutral.
@@ -82,12 +83,14 @@ enum DroneRegistry {
               motion: MotionTrait(bobAmplitude: 2.4, bobFrequency: 0.85, activeScale: 2.4)),  // magenta — smooth, flowing
         Drone(category: "echo",     role: "writer",     color: Color(red: 0.18, green: 0.75, blue: 0.72), voice: "Tessa",    badge: "W",
               motion: MotionTrait(bobAmplitude: 1.6, bobFrequency: 1.0,  activeScale: 2.4)),  // teal — steady
-        Drone(category: "atlas",    role: "generalist", color: Color(red: 0.62, green: 0.45, blue: 0.85), voice: "Rishi",    badge: "G",
-              motion: MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9,  activeScale: 2.4)),  // violet — warm, distinct from sentinel azure
+        Drone(category: "atlas",    role: "generalist", color: Color(red: 0.50, green: 0.25, blue: 0.75), voice: "Rishi",    badge: "G",
+              motion: MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9,  activeScale: 2.4)),  // deep grape #8040C0 — ΔE>34 from both pulsar-indigo + nebula-magenta
         // "unknown" — a neutral catch-all for unrecognised agent categories.
         // Desaturated mid-grey rim so it reads as "generic agent" without competing
-        // with any named drone hue. Shares Daniel's voice (Pulsar's) so the portrait
-        // server falls back to Pulsar's portrait frames — no bespoke art needed.
+        // with any named drone hue. Shares Daniel's voice (Pulsar's), but voice does
+        // NOT drive the frame set — PortraitView keys on droneName directly. The
+        // frame loader maps droneName "unknown" → the "pulsar" frame set so it
+        // renders a real face instead of a broken monogram. No bespoke art needed.
         // Still/neutral motion so it doesn't draw the eye away from active drones.
         Drone(category: "unknown",  role: "agent",      color: Color(red: 0.58, green: 0.58, blue: 0.60), voice: "Daniel",   badge: "?",
               motion: MotionTrait(bobAmplitude: 1.2, bobFrequency: 0.75, activeScale: 2.3)),  // grey — neutral, visually recessive

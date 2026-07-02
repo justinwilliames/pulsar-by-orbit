@@ -49,11 +49,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start the in-process HTTP server. Phase 5 is complete: the Swift
         // app is now the sole listener on port 7865.
+        //
+        // `startup()` restores persisted in-flight state BEFORE arming the
+        // listener, so a `/subagent/stop` can't arrive-and-no-op ahead of the
+        // restore (which would then resurrect the just-stopped drone). Ordering
+        // is inside the actor-safe `startup()`, so it can't race here.
         httpServer = CaldwellHTTPServer()
-        httpServer?.start()
         if let httpServer {
             Task {
-                await httpServer.configure()
+                await httpServer.startup()
             }
         }
 

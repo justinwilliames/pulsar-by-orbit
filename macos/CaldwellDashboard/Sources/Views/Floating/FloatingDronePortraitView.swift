@@ -49,10 +49,27 @@ struct FloatingDronePortraitView: View {
         )
     }
 
+    /// Stable per-category bob phase derived from the category string's hash.
+    /// Using `orbitIndex` caused a snap: when a participant moves centre→orbit
+    /// its index becomes its real slot index (was hardcoded 0 at centre), so the
+    /// phase jumped on transition. A category hash is constant regardless of
+    /// position, so the drift runs continuously through the swap.
+    private var stablePhase: Double {
+        let h = abs(category.hashValue)
+        // Map the hash into [0, 2π) and scale to give similar spread as the old
+        // index-based formula (index * 1.7 ≈ 0…10 for 7 drones → wrap to 2π).
+        return Double(h % 1000) / 1000.0 * 2.0 * .pi
+    }
+
     var body: some View {
         TimelineView(schedule) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
-            let phase = Double(index) * 1.7
+            // [FIX 4 — bob phase] Derive phase from category hash, not orbitIndex.
+            // orbitIndex is 0 at centre and snaps to the real slot index when the
+            // participant enters orbit, causing a visible drift-phase jump on
+            // centre→orbit transition. stablePhase is constant for the lifetime of
+            // the drone, so the bob motion is continuous through the swap.
+            let phase = stablePhase
             // SWARM DRIFT: each drone wanders on its own gentle, slightly
             // out-of-phase path so the cluster reads as a living pod hovering
             // together, not icons pinned to a track. Two summed sines per axis at

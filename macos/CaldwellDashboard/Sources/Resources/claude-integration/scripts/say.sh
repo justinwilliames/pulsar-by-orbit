@@ -166,6 +166,12 @@ case "${ACTION:-speak}" in
       exit 0
     fi
 
+    # say.sh runs INSIDE the sub-agent, so its env carries the session id.
+    # Passing it lets the daemon session-scope claim-on-speak promotion — an
+    # --agent line only claims a generic drone from its OWN session. Best-effort:
+    # absent env → empty → omitted, and the daemon falls back to cross-session.
+    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+
     # Build JSON body using python3 for safe serialization
     BODY=$(python3 -c "
 import json, sys
@@ -175,8 +181,9 @@ if sys.argv[3]: d['channel'] = sys.argv[3]
 if sys.argv[4] == 'true': d['priority'] = True
 if sys.argv[5] == 'true': d['cacheable'] = True
 if sys.argv[6]: d['agent'] = sys.argv[6]
+if sys.argv[7]: d['session_id'] = sys.argv[7]
 print(json.dumps(d))
-" "$TEXT" "$VOICE" "$CHANNEL" "$PRIORITY" "$CACHEABLE" "$AGENT")
+" "$TEXT" "$VOICE" "$CHANNEL" "$PRIORITY" "$CACHEABLE" "$AGENT" "$SESSION_ID")
 
     # --max-time guards against curl hanging on a stale keep-alive
     # connection; output redirected to /dev/null so Claude Code's Bash

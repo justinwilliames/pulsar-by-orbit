@@ -245,13 +245,24 @@ actor AudioQueueActor {
     private struct InFlightDrone {
         var category: String
         var lastSeen: Date
+        /// The Claude Code session that spawned this sub-agent, if the hook
+        /// supplied it. Used to session-scope claim-on-speak promotion so a
+        /// `--agent` line from session A can't claim session B's generic drone.
+        /// nil when the hook didn't carry a session_id — promotion then falls
+        /// back to the old cross-session behaviour (best-effort).
+        var sessionId: String?
     }
 
     /// Currently in-flight sub-agents, keyed by agentId. Populated by
     /// /subagent/start, refreshed by every tagged speak line, cleared by
     /// /subagent/stop or the staleness sweep.
+    ///
+    /// Mutations DON'T persist synchronously — a batch mutation (the sweep or
+    /// deferred-removal flush touches many keys in a loop) would otherwise fire
+    /// one blocking disk write per key. Instead each mutation marks the store
+    /// dirty and schedules a single coalesced write; see `schedulePersist()`.
     private var inFlight: [String: InFlightDrone] = [:] {
-        didSet { persistInFlight() }
+        didSet { schedulePersist() }
     }
 
     /// Agent ids whose /subagent/stop arrived WHILE that drone was the active
@@ -267,6 +278,7 @@ actor AudioQueueActor {
     private struct PersistedDrone: Codable {
         var category: String
         var lastSeen: Double  // timeIntervalSince1970 — the REAL lastSeen, never refreshed on load
+        var sessionId: String?  // optional — absent in stores written by older builds
     }
 
     /// Durable store for the in-flight set, so a daemon relaunch/reload doesn't
@@ -277,32 +289,58 @@ actor AudioQueueActor {
         CaldwellConfig.shared.cacheDir.appendingPathComponent("drones.json")
     }
 
-    /// Best-effort write of `inFlight` to disk on every mutation. The map is
-    /// tiny and mutations are infrequent, so a synchronous encode+write is cheap;
-    /// any failure is swallowed so a bad write can never crash or block the actor.
+    /// True while a coalesced persist is already scheduled, so a burst of
+    /// mutations (the sweep / deferred-flush loop touches many keys) collapses
+    /// to ONE write instead of one-per-key.
+    private var persistScheduled = false
+
+    /// Mark the store dirty and schedule a single coalesced write off the hot
+    /// path. The actor hop means any run of synchronous mutations that happen
+    /// before the scheduled task is next serviced share one write of the FINAL
+    /// state — the per-key sweep/flush loops no longer each hit the disk.
+    private func schedulePersist() {
+        guard !persistScheduled else { return }
+        persistScheduled = true
+        Task { [weak self] in await self?.persistInFlight() }
+    }
+
+    /// Best-effort atomic write of `inFlight` to disk. The map is tiny, so the
+    /// encode+write is cheap; any failure is swallowed so a bad write can never
+    /// crash or block the actor. `.atomic` writes to a temp file and renames, so
+    /// a crash mid-write can't leave a half-written `drones.json` that would fail
+    /// to decode on the next restore. Clears the coalescing flag so the NEXT
+    /// mutation schedules a fresh write of whatever state exists then.
     private func persistInFlight() {
+        persistScheduled = false
         let snapshot = inFlight.mapValues {
-            PersistedDrone(category: $0.category, lastSeen: $0.lastSeen.timeIntervalSince1970)
+            PersistedDrone(
+                category: $0.category,
+                lastSeen: $0.lastSeen.timeIntervalSince1970,
+                sessionId: $0.sessionId)
         }
         let url = dronesStoreURL
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url)
+        try? data.write(to: url, options: .atomic)
     }
 
     /// Restore the in-flight set from disk. Preserves the REAL `lastSeen` for
     /// each drone (NOT refreshed to now) so the 1s sweeper immediately evicts any
     /// drone that has aged past `droneStaleAfter` while the app was closed — the
     /// self-healing property the restart path depends on. Best-effort: a missing
-    /// or corrupt store leaves `inFlight` empty. Assigns to the backing storage
-    /// directly to avoid a redundant persist of what we just read.
+    /// or corrupt store leaves `inFlight` empty. The assignment schedules one
+    /// coalesced write of the just-restored state — cheap, and it re-normalises
+    /// the file to atomic form.
     func restoreInFlight() {
         guard let data = try? Data(contentsOf: dronesStoreURL),
               let snapshot = try? JSONDecoder().decode([String: PersistedDrone].self, from: data)
         else { return }
         inFlight = snapshot.mapValues {
-            InFlightDrone(category: $0.category, lastSeen: Date(timeIntervalSince1970: $0.lastSeen))
+            InFlightDrone(
+                category: $0.category,
+                lastSeen: Date(timeIntervalSince1970: $0.lastSeen),
+                sessionId: $0.sessionId)
         }
         NSLog("[AudioQueue] ♻️ restored \(inFlight.count) in-flight drone(s) from disk")
     }
@@ -323,8 +361,30 @@ actor AudioQueueActor {
     static let droneStaleAfter: TimeInterval = 600
 
     /// Record a newly-spawned sub-agent as in-flight under its drone category.
-    func addInFlightDrone(id: String, category: String) {
-        inFlight[id] = InFlightDrone(category: category, lastSeen: Date())
+    ///
+    /// Re-registration safety: an id that re-registers (a duplicate
+    /// SubagentStart, or a start racing a not-yet-flushed stop) clears any
+    /// PENDING removal for it — otherwise the next `flushDeferredRemovals`
+    /// would evict a drone that is demonstrably alive again.
+    ///
+    /// Label preservation: a double-start for an EXISTING id must not clobber a
+    /// category the drone earned by speaking (`promoteInFlightDrone`). We only
+    /// overwrite the category when the incoming one is more specific — i.e. the
+    /// existing category is still generic (atlas/unknown). A generic incoming
+    /// category never demotes a promoted label. `lastSeen` is always refreshed
+    /// (the drone is genuinely live right now).
+    func addInFlightDrone(id: String, category: String, sessionId: String? = nil) {
+        pendingRemoval.remove(id)
+        if let existing = inFlight[id] {
+            let existingIsGeneric = existing.category == "atlas" || existing.category == "unknown"
+            let category = existingIsGeneric ? category : existing.category
+            // Keep a session_id once known — a re-register that omits it (older
+            // hook, dropped field) must not blank an id we can still scope by.
+            let session = sessionId ?? existing.sessionId
+            inFlight[id] = InFlightDrone(category: category, lastSeen: Date(), sessionId: session)
+        } else {
+            inFlight[id] = InFlightDrone(category: category, lastSeen: Date(), sessionId: sessionId)
+        }
     }
 
     /// Remove a finished sub-agent from the in-flight set — UNLESS that drone is
@@ -410,7 +470,7 @@ actor AudioQueueActor {
     /// At most ONE promotion per call (the "claim"); prefers the most-recently-
     /// registered generic drone (largest `lastSeen`), matching the intuition that
     /// the newest just-spawned worker is the one now speaking.
-    func promoteInFlightDrone(toCategory category: String) -> Bool {
+    func promoteInFlightDrone(toCategory category: String, sessionId: String? = nil) -> Bool {
         let trimmed = category.trimmingCharacters(in: .whitespaces).lowercased()
         // The centre (Pulsar) and an empty tag are never orbit drones — nothing
         // to promote.
@@ -422,14 +482,32 @@ actor AudioQueueActor {
             return false
         }
 
-        // Find the most-recently-registered generic (not-yet-revealed) worker.
-        let generic = inFlight
-            .filter { $0.value.category == "atlas" || $0.value.category == "unknown" }
-            .max(by: { $0.value.lastSeen < $1.value.lastSeen })
-        guard let id = generic?.key else { return false }
+        // Session-scoped claim: a `--agent X` line runs INSIDE one sub-agent, so
+        // the drone it's claiming should be a generic one from the SAME session.
+        // Prefer that; only fall back to a cross-session generic when the session
+        // is unknown or has no generic drone left. This stops session A's line
+        // from stealing session B's atlas. Within a candidate set, still take the
+        // most-recently-registered (largest lastSeen) — the newest just-spawned
+        // worker is the likeliest speaker.
+        func newestGeneric(_ pred: (InFlightDrone) -> Bool) -> String? {
+            inFlight
+                .filter { ($0.value.category == "atlas" || $0.value.category == "unknown") && pred($0.value) }
+                .max(by: { $0.value.lastSeen < $1.value.lastSeen })?
+                .key
+        }
+
+        let id: String?
+        if let sessionId, !sessionId.isEmpty {
+            // Same-session first; cross-session (incl. session-less drones) only
+            // if the speaking session has no generic of its own.
+            id = newestGeneric { $0.sessionId == sessionId } ?? newestGeneric { _ in true }
+        } else {
+            id = newestGeneric { _ in true }
+        }
+        guard let id else { return false }
 
         inFlight[id]?.category = trimmed
-        NSLog("[AudioQueue] 🎭 promoted drone \(id) → \(trimmed) (claim-on-speak)")
+        NSLog("[AudioQueue] 🎭 promoted drone \(id) → \(trimmed) (claim-on-speak\(sessionId.map { ", session \($0.prefix(8))" } ?? ""))")
         return true
     }
 
@@ -452,12 +530,20 @@ actor AudioQueueActor {
     func sweepStaleDrones(now: Date = Date()) -> [String: String]? {
         let stale = inFlight.filter { now.timeIntervalSince($0.value.lastSeen) > Self.droneStaleAfter }
         guard !stale.isEmpty else { return nil }
+        // Idempotent removal: only broadcast when a drone was ACTUALLY present
+        // and removed this call. The 1Hz sweep and the worker's
+        // flushDeferredRemovals can target overlapping ids; if a flush already
+        // removed one, `removeValue` returns nil here and we must NOT re-broadcast
+        // an identical set (the double broadcast is what flickers the fade).
+        var removedAny = false
         for id in stale.keys {
-            inFlight.removeValue(forKey: id)
+            if inFlight.removeValue(forKey: id) != nil {
+                removedAny = true
+                NSLog("[AudioQueue] 🫥 swept stale drone \(id) (no Stop within \(Int(Self.droneStaleAfter))s)")
+            }
             pendingRemoval.remove(id)  // backstop: a pending id that ages out is cleared here too
-            NSLog("[AudioQueue] 🫥 swept stale drone \(id) (no Stop within \(Int(Self.droneStaleAfter))s)")
         }
-        return inFlight.mapValues(\.category)
+        return removedAny ? inFlight.mapValues(\.category) : nil
     }
 
     // MARK: - Public API

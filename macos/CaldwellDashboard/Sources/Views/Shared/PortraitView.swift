@@ -43,7 +43,8 @@ struct PortraitView: View {
         self.portraitManager = portraitManager
         self.droneName = droneName
         _frames = State(initialValue: PortraitView.loadFrames(droneName: droneName))
-        _blinkFrame = State(initialValue: NSImage(named: "\(droneName)-blink"))
+        let resolvedBlink = droneName == "unknown" ? "pulsar" : droneName
+        _blinkFrame = State(initialValue: NSImage(named: "\(resolvedBlink)-blink"))
     }
 
     /// Exponentially-smoothed amplitude in 0…1, used to position across frames.
@@ -105,7 +106,8 @@ struct PortraitView: View {
             // face. Reload on any droneName change so the head always matches.
             .onChange(of: droneName) { _, newName in
                 frames = PortraitView.loadFrames(droneName: newName)
-                blinkFrame = NSImage(named: "\(newName)-blink")
+                let resolvedBlink = newName == "unknown" ? "pulsar" : newName
+                blinkFrame = NSImage(named: "\(resolvedBlink)-blink")
                 // Reset blink state so an in-flight blink from the previous face
                 // doesn't fire over the incoming portrait. Defer the next blink
                 // past the swap window (~0.5s) so the eye-open frame settles first.
@@ -200,10 +202,14 @@ struct PortraitView: View {
 
     /// Loads `<droneName>-mouth-0…4` from the bundle. Returns an empty array if
     /// any frame is missing, which triggers the fallback monogram.
+    ///
+    /// `"unknown"` has no portrait art — it maps to the `"pulsar"` frame set so
+    /// the swarm renders a real neutral face instead of a broken monogram.
     private static func loadFrames(droneName: String = "pulsar") -> [NSImage] {
+        let name = droneName == "unknown" ? "pulsar" : droneName
         var out: [NSImage] = []
         for i in 0..<5 {
-            guard let img = NSImage(named: "\(droneName)-mouth-\(i)") else { return [] }
+            guard let img = NSImage(named: "\(name)-mouth-\(i)") else { return [] }
             out.append(img)
         }
         return out

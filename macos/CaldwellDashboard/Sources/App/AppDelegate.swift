@@ -36,6 +36,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isFadingOut = false
     private var maxVisibleWorkItem: DispatchWorkItem?
 
+    /// Fires BEFORE the SwiftUI scenes (the MenuBarExtra status item) are
+    /// created, so this is the right place to bail on a duplicate launch — the
+    /// doomed process exits before it can install a second menu-bar glyph, draw
+    /// the floating overlay, or clash on the HTTP port. See SingleInstanceGuard.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard SingleInstanceGuard.acquire() else {
+            NSLog("[Pulsar] duplicate launch — deferring to the instance that already holds the lock; exiting so only one overlay + one server remain")
+            // exit(0), not NSApp.terminate: terminate runs the full AppKit
+            // teardown cycle (and can still momentarily realise the status
+            // item); exit(0) is immediate and clean. It's a *successful* exit,
+            // so launchd's KeepAlive{SuccessfulExit=false} won't relaunch it.
+            exit(0)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         floatingPanel = FloatingPanelController(viewModel: viewModel)
 

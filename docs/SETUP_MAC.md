@@ -28,13 +28,13 @@ there's no account, and there's no key to configure.
 
 ```bash
 # Builds the Swift binary, assembles Pulsar.app, copies it to /Applications
-scripts/install-caldwell-app.sh
+scripts/install-pulsar-app.sh
 ```
 
 ### Auto-launch at login
 
 ```bash
-scripts/install-caldwell-app-launchd.sh
+scripts/install-pulsar-app-launchd.sh
 ```
 
 Registers the `team.yourorbit.Pulsar` LaunchAgent (RunAtLoad +
@@ -88,7 +88,7 @@ scripts/say.sh --unmute
 The Pulsar app isn't running. Launch it and check the LaunchAgent:
 ```bash
 open -a Pulsar
-launchctl list | grep CaldwellDashboard
+launchctl list | grep Pulsar
 ```
 
 ### App won't launch / Gatekeeper blocks it

@@ -5,7 +5,7 @@ import Foundation
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
 let package = Package(
-    name: "CaldwellDashboard",
+    name: "Pulsar",
     platforms: [.macOS(.v14)],
     dependencies: [
         // Hummingbird — SSWG-endorsed lightweight HTTP server. Used to host
@@ -17,14 +17,14 @@ let package = Package(
         // Sparkle — in-app auto-update. Re-added after the 0.2.0 removal:
         // the prior attempt dyld-crashed because the framework was linked
         // but never embedded at Contents/Frameworks with a matching rpath.
-        // build-caldwell-app.sh + package-dmg.yml now embed + sign it, and
+        // build-pulsar-app.sh + package-dmg.yml now embed + sign it, and
         // the -rpath linker flag below bakes @executable_path/../Frameworks
         // into the binary so dyld resolves the embedded framework.
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
     ],
     targets: [
         .executableTarget(
-            name: "CaldwellDashboard",
+            name: "Pulsar",
             dependencies: [
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "Sparkle", package: "Sparkle"),
@@ -33,7 +33,7 @@ let package = Package(
             resources: [
                 .copy("Resources/AppIcon.icns"),
                 // OrbitLogo images — copied as plain PNGs to the resource bundle,
-                // then explicitly placed in Contents/Resources/ by build-caldwell-app.sh
+                // then explicitly placed in Contents/Resources/ by build-pulsar-app.sh
                 // so Bundle.main can find them via NSImage(named:).
                 .copy("Resources/OrbitLogo.png"),
                 .copy("Resources/OrbitLogo@2x.png"),
@@ -93,7 +93,7 @@ let package = Package(
                 // say.sh + CANON.md + voices.json. Bundled verbatim so a DMG-only
                 // user (no repo) can one-click install Pulsar's Claude integration
                 // from inside the app. The whole directory is copied into the SPM
-                // resource bundle, then build-caldwell-app.sh re-syncs it from the
+                // resource bundle, then build-pulsar-app.sh re-syncs it from the
                 // repo (so it never goes stale) and lifts it into
                 // Contents/Resources/claude-integration/ for ClaudeIntegrationInstaller.
                 .copy("Resources/claude-integration"),

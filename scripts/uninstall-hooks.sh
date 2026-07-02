@@ -10,7 +10,7 @@
 # delegation-ledger, etc.) that share those two events all survive. Idempotent:
 # re-running when the drone hooks are already gone is a clean no-op.
 #
-# If install-hooks.sh left a backup (settings.json.caldwell-bak.*), we mention
+# If install-hooks.sh left a backup (settings.json.pulsar-bak.*), we mention
 # the most recent one so the user can hand-restore if they want a full revert;
 # but the default action is a surgical removal of just the two drone entries,
 # not a blanket rollback (which would also nuke unrelated later changes).
@@ -29,12 +29,12 @@ fi
 
 # Note the most recent backup (informational only).
 LATEST_BAK=""
-for b in "$SETTINGS".caldwell-bak.*; do
+for b in "$SETTINGS".pulsar-bak.*; do
   [ -f "$b" ] && LATEST_BAK="$b"
 done
 
 # Back up the current state before we edit (so THIS removal is also revertible).
-cp "$SETTINGS" "$SETTINGS.caldwell-uninstall-bak.$(date +%s 2>/dev/null || echo bak)" 2>/dev/null || true
+cp "$SETTINGS" "$SETTINGS.pulsar-uninstall-bak.$(date +%s 2>/dev/null || echo bak)" 2>/dev/null || true
 
 SUBSTART_HOOK="$SUBSTART_HOOK" SUBSTOP_HOOK="$SUBSTOP_HOOK" \
 SETTINGS="$SETTINGS" python3 <<'PY'

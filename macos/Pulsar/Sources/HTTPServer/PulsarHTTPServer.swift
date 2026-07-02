@@ -1,7 +1,7 @@
 import Foundation
 import Hummingbird
 
-/// Local HTTP server hosted inside Caldwell.app. Exposes the same REST surface
+/// Local HTTP server hosted inside Pulsar.app. Exposes the same REST surface
 /// as the Python daemon so `say.sh`, the Stop hook, and external scripts keep
 /// working unchanged now that the daemon is retired.
 ///
@@ -14,7 +14,7 @@ import Hummingbird
 ///   Phase 3    /history, /cache/*, /settings, /usage
 ///   Phase 4    /events (SSE), /portraits/*
 ///   Phase 5 ✓  flip to 7865, retire Python daemon
-final class CaldwellHTTPServer: @unchecked Sendable {
+final class PulsarHTTPServer: @unchecked Sendable {
 
     static let migrationPort: Int = 7865
 
@@ -23,7 +23,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     let audioQueue = AudioQueueActor()
     let sseBroadcaster = SSEBroadcaster()
 
-    init(port: Int = CaldwellHTTPServer.migrationPort) {
+    init(port: Int = PulsarHTTPServer.migrationPort) {
         self.port = port
     }
 
@@ -353,7 +353,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse("Entry not found in history"), status: .notFound)
         }
 
-        let audioURL = CaldwellConfig.shared.historyAudioDir.appendingPathComponent("\(id).mp3")
+        let audioURL = PulsarConfig.shared.historyAudioDir.appendingPathComponent("\(id).mp3")
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             // Item is in history but its audio isn't retained — only happens
             // for entries that failed to play (nothing was ever captured).
@@ -451,7 +451,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         let name = try context.parameters.require("name")
         let frame = try context.parameters.require("frame")
 
-        let portraitsRoot = CaldwellConfig.shared.repoRoot
+        let portraitsRoot = PulsarConfig.shared.repoRoot
             .appendingPathComponent("assets/portraits", isDirectory: true)
             .resolvingSymlinksInPath()
             .standardizedFileURL
@@ -704,26 +704,26 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             return try Self.json(ErrorResponse("No fields to update"), status: .badRequest)
         }
 
-        let config = CaldwellConfig.shared
+        let config = PulsarConfig.shared
 
         do {
             if let muted = update.muted {
-                try config.set("CALDWELL_MUTED", value: muted ? "1" : "0")
+                try config.set("PULSAR_MUTED", value: muted ? "1" : "0")
             }
             if let expletives = update.expletives_enabled {
-                try config.set("CALDWELL_EXPLETIVES", value: expletives ? "1" : "0")
+                try config.set("PULSAR_EXPLETIVES", value: expletives ? "1" : "0")
             }
             if let canon = update.canon_enabled {
-                try config.set("CALDWELL_CANON_ENABLED", value: canon ? "1" : "0")
+                try config.set("PULSAR_CANON_ENABLED", value: canon ? "1" : "0")
             }
             if let floatingHead = update.floating_head_enabled {
-                try config.set("CALDWELL_FLOATING_HEAD", value: floatingHead ? "1" : "0")
+                try config.set("PULSAR_FLOATING_HEAD", value: floatingHead ? "1" : "0")
             }
             if let subtitles = update.subtitles_enabled {
-                try config.set("CALDWELL_SUBTITLES", value: subtitles ? "1" : "0")
+                try config.set("PULSAR_SUBTITLES", value: subtitles ? "1" : "0")
             }
             if let showAgents = update.show_active_agents {
-                try config.set("CALDWELL_SHOW_AGENTS", value: showAgents ? "1" : "0")
+                try config.set("PULSAR_SHOW_AGENTS", value: showAgents ? "1" : "0")
             }
             if let nv = update.native_voice {
                 // Empty resets to auto; otherwise only accept an installed voice.
@@ -731,7 +731,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
                 if trimmed.isEmpty || NativeVoiceClient.availableVoices().contains(where: {
                     $0.caseInsensitiveCompare(trimmed) == .orderedSame
                 }) {
-                    try config.set("CALDWELL_NATIVE_VOICE", value: trimmed)
+                    try config.set("PULSAR_NATIVE_VOICE", value: trimmed)
                 }
             }
         } catch {
@@ -813,7 +813,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
 
     /// Anti-repeat: the exact canon line we last played. When the chosen
     /// context has more than one cached candidate, the picker drops this line
-    /// from the pool so Caldwell never fires the same phrase twice running.
+    /// from the pool so Pulsar never fires the same phrase twice running.
     /// Guarded by `canonLock` — the pick path is `nonisolated static`.
     nonisolated(unsafe) private static var lastCanonText: String?
     nonisolated private static let canonLock = NSLock()
@@ -831,7 +831,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
             requestedContext = ctx.lowercased()
         }
 
-        let cfg = CaldwellConfig.shared
+        let cfg = PulsarConfig.shared
 
         // Mute respects the global setting — same as /speak.
         if cfg.isMuted {
@@ -1034,7 +1034,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
         // connected UIs the mute state so the menu-bar glyph doesn't go stale —
         // but only as a tiny `icon-state` event, and only when the state changed
         // (no echo-storm on a burst of muted calls).
-        let cfg = CaldwellConfig.shared
+        let cfg = PulsarConfig.shared
         if cfg.isMuted {
             await Self.broadcastIconStateIfChanged(muted: true, sseBroadcaster: sseBroadcaster)
             return try Self.json(MutedResponse(muted: true, text_preview: String(text.prefix(100))))
@@ -1151,7 +1151,7 @@ final class CaldwellHTTPServer: @unchecked Sendable {
     }
 
     nonisolated private static func currentSettings() -> SettingsResponse {
-        let config = CaldwellConfig.shared
+        let config = PulsarConfig.shared
         return SettingsResponse(
             muted: config.isMuted,
             expletives_enabled: config.expletivesEnabled,

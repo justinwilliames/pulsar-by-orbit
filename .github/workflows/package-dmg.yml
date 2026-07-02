@@ -54,8 +54,8 @@ jobs:
       - name: Cache SwiftPM
         uses: actions/cache@v5
         with:
-          path: macos/CaldwellDashboard/.build
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/CaldwellDashboard/Package.swift', 'macos/CaldwellDashboard/Sources/**/*.swift') }}
+          path: macos/Pulsar/.build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/Pulsar/Package.swift', 'macos/Pulsar/Sources/**/*.swift') }}
           restore-keys: |
             swiftpm-${{ runner.os }}-
 
@@ -74,7 +74,7 @@ jobs:
 
       - name: Build (unsigned, Release)
         run: |
-          cd macos/CaldwellDashboard
+          cd macos/Pulsar
           swift build -c release
 
       - name: Locate built binary
@@ -83,10 +83,10 @@ jobs:
           set -e
           # Exclude .dSYM bundles — they contain a DWARF copy of the binary
           # that would otherwise match the find and produce a wrong path.
-          BINARY_PATH=$(find macos/CaldwellDashboard/.build -name "CaldwellDashboard" -type f -path "*/release/*" -not -path "*.dSYM*" | head -n 1)
+          BINARY_PATH=$(find macos/Pulsar/.build -name "Pulsar" -type f -path "*/release/*" -not -path "*.dSYM*" | head -n 1)
           if [ -z "$BINARY_PATH" ]; then
-            echo "::error::Could not find CaldwellDashboard binary under macos/CaldwellDashboard/.build"
-            find macos/CaldwellDashboard/.build -type f | sort
+            echo "::error::Could not find Pulsar binary under macos/Pulsar/.build"
+            find macos/Pulsar/.build -type f | sort
             exit 1
           fi
           echo "binary_path=$BINARY_PATH" >> "$GITHUB_OUTPUT"
@@ -103,9 +103,9 @@ jobs:
           APP_PATH="$RUNNER_TEMP/Pulsar.app"
           mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources"
 
-          cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/CaldwellDashboard"
-          cp macos/CaldwellDashboard/Info.plist "$APP_PATH/Contents/Info.plist"
-          cp macos/CaldwellDashboard/Sources/Resources/AppIcon.icns "$APP_PATH/Contents/Resources/AppIcon.icns"
+          cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/Pulsar"
+          cp macos/Pulsar/Info.plist "$APP_PATH/Contents/Info.plist"
+          cp macos/Pulsar/Sources/Resources/AppIcon.icns "$APP_PATH/Contents/Resources/AppIcon.icns"
 
           if [ -d assets/portraits ]; then
             mkdir -p "$APP_PATH/Contents/Resources/assets"
@@ -115,7 +115,7 @@ jobs:
           # Embed Sparkle.framework. The binary loads @rpath/Sparkle.framework
           # and carries an @executable_path/../Frameworks rpath (set in
           # Package.swift), so the framework must live at Contents/Frameworks
-          # or the app dyld-crashes on launch. Mirrors build-caldwell-app.sh.
+          # or the app dyld-crashes on launch. Mirrors build-pulsar-app.sh.
           # ditto preserves the framework's Versions/ symlink layout.
           FRAMEWORK_SRC="${{ steps.locate.outputs.release_dir }}/Sparkle.framework"
           if [ ! -d "$FRAMEWORK_SRC" ]; then
@@ -126,7 +126,7 @@ jobs:
           mkdir -p "$APP_PATH/Contents/Frameworks"
           ditto "$FRAMEWORK_SRC" "$APP_PATH/Contents/Frameworks/Sparkle.framework"
 
-          chmod +x "$APP_PATH/Contents/MacOS/CaldwellDashboard"
+          chmod +x "$APP_PATH/Contents/MacOS/Pulsar"
 
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "Found .app at: $APP_PATH"

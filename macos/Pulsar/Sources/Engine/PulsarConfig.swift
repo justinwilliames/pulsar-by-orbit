@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Thread-safe: all mutations go through an NSLock. Call `reload()` after
 /// writing config.json to pick up new values without restarting the app.
-final class CaldwellConfig: @unchecked Sendable {
-    static let shared = CaldwellConfig()
+final class PulsarConfig: @unchecked Sendable {
+    static let shared = PulsarConfig()
 
     private let lock = NSLock()
     private var _config: [String: String] = [:]
@@ -20,39 +20,31 @@ final class CaldwellConfig: @unchecked Sendable {
 
     // MARK: - Paths
 
-    /// Repo root: honour CALDWELL_REPO_ROOT env var first, then default to
-    /// ~/code/caldwell-speak. This locates BUNDLED CODE ASSETS (e.g. the drone
+    /// Repo root: honour PULSAR_REPO_ROOT env var first, then default to
+    /// ~/code/pulsar. This locates BUNDLED CODE ASSETS (e.g. the drone
     /// portrait frames under assets/portraits) — NOT mutable app state. Mutable
     /// state (config.json, cache/) lives under `storageRoot` in Application
     /// Support so the app works for DMG users with no checkout. Keep this here
     /// only for read-only asset lookups relative to the source tree.
     var repoRoot: URL {
-        if let env = ProcessInfo.processInfo.environment["CALDWELL_REPO_ROOT"],
+        if let env = ProcessInfo.processInfo.environment["PULSAR_REPO_ROOT"],
            !env.isEmpty {
             return URL(fileURLWithPath: env)
         }
         return URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("code/caldwell-speak")
+            .appendingPathComponent("code/pulsar")
     }
 
     /// Mutable app-state root. Defaults to a per-user Application Support dir
     /// (`~/Library/Application Support/Pulsar/`) so state lives OUTSIDE the code
     /// checkout — the app runs identically for DMG users with no source tree.
-    /// Dev override: set `PULSAR_STORAGE` (or the legacy `CALDWELL_REPO_ROOT`)
-    /// to point storage at a checkout's `cache/`+`config.json` instead.
+    /// Dev override: set `PULSAR_STORAGE` to point storage at a checkout's
+    /// `cache/`+`config.json` instead.
     ///
-    /// Directory is created on first access (best-effort). On first use we also
-    /// migrate an existing legacy `~/code/caldwell-speak` install's state across
-    /// so upgraders keep their config + cached audio.
+    /// Directory is created on first access (best-effort).
     var storageRoot: URL {
-        // Dev overrides win, in priority order.
+        // Dev override wins.
         if let env = ProcessInfo.processInfo.environment["PULSAR_STORAGE"],
-           !env.isEmpty {
-            let url = URL(fileURLWithPath: env)
-            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-            return url
-        }
-        if let env = ProcessInfo.processInfo.environment["CALDWELL_REPO_ROOT"],
            !env.isEmpty {
             let url = URL(fileURLWithPath: env)
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -64,42 +56,7 @@ final class CaldwellConfig: @unchecked Sendable {
             .first!
             .appendingPathComponent("Pulsar", isDirectory: true)
         try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
-        migrateLegacyStateIfNeeded(into: appSupport)
         return appSupport
-    }
-
-    /// Legacy checkout path we may have written state into before the move to
-    /// Application Support. Read-only source for the one-time migration.
-    private var legacyStorageRoot: URL {
-        URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("code/caldwell-speak")
-    }
-
-    /// Best-effort, one-time state migration from the old in-checkout location
-    /// (`~/code/caldwell-speak/{config.json,cache/}`) into Application Support.
-    /// Runs only when the new location has NO config.json and NO cache/ yet, so
-    /// it never clobbers live state. Every step is `try?` — a failed migration
-    /// must never crash the app or block startup; worst case is a fresh state.
-    private func migrateLegacyStateIfNeeded(into dest: URL) {
-        let fm = FileManager.default
-        let destConfig = dest.appendingPathComponent("config.json")
-        let destCache = dest.appendingPathComponent("cache")
-        // Already populated → nothing to do (idempotent on every launch).
-        if fm.fileExists(atPath: destConfig.path) || fm.fileExists(atPath: destCache.path) {
-            return
-        }
-        let legacy = legacyStorageRoot
-        let legacyConfig = legacy.appendingPathComponent("config.json")
-        let legacyCache = legacy.appendingPathComponent("cache")
-        let haveLegacy = fm.fileExists(atPath: legacyConfig.path)
-            || fm.fileExists(atPath: legacyCache.path)
-        guard haveLegacy else { return }
-        if fm.fileExists(atPath: legacyConfig.path) {
-            try? fm.copyItem(at: legacyConfig, to: destConfig)
-        }
-        if fm.fileExists(atPath: legacyCache.path) {
-            try? fm.copyItem(at: legacyCache, to: destCache)
-        }
     }
 
     var configPath: URL {
@@ -126,7 +83,7 @@ final class CaldwellConfig: @unchecked Sendable {
     // MARK: - Config values
 
     var isMuted: Bool {
-        let val = lock.withLock { _config["CALDWELL_MUTED"] } ?? "0"
+        let val = lock.withLock { _config["PULSAR_MUTED"] } ?? "0"
         return ["1", "true", "yes", "on"].contains(val.lowercased())
     }
 
@@ -135,15 +92,15 @@ final class CaldwellConfig: @unchecked Sendable {
     /// (no scrubbing). When OFF, bespoke lines are scrubbed clean before being
     /// cached or spoken, making Polite authoritative regardless of caller text.
     var expletivesEnabled: Bool {
-        let val = lock.withLock { _config["CALDWELL_EXPLETIVES"] } ?? "0"
+        let val = lock.withLock { _config["PULSAR_EXPLETIVES"] } ?? "0"
         return ["1", "true", "yes", "on"].contains(val.lowercased())
     }
 
     /// The user's chosen local (free-mode) voice. Empty = auto (Daniel Enhanced
     /// when installed, else basic Daniel). Set via the Settings voice picker.
     var nativeVoiceChoice: String {
-        (lock.withLock { _config["CALDWELL_NATIVE_VOICE"] }
-            ?? ProcessInfo.processInfo.environment["CALDWELL_NATIVE_VOICE"]
+        (lock.withLock { _config["PULSAR_NATIVE_VOICE"] }
+            ?? ProcessInfo.processInfo.environment["PULSAR_NATIVE_VOICE"]
             ?? "").trimmingCharacters(in: .whitespaces)
     }
 
@@ -153,7 +110,7 @@ final class CaldwellConfig: @unchecked Sendable {
     /// default register). Speech is free (local `say`), so this is a style
     /// choice, not a cost lever. Default on preserves today's behaviour.
     var canonEnabled: Bool {
-        let val = lock.withLock { _config["CALDWELL_CANON_ENABLED"] } ?? "1"
+        let val = lock.withLock { _config["PULSAR_CANON_ENABLED"] } ?? "1"
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
@@ -161,7 +118,7 @@ final class CaldwellConfig: @unchecked Sendable {
     /// speaks. Default ON preserves today's behaviour. When OFF, the floating
     /// window is never created/shown (the voice still plays).
     var floatingHeadEnabled: Bool {
-        let val = lock.withLock { _config["CALDWELL_FLOATING_HEAD"] } ?? "1"
+        let val = lock.withLock { _config["PULSAR_FLOATING_HEAD"] } ?? "1"
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
@@ -169,7 +126,7 @@ final class CaldwellConfig: @unchecked Sendable {
     /// while it speaks. Default ON. Gated by `floatingHeadEnabled` at the view
     /// layer — head off means no bubble regardless of this flag.
     var subtitlesEnabled: Bool {
-        let val = lock.withLock { _config["CALDWELL_SUBTITLES"] } ?? "1"
+        let val = lock.withLock { _config["PULSAR_SUBTITLES"] } ?? "1"
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 
@@ -177,7 +134,7 @@ final class CaldwellConfig: @unchecked Sendable {
     /// are shown. Default ON. When OFF only Pulsar himself appears; the drones'
     /// voices still play but no drone heads are rendered.
     var showActiveAgents: Bool {
-        let val = lock.withLock { _config["CALDWELL_SHOW_AGENTS"] } ?? "1"
+        let val = lock.withLock { _config["PULSAR_SHOW_AGENTS"] } ?? "1"
         return !["0", "false", "no", "off", ""].contains(val.lowercased())
     }
 

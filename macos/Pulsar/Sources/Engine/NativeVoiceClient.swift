@@ -78,7 +78,7 @@ enum NativeVoiceClient {
     /// variant → first available. The user voice-picker is gone — every line is
     /// spoken in a character voice (Pulsar = Daniel, drones from the registry).
     static func bestVoice() -> String {
-        if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
+        if let override = ProcessInfo.processInfo.environment["PULSAR_FALLBACK_VOICE"],
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }
@@ -110,7 +110,7 @@ enum NativeVoiceClient {
     /// unknown → Daniel; a drone → its registry voice, each resolved to the best
     /// installed variant. An env override still wins (debug/global force).
     static func voice(forAgent category: String?) -> String {
-        if let override = ProcessInfo.processInfo.environment["CALDWELL_FALLBACK_VOICE"],
+        if let override = ProcessInfo.processInfo.environment["PULSAR_FALLBACK_VOICE"],
            !override.trimmingCharacters(in: .whitespaces).isEmpty {
             return override
         }

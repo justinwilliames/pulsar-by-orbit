@@ -5,7 +5,7 @@
 - Pull latest `main` and confirm no unexpected local changes
 - Run smoke checks:
   - `bash -n scripts/say.sh scripts/warm-cache.sh`
-  - Build the app cleanly: `scripts/build-caldwell-app.sh`
+  - Build the app cleanly: `scripts/build-pulsar-app.sh`
 - Verify path traversal protection for portraits still holds
 - Confirm no secrets are committed:
   - `.env` is ignored

@@ -4,17 +4,17 @@ on:
   push:
     branches: [main]
     paths:
-      - 'macos/CaldwellDashboard/**'
+      - 'macos/Pulsar/**'
       - '.github/workflows/build.yml'
   pull_request:
     paths:
-      - 'macos/CaldwellDashboard/**'
+      - 'macos/Pulsar/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
 jobs:
   build:
-    # Caldwell uses Liquid Glass APIs introduced in macOS 26 (Tahoe). Prefer
+    # Pulsar uses Liquid Glass APIs introduced in macOS 26 (Tahoe). Prefer
     # the explicit macos-26 label once GitHub has published it; until then,
     # fall back to macos-latest with a soft pre-flight that exits 0 (rather
     # than failing the run) when the runner is still on Sequoia. This keeps
@@ -47,22 +47,22 @@ jobs:
         if: steps.precheck.outputs.skip != 'true'
         uses: actions/cache@v5
         with:
-          path: macos/CaldwellDashboard/.build
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/CaldwellDashboard/Package.swift', 'macos/CaldwellDashboard/Sources/**/*.swift') }}
+          path: macos/Pulsar/.build
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('macos/Pulsar/Package.swift', 'macos/Pulsar/Sources/**/*.swift') }}
           restore-keys: |
             swiftpm-${{ runner.os }}-
 
       - name: Build (release)
         if: steps.precheck.outputs.skip != 'true'
-        working-directory: macos/CaldwellDashboard
+        working-directory: macos/Pulsar
         run: swift build -c release
 
       - name: Verify binary
         if: steps.precheck.outputs.skip != 'true'
         run: |
-          BINARY=$(find macos/CaldwellDashboard/.build -name CaldwellDashboard -type f -path "*/release/*" | head -1)
+          BINARY=$(find macos/Pulsar/.build -name Pulsar -type f -path "*/release/*" | head -1)
           if [ -z "$BINARY" ]; then
-            echo "::error::Build did not produce a CaldwellDashboard binary"
+            echo "::error::Build did not produce a Pulsar binary"
             exit 1
           fi
           file "$BINARY"

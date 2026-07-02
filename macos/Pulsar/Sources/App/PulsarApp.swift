@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct CaldwellDashboardApp: App {
+struct PulsarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {

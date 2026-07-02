@@ -293,7 +293,7 @@ actor AudioQueueActor {
     /// the phrase/history stores — no sandbox container to reason about.
     private var dronesStoreURL: URL {
         dronesStoreOverrideURL
-            ?? CaldwellConfig.shared.cacheDir.appendingPathComponent("drones.json")
+            ?? PulsarConfig.shared.cacheDir.appendingPathComponent("drones.json")
     }
 
     /// True while a coalesced persist is already scheduled, so a burst of
@@ -902,9 +902,9 @@ actor AudioQueueActor {
     // MARK: - Playback
 
     /// Zero-cost voice fallback: speak `text` via the macOS `say` command in a
-    /// British voice when ElevenLabs synthesis is unavailable, so Caldwell never
+    /// British voice when ElevenLabs synthesis is unavailable, so Pulsar never
     /// goes silent on a failed fetch. Voice overridable via the
-    /// CALDWELL_FALLBACK_VOICE env var (default "Daniel"). Best-effort — launch
+    /// PULSAR_FALLBACK_VOICE env var (default "Daniel"). Best-effort — launch
     /// errors are logged and swallowed. Reuses `currentProcess` so --skip can
     /// interrupt it like any premium line.
     private func speakNative(_ text: String) async {
@@ -913,7 +913,7 @@ actor AudioQueueActor {
         // lines normally never reach here — but this guard also catches the
         // race where the user mutes mid-flight, after a line was queued. A mute
         // silences Daniel, not just ElevenLabs.
-        guard !CaldwellConfig.shared.isMuted else {
+        guard !PulsarConfig.shared.isMuted else {
             NSLog("[AudioQueue] native say fallback suppressed — muted")
             return
         }
@@ -954,7 +954,7 @@ actor AudioQueueActor {
             // line through the macOS `say` command in a British voice — free, no
             // ElevenLabs spend. Mute is enforced upstream at /speak (muted
             // requests never enqueue), so reaching here means the user wants to
-            // hear Caldwell and only the premium voice failed.
+            // hear Pulsar and only the premium voice failed.
             NSLog("[AudioQueue] fetch failed for \(entry.id) — native say fallback")
             await speakNative(entry.text)
             await broadcastIdleIfQueueEmpty()
@@ -1157,7 +1157,7 @@ actor AudioQueueActor {
     /// memory and starts empty, so any retained mp3s are orphans from a prior
     /// run and can never be referenced by a replay.
     func purgeHistoryAudioStore() {
-        let dir = CaldwellConfig.shared.historyAudioDir
+        let dir = PulsarConfig.shared.historyAudioDir
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
         ) else { return }
@@ -1167,7 +1167,7 @@ actor AudioQueueActor {
     }
 
     private func retainHistoryAudio(id: String, sourceURL: URL) {
-        let dir = CaldwellConfig.shared.historyAudioDir
+        let dir = PulsarConfig.shared.historyAudioDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent("\(id).mp3")
         try? FileManager.default.removeItem(at: dest)
@@ -1179,7 +1179,7 @@ actor AudioQueueActor {
     }
 
     private func deleteHistoryAudio(id: String) {
-        let url = CaldwellConfig.shared.historyAudioDir.appendingPathComponent("\(id).mp3")
+        let url = PulsarConfig.shared.historyAudioDir.appendingPathComponent("\(id).mp3")
         try? FileManager.default.removeItem(at: url)
     }
 

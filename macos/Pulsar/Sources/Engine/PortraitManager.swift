@@ -46,7 +46,7 @@ final class PortraitManager {
 
     private func load(voiceName: String) async -> PortraitFrames {
         // Route: /portraits/:name/:frame  (server uses legacy fallback mapping)
-        // closed.png → caldwell.png, slight.png → caldwell_slight.png, etc.
+        // closed.png → pulsar.png, slight.png → pulsar_slight.png, etc.
         let base = "http://127.0.0.1:\(port)/portraits/\(voiceName)"
         async let closedData = fetchImage("\(base)/closed.png")
         async let slightData = fetchImage("\(base)/slight.png")

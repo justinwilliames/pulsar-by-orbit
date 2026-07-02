@@ -8,7 +8,7 @@ import Foundation
 /// draw the floating overlay + drone swarm and BOTH try to bind
 /// 127.0.0.1:7865 — the user sees a DUPLICATED head. The port clash can't
 /// arbitrate this: the loser's Hummingbird bind just throws and is swallowed
-/// (see `CaldwellHTTPServer.start()`), leaving that instance alive with its own
+/// (see `PulsarHTTPServer.start()`), leaving that instance alive with its own
 /// overlay. So we need an explicit guard.
 ///
 /// Why `flock` (not a pidfile, not an NSRunningApplication scan, not the port):
@@ -49,7 +49,7 @@ enum SingleInstanceGuard {
     /// bricking launch entirely.
     @discardableResult
     static func acquire() -> Bool {
-        let lockURL = CaldwellConfig.shared.storageRoot
+        let lockURL = PulsarConfig.shared.storageRoot
             .appendingPathComponent("pulsar.lock")
 
         let fd = open(lockURL.path, O_RDWR | O_CREAT, 0o644)

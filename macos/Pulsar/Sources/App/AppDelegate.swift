@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingPanel: FloatingPanelController?
-    private var httpServer: CaldwellHTTPServer?
+    private var httpServer: PulsarHTTPServer?
     private var aboutWindow: NSWindow?
     let viewModel = DashboardViewModel()
 
@@ -69,14 +69,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // listener, so a `/subagent/stop` can't arrive-and-no-op ahead of the
         // restore (which would then resurrect the just-stopped drone). Ordering
         // is inside the actor-safe `startup()`, so it can't race here.
-        httpServer = CaldwellHTTPServer()
+        httpServer = PulsarHTTPServer()
         if let httpServer {
             Task {
                 await httpServer.startup()
             }
         }
 
-        NSLog("[Pulsar] AppDelegate finished launching, floatingPanel=\(floatingPanel != nil), SSE connecting, httpServer on \(CaldwellHTTPServer.migrationPort)")
+        NSLog("[Pulsar] AppDelegate finished launching, floatingPanel=\(floatingPanel != nil), SSE connecting, httpServer on \(PulsarHTTPServer.migrationPort)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -114,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Honour the floating-head setting. When off, the head never appears —
         // the voice still plays. If it's somehow on screen (setting flipped
         // mid-utterance), take it down now.
-        guard CaldwellConfig.shared.floatingHeadEnabled else {
+        guard PulsarConfig.shared.floatingHeadEnabled else {
             if panel.isVisible {
                 hidePanel(reason: "floating-head-disabled")
             }

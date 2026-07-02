@@ -6,7 +6,7 @@
 // ships neither XCTest nor Swift Testing on the SwiftPM module search path, so a
 // `.testTarget` fails to resolve `import XCTest`/`import Testing`. Rather than
 // restructure the (Sparkle/rpath-sensitive) app build, this harness compiles the
-// REAL AudioQueueActor + CaldwellConfig sources (no duplication — the tests
+// REAL AudioQueueActor + PulsarConfig sources (no duplication — the tests
 // exercise the shipping code) together with a tiny built-in assert framework and
 // runs as a plain executable. See scripts/run-tests.sh for the swiftc call.
 //

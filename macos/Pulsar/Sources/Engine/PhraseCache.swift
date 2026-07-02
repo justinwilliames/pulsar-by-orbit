@@ -23,7 +23,7 @@ final class PhraseCache: @unchecked Sendable {
     let maxBytes = 50 * 1024 * 1024   // 50 MB
 
     var phraseCacheDir: URL {
-        CaldwellConfig.shared.phraseCacheDir
+        PulsarConfig.shared.phraseCacheDir
     }
 
     // MARK: - Key

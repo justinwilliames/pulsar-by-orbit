@@ -23,7 +23,7 @@ rem=$(J '.cost.total_lines_removed')
 cost=$(J '.cost.total_cost_usd')
 durms=$(J '.cost.total_duration_ms')
 
-muted=$(C '.CALDWELL_MUTED')
+muted=$(C '.PULSAR_MUTED')
 
 D=$'\033[2m'; R=$'\033[0m'
 A=$'\033[38;5;75m'; G=$'\033[38;5;108m'; Y=$'\033[38;5;179m'; M=$'\033[38;5;245m'; HAT=$'\033[38;5;180m'

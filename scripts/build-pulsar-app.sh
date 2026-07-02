@@ -1,5 +1,5 @@
 #!/bin/sh
-# build-caldwell-app.sh — compile the SwiftUI menu-bar app and assemble
+# build-pulsar-app.sh — compile the SwiftUI menu-bar app and assemble
 # a proper Pulsar.app bundle.
 #
 # Requires macOS 26 (Tahoe) — the app uses Liquid Glass APIs that don't
@@ -10,7 +10,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_DIR="$REPO_ROOT/macos/CaldwellDashboard"
+APP_DIR="$REPO_ROOT/macos/Pulsar"
 BUILD_DIR="$APP_DIR/build"
 APP_BUNDLE="$BUILD_DIR/Pulsar.app"
 
@@ -48,21 +48,21 @@ done
 echo "Building release binary (this can take a minute)..."
 swift build -c release
 
-BINARY="$APP_DIR/.build/release/CaldwellDashboard"
+BINARY="$APP_DIR/.build/release/Pulsar"
 if [ ! -f "$BINARY" ]; then
   # Apple Silicon may put it under a triple-prefixed dir
-  BINARY="$(find "$APP_DIR/.build" -name CaldwellDashboard -type f -path "*/release/*" 2>/dev/null | head -1)"
+  BINARY="$(find "$APP_DIR/.build" -name Pulsar -type f -path "*/release/*" 2>/dev/null | head -1)"
 fi
 
 if [ ! -f "$BINARY" ]; then
-  echo "Error: build did not produce a CaldwellDashboard binary under .build/" >&2
+  echo "Error: build did not produce a Pulsar binary under .build/" >&2
   exit 1
 fi
 
 echo "Assembling Pulsar.app..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
-cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/CaldwellDashboard"
+cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/Pulsar"
 cp "$APP_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 printf 'APPL????' > "$APP_BUNDLE/Contents/PkgInfo"
 
@@ -78,7 +78,7 @@ fi
 
 # OrbitLogo PNGs — copied by SPM into the build's resource bundle; extract
 # them into Contents/Resources/ so Bundle.main can find them via NSImage(named:).
-RESOURCE_BUNDLE="$(find "$APP_DIR/.build" -name "CaldwellDashboard_CaldwellDashboard.bundle" -path "*/release/*" 2>/dev/null | head -1)"
+RESOURCE_BUNDLE="$(find "$APP_DIR/.build" -name "Pulsar_Pulsar.bundle" -path "*/release/*" 2>/dev/null | head -1)"
 if [ -n "$RESOURCE_BUNDLE" ] && [ -d "$RESOURCE_BUNDLE" ]; then
   for f in OrbitLogo.png "OrbitLogo@2x.png" "OrbitLogo@3x.png" \
            pulsar-mouth-0.png pulsar-mouth-1.png pulsar-mouth-2.png \
@@ -146,6 +146,6 @@ fi
 
 echo ""
 echo "Built: $APP_BUNDLE"
-echo "To install:  $SCRIPT_DIR/install-caldwell-app.sh"
+echo "To install:  $SCRIPT_DIR/install-pulsar-app.sh"
 echo "To run now:  open '$APP_BUNDLE'"
 echo "Build complete!"

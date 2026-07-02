@@ -13,7 +13,7 @@ set -e
 DAEMON="${DAEMON:-http://127.0.0.1:7865}"
 
 # Canonical Tier 0 phrases. SOURCE OF TRUTH is the `canonContexts` dict in
-# macos/CaldwellDashboard/Sources/HTTPServer/CaldwellHTTPServer.swift — this
+# macos/Pulsar/Sources/HTTPServer/PulsarHTTPServer.swift — this
 # array must be the full union of every phrase there (byte-for-byte), or the
 # picker will choose a line that was never cached and silently fall through.
 # Adding a context phrase in Swift? Add it here too, then re-run this script.

@@ -6,7 +6,7 @@
 # ships neither XCTest nor Swift Testing on the SwiftPM module search path, so a
 # `.testTarget` fails with `no such module 'XCTest'` / `'Testing'`. Rather than
 # restructure the Sparkle/rpath-sensitive app build, this harness compiles the
-# REAL Engine sources (AudioQueueActor + CaldwellConfig + NativeVoiceClient — no
+# REAL Engine sources (AudioQueueActor + PulsarConfig + NativeVoiceClient — no
 # source duplication, so the tests exercise the shipping code) together with a
 # self-contained assert framework in Tests/DroneLifecycleTests.swift, then runs
 # it as a plain executable.
@@ -20,7 +20,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_DIR="$REPO_ROOT/macos/CaldwellDashboard"
+APP_DIR="$REPO_ROOT/macos/Pulsar"
 ENGINE="$APP_DIR/Sources/Engine"
 HARNESS="$APP_DIR/Tests/DroneLifecycleTests.swift"
 
@@ -39,7 +39,7 @@ swiftc \
   -swift-version 5 \
   -o "$BIN" \
   "$ENGINE/AudioQueueActor.swift" \
-  "$ENGINE/CaldwellConfig.swift" \
+  "$ENGINE/PulsarConfig.swift" \
   "$HARNESS"
 
 echo "Running..."

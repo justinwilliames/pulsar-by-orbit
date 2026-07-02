@@ -1,15 +1,15 @@
 #!/bin/sh
-# install-caldwell-app.sh — build the app and copy it to /Applications/.
+# install-pulsar-app.sh — build the app and copy it to /Applications/.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_BUNDLE="$REPO_ROOT/macos/CaldwellDashboard/build/Pulsar.app"
+APP_BUNDLE="$REPO_ROOT/macos/Pulsar/build/Pulsar.app"
 TARGET="/Applications/Pulsar.app"
 
 # Build first
-"$SCRIPT_DIR/build-caldwell-app.sh"
+"$SCRIPT_DIR/build-pulsar-app.sh"
 
 if [ -d "$TARGET" ]; then
   echo "Removing existing $TARGET ..."
@@ -25,4 +25,4 @@ echo ""
 echo "Installed: $TARGET"
 echo ""
 echo "To launch:    open -a Pulsar"
-echo "Auto-launch:  $SCRIPT_DIR/install-caldwell-app-launchd.sh"
+echo "Auto-launch:  $SCRIPT_DIR/install-pulsar-app-launchd.sh"

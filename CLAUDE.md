@@ -4,13 +4,13 @@ Pulsar — local-voice TTS skill for Claude Code. Agents speak aloud via a share
 
 ## Running
 
-The Pulsar menu-bar app (`macos/CaldwellDashboard`) serves the HTTP API on
+The Pulsar menu-bar app (`macos/Pulsar`) serves the HTTP API on
 `127.0.0.1:7865`. It *is* the daemon — there is no separate process to start.
 
 ```bash
 # Install the app and register it to auto-launch at login
-scripts/install-caldwell-app.sh            # build + copy to /Applications
-scripts/install-caldwell-app-launchd.sh    # register the LaunchAgent
+scripts/install-pulsar-app.sh            # build + copy to /Applications
+scripts/install-pulsar-app-launchd.sh    # register the LaunchAgent
 
 # Speak (the Pulsar app must be running)
 scripts/say.sh "Hello"
@@ -27,7 +27,7 @@ No API key required. Optional shell overrides:
 ## Architecture
 
 1. **`scripts/say.sh`** — Bash CLI. Parses args, POSTs to the app's HTTP server on 7865. No fallback — stays silent if the app is down (voice fires only when the app is running).
-2. **`macos/CaldwellDashboard/`** — the SwiftUI menu-bar app and sole listener on 7865. Embedded HTTP server (`Sources/HTTPServer/`), local TTS via `NativeVoiceClient` (calls `/usr/bin/say`, plays via `afplay`), audio queue, phrase cache (`Sources/Engine/`), SSE, and the popover dashboard. All queue logic lives here.
+2. **`macos/Pulsar/`** — the SwiftUI menu-bar app and sole listener on 7865. Embedded HTTP server (`Sources/HTTPServer/`), local TTS via `NativeVoiceClient` (calls `/usr/bin/say`, plays via `afplay`), audio queue, phrase cache (`Sources/Engine/`), SSE, and the popover dashboard. All queue logic lives here.
 3. **`cache/phrases/`** — dedupe phrase cache (LRU, 50 MB) for repeated canon lines. **`cache/history/`** — per-history-item audio keyed by entry id so every history line is replayable via `/history/replay`.
 
 ## Voice — local macOS `say`, free, no key

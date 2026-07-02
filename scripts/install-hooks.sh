@@ -39,7 +39,7 @@ mkdir -p "$(dirname "$SETTINGS")"
 [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
 
 # Back up before touching it.
-cp "$SETTINGS" "$SETTINGS.caldwell-bak.$(date +%s 2>/dev/null || echo bak)" 2>/dev/null || true
+cp "$SETTINGS" "$SETTINGS.pulsar-bak.$(date +%s 2>/dev/null || echo bak)" 2>/dev/null || true
 
 STOP_HOOK="$STOP_HOOK" SESSION_HOOK="$SESSION_HOOK" CHIME_HOOK="$CHIME_HOOK" \
 TURNSTART_HOOK="$TURNSTART_HOOK" SUBSTART_HOOK="$SUBSTART_HOOK" \

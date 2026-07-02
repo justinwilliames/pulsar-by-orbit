@@ -5,7 +5,7 @@ import Foundation
 /// downloaded only the DMG and has neither the repo nor a shell script to run.
 ///
 /// Everything ships inside the app bundle (Contents/Resources/claude-integration,
-/// populated by build-caldwell-app.sh). This type copies those files into a
+/// populated by build-pulsar-app.sh). This type copies those files into a
 /// stable location under `~/.claude/skills/pulsar/` and wires the hooks into
 /// `~/.claude/settings.json`, mirroring the manual `scripts/install-hooks.sh`.
 ///
@@ -73,7 +73,7 @@ struct ClaudeIntegrationInstaller {
     }
 
     // Files that make up the payload. Kept in lockstep with
-    // build-caldwell-app.sh's sync list.
+    // build-pulsar-app.sh's sync list.
     private static let scriptNames = [
         "say.sh", "session-start-voice.sh", "stop-hook.sh",
         "chime.sh", "turn-start.sh", "statusline.sh",

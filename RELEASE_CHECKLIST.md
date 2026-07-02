@@ -14,8 +14,10 @@
   - `cache/` contains only `.gitkeep`
 - Review docs for accuracy:
   - `README.md`
+  - `CLAUDE.md`
   - `SKILL.md`
   - `SECURITY.md`
+  - `docs/SETUP_MAC.md`
 - Confirm executable bits on scripts:
   - `scripts/say.sh`
 

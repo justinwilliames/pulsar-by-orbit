@@ -199,7 +199,8 @@ final class PulsarHTTPServer: @unchecked Sendable {
 
         // POST /settings — update config + Keychain API key
         router.post("/settings") { request, _ -> Response in
-            return try await Self.handleSettingsPost(request: request, sseBroadcaster: sseBroadcaster)
+            return try await Self.handleSettingsPost(
+                request: request, audioQueue: audioQueue, sseBroadcaster: sseBroadcaster)
         }
 
         // GET /portraits/:name/:frame — serve portrait assets to the app UI
@@ -689,6 +690,7 @@ final class PulsarHTTPServer: @unchecked Sendable {
 
     nonisolated private static func handleSettingsPost(
         request: Request,
+        audioQueue: AudioQueueActor,
         sseBroadcaster: SSEBroadcaster
     ) async throws -> Response {
         let update: SettingsUpdateRequest
@@ -714,6 +716,15 @@ final class PulsarHTTPServer: @unchecked Sendable {
         do {
             if let muted = update.muted {
                 try config.set("PULSAR_MUTED", value: muted ? "1" : "0")
+                // Mute is a real, immediate mute — not just a gate on FUTURE
+                // lines. Kill whatever is playing RIGHT NOW so the user can mute
+                // mid-sentence and have it go quiet within a fraction of a second.
+                // The worker's mute-gate (playEntry / speakNative) keeps every
+                // still-queued line silent while muted; this handles the one line
+                // that's already sounding through afplay/say.
+                if muted {
+                    await audioQueue.muteNow()
+                }
             }
             if let expletives = update.expletives_enabled {
                 try config.set("PULSAR_EXPLETIVES", value: expletives ? "1" : "0")

@@ -59,6 +59,10 @@ except: print("")' 2>/dev/null || echo "")
   S_CWD=$(printf '%s' "$EVENT_JSON" | python3 -c 'import sys,json
 try: print(json.load(sys.stdin).get("cwd",""))
 except: print("")' 2>/dev/null || echo "")
+  # Ephemeral/scratch session (cwd under the system temp dir, e.g. Comet's
+  # dictation-cleanup CLI)? Blank the id so the block below skips it — those
+  # aren't real missions and must not flip a phantom row to "Paused".
+  case "$S_CWD" in /private/var/folders/*|/var/folders/*|/private/tmp/*|/tmp/*) S_SID="" ;; esac
   if [ -n "$S_SID" ]; then
     S_BODY=$(python3 -c 'import sys,json
 sid,cwd=sys.argv[1],sys.argv[2]

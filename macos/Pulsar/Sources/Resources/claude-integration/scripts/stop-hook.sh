@@ -31,12 +31,16 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SAY="$SCRIPT_DIR/say.sh"
 
 # Read the Stop event from stdin (best-effort — older Claude Code versions
-# may not send anything). 2s timeout so a missing producer can't hang us.
+# may not send anything). The `[ -t 0 ]` guard handles the no-producer case;
+# stdin is a pipe Claude Code closes after writing, so a plain `cat` can't
+# hang. (Do NOT use `timeout` here — it does not exist on macOS, so
+# `timeout 2 cat` silently returns empty, which nukes session_id and stops
+# the Missions board from ever flipping a session to "Paused".)
 EVENT_JSON=""
 if [ -t 0 ]; then
   : # tty — nothing to read
 else
-  EVENT_JSON=$(timeout 2 cat 2>/dev/null || true)
+  EVENT_JSON=$(cat 2>/dev/null || true)
 fi
 
 # 1. Daemon up?
@@ -55,6 +59,10 @@ except: print("")' 2>/dev/null || echo "")
   S_CWD=$(printf '%s' "$EVENT_JSON" | python3 -c 'import sys,json
 try: print(json.load(sys.stdin).get("cwd",""))
 except: print("")' 2>/dev/null || echo "")
+  # Ephemeral/scratch session (cwd under the system temp dir, e.g. Comet's
+  # dictation-cleanup CLI)? Blank the id so the block below skips it — those
+  # aren't real missions and must not flip a phantom row to "Paused".
+  case "$S_CWD" in /private/var/folders/*|/var/folders/*|/private/tmp/*|/tmp/*) S_SID="" ;; esac
   if [ -n "$S_SID" ]; then
     S_BODY=$(python3 -c 'import sys,json
 sid,cwd=sys.argv[1],sys.argv[2]

@@ -29,6 +29,15 @@ sid=$(printf '%s' "$input" | /usr/bin/jq -r '.session_id // "default"' 2>/dev/nu
 date +%s > "$HOME/.claude/.cc-turn-$sid" 2>/dev/null
 
 cwd=$(printf '%s' "$input" | /usr/bin/jq -r '.cwd // ""' 2>/dev/null)
+
+# Skip ephemeral / scratch sessions. A cwd under the system temp dir ($TMPDIR,
+# /var/folders, /tmp) is never real project work — it's a throwaway `claude`
+# invocation (e.g. Comet's dictation-cleanup CLI, which runs in $TMPDIR). Those
+# would otherwise spam the Missions board with one row per dictation phrase.
+case "$cwd" in
+  /private/var/folders/*|/var/folders/*|/private/tmp/*|/tmp/*) exit 0 ;;
+esac
+
 prompt=$(printf '%s' "$input" | /usr/bin/jq -r '.prompt // ""' 2>/dev/null)
 
 # LOCAL first-line name — cleaned first line of the prompt, ≤60 chars. This is

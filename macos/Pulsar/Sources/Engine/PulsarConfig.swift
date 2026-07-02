@@ -140,33 +140,143 @@ final class PulsarConfig: @unchecked Sendable {
 
     // MARK: - Mutate + reload
 
-    /// Re-read config.json from disk. Call after any write.
-    func reload() {
+    /// Read config.json from disk and coerce every value to a String, tolerating
+    /// Bool/number values so one non-string value can't nuke the whole config (a
+    /// bad hand-edit — or a Bool written by an older build — must not silently
+    /// revert mute or persona). Returns nil only when the file is
+    /// missing/unreadable/not-an-object, so callers can distinguish "no file" from
+    /// "empty file". SHARED by `reload()` and `set()` — they must agree on the
+    /// tolerant read, or a read-modify-write through a strict cast wipes siblings.
+    private func loadCoerced() -> [String: String]? {
         guard let data = try? Data(contentsOf: configPath),
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }   // unreadable/malformed → keep last-known, never blank
-        // Coerce per-key so one non-string value can't nuke the whole config
-        // (a bad hand-edit must not silently revert mute or persona).
+        else { return nil }
         var coerced: [String: String] = [:]
         for (k, v) in raw {
             if let s = v as? String { coerced[k] = s }
             else if let b = v as? Bool { coerced[k] = b ? "1" : "0" }
             else if let n = v as? NSNumber { coerced[k] = n.stringValue }
         }
+        return coerced
+    }
+
+    /// Re-read config.json from disk. Call after any write.
+    func reload() {
+        guard let coerced = loadCoerced() else { return }  // keep last-known, never blank
         lock.withLock { _config = coerced }
     }
 
-    /// Write a single key back to config.json and reload.
+    /// Write a single key back to config.json and reload. Reads the existing file
+    /// with the SAME tolerant coercion as `reload()` (via `loadCoerced()`), so a
+    /// sibling key holding a Bool/number value is preserved rather than wiped —
+    /// the old strict `[String: String]` cast returned nil on any non-string
+    /// value and clobbered every other key on the next write.
     func set(_ key: String, value: String) throws {
-        var current: [String: String] = [:]
-        if let data = try? Data(contentsOf: configPath),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
-            current = json
-        }
+        var current = loadCoerced() ?? [:]
         current[key] = value
         let data = try JSONSerialization.data(withJSONObject: current, options: .prettyPrinted)
         try data.write(to: configPath)
         reload()
+    }
+
+    // MARK: - One-shot legacy migration (Caldwell → Pulsar / legacy dir)
+
+    /// Legacy Application-Support dir the pre-rename `caldwell-speak` build wrote
+    /// its state into. Sibling of `storageRoot` under the same Application Support
+    /// root, so a `PULSAR_STORAGE` dev override redirects both in lockstep (the
+    /// legacy dir is looked for beside wherever storage currently resolves).
+    var legacyStorageRoot: URL {
+        storageRoot.deletingLastPathComponent()
+            .appendingPathComponent("caldwell-speak", isDirectory: true)
+    }
+
+    /// Sentinel marking the one-shot migration as done. Idempotency gates on THIS
+    /// file's existence, never on key-presence — a user caught mid-hybrid (both
+    /// CALDWELL_* and PULSAR_* keys live) must not re-run and clobber a newer
+    /// PULSAR_* value the user re-toggled after the rename.
+    private var migrationSentinel: URL {
+        storageRoot.appendingPathComponent(".migrated")
+    }
+
+    /// One-shot, idempotent migration from the pre-rename `caldwell-speak` layout
+    /// and from any lingering `CALDWELL_*` keys in the live config.
+    ///
+    /// MUST run BEFORE the server arms / `restoreInFlight()` and BEFORE the first
+    /// `/settings` POST, so the merge can't race a live write. Wrapped in do/catch
+    /// end-to-end: a failed migration NEVER blocks startup or corrupts the live
+    /// config — worst case it's retried next launch (the sentinel is written last,
+    /// only on success). Non-destructive: the legacy dir is COPIED, never moved.
+    ///
+    /// Rules:
+    ///   • Gate on the `.migrated` sentinel. If present, no-op.
+    ///   • If the new config.json is absent OR still carries `CALDWELL_*` keys,
+    ///     seed from the legacy dir's config.json (+ cache/ if the new cache is
+    ///     absent) by COPY.
+    ///   • Rewrite every `CALDWELL_<X>` → `PULSAR_<X>`; on conflict the existing
+    ///     `PULSAR_<X>` WINS (respects a post-rename re-toggle). Drop the old
+    ///     `CALDWELL_*` keys.
+    ///   • Persist via the hardened `set()`; write the sentinel LAST.
+    func migrateLegacyConfigIfNeeded() {
+        let fm = FileManager.default
+
+        // Sentinel gate — already migrated, nothing to do.
+        if fm.fileExists(atPath: migrationSentinel.path) { return }
+
+        do {
+            // Snapshot the current live config (tolerant read). nil = no file yet.
+            let existing = loadCoerced()
+            let hasLegacyKeys = (existing ?? [:]).keys.contains { $0.hasPrefix("CALDWELL_") }
+
+            // Only do work if the new config is absent OR still half-migrated.
+            // A fully-migrated config with no CALDWELL_* keys just gets a sentinel
+            // so we never scan again.
+            if existing != nil && !hasLegacyKeys {
+                try? "ok".write(to: migrationSentinel, atomically: true, encoding: .utf8)
+                return
+            }
+
+            // (1) Seed from the legacy dir if the new config is absent.
+            let legacyConfig = legacyStorageRoot.appendingPathComponent("config.json")
+            if existing == nil, fm.fileExists(atPath: legacyConfig.path) {
+                // Copy the legacy config into place so loadCoerced() can read it.
+                if fm.fileExists(atPath: configPath.path) { try? fm.removeItem(at: configPath) }
+                try? fm.copyItem(at: legacyConfig, to: configPath)
+            }
+
+            // Copy the legacy cache/ if the new cache is absent (best-effort).
+            let legacyCache = legacyStorageRoot.appendingPathComponent("cache", isDirectory: true)
+            if !fm.fileExists(atPath: cacheDir.path), fm.fileExists(atPath: legacyCache.path) {
+                try? fm.copyItem(at: legacyCache, to: cacheDir)
+            }
+
+            // (2) Load whatever config we now have (seeded or pre-existing).
+            var merged = loadCoerced() ?? [:]
+
+            // (3) Rewrite CALDWELL_<X> → PULSAR_<X>, PULSAR_ wins on conflict,
+            //     drop the old keys.
+            for (k, v) in merged where k.hasPrefix("CALDWELL_") {
+                let newKey = "PULSAR_" + k.dropFirst("CALDWELL_".count)
+                if merged[newKey] == nil {          // PULSAR_ wins on conflict
+                    merged[newKey] = v
+                }
+                merged.removeValue(forKey: k)
+            }
+
+            // (4) Persist via the hardened writer, one key at a time, so the
+            //     read-modify-write stays non-destructive throughout. Writing the
+            //     full merged dict directly is fine too, but going through set()
+            //     keeps a single write path and picks up the Fix-A tolerance.
+            let data = try JSONSerialization.data(withJSONObject: merged, options: .prettyPrinted)
+            try data.write(to: configPath)
+            reload()
+
+            // (5) Sentinel LAST — only on success.
+            try "ok".write(to: migrationSentinel, atomically: true, encoding: .utf8)
+        } catch {
+            // Never fatal: leave the live config as-is, no sentinel, retry next
+            // launch. Startup proceeds regardless.
+            NSLog("PulsarConfig: legacy migration skipped (\(error.localizedDescription))")
+        }
     }
 }
 

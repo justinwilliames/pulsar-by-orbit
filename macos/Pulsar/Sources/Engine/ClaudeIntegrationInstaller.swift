@@ -30,6 +30,14 @@ struct ClaudeIntegrationInstaller {
         let hookOutcomes: [String]
     }
 
+    struct UninstallResult {
+        let settingsPath: String
+        let backupPath: String?
+        let skillRemoved: Bool
+        /// Human-readable per-hook outcome, e.g. "Stop (voice): removed".
+        let hookOutcomes: [String]
+    }
+
     enum InstallError: LocalizedError {
         case claudeNotFound(String)
         case bundlePayloadMissing(String)
@@ -78,6 +86,9 @@ struct ClaudeIntegrationInstaller {
         "say.sh", "session-start-voice.sh", "stop-hook.sh",
         "chime.sh", "turn-start.sh", "statusline.sh",
         "subagent-start.sh", "subagent-stop.sh",
+        // Shipped so a user who wants to reverse the wiring by hand has the
+        // script locally (the in-app "Remove Pulsar" button is the primary path).
+        "uninstall-hooks.sh",
     ]
     private static let rootFiles = ["SKILL.md", "CANON.md", "voices.json"]
 
@@ -119,6 +130,50 @@ struct ClaudeIntegrationInstaller {
             scriptsPath: scriptsDir.path,
             settingsPath: settingsPath.path,
             backupPath: wiring.backupPath,
+            hookOutcomes: wiring.outcomes)
+    }
+
+    /// Symmetric inverse of `install()`. Reuses the same timestamped-backup +
+    /// validate + atomic-write machinery. Removes ONLY Pulsar-owned entries:
+    ///   • the six managed hooks (matched by the installed
+    ///     `skills/pulsar/scripts/<name>` path suffix — same ownership check the
+    ///     installer uses), leaving every other user hook intact;
+    ///   • the `statusLine` IF it points at Pulsar's installed statusline.sh;
+    ///   • the `~/.claude/skills/pulsar` payload dir (best-effort).
+    /// Never touches a foreign hook, a custom statusLine, or any other top-level
+    /// key. Safe to run when nothing is installed (all outcomes "not present").
+    @discardableResult
+    func uninstall() throws -> UninstallResult {
+        let fm = FileManager.default
+
+        guard fm.fileExists(atPath: claudeDir.path) else {
+            throw InstallError.claudeNotFound(
+                "Claude Code not found — nothing to remove. "
+                + "(Looked for \(claudeDir.path).)")
+        }
+
+        let skillDir = claudeDir
+            .appendingPathComponent("skills", isDirectory: true)
+            .appendingPathComponent("pulsar", isDirectory: true)
+
+        let settingsPath = claudeDir.appendingPathComponent("settings.json")
+        let wiring = try unwireHooks(settingsPath: settingsPath)
+
+        // Remove the installed payload dir (best-effort, non-fatal).
+        var skillRemoved = false
+        if fm.fileExists(atPath: skillDir.path) {
+            do {
+                try fm.removeItem(at: skillDir)
+                skillRemoved = true
+            } catch {
+                skillRemoved = false   // leave it; hooks are already unwired
+            }
+        }
+
+        return UninstallResult(
+            settingsPath: settingsPath.path,
+            backupPath: wiring.backupPath,
+            skillRemoved: skillRemoved,
             hookOutcomes: wiring.outcomes)
     }
 
@@ -335,6 +390,165 @@ struct ClaudeIntegrationInstaller {
         }
 
         return WiringResult(backupPath: backupPath, outcomes: outcomes)
+    }
+
+    /// Inverse of `wireHooks`: strip every Pulsar-owned hook + statusLine from an
+    /// existing settings.json, reusing the same backup / validate / atomic-write
+    /// path. If settings.json is absent there is nothing to remove — returns a
+    /// clean "not present" result without creating a file.
+    private func unwireHooks(settingsPath: URL) throws -> WiringResult {
+        let fm = FileManager.default
+
+        guard fm.fileExists(atPath: settingsPath.path) else {
+            return WiringResult(backupPath: nil,
+                                outcomes: ["settings.json: not present — nothing to remove"])
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: settingsPath)
+        } catch {
+            throw InstallError.settingsUnreadable(
+                "Couldn't read \(settingsPath.path): \(error.localizedDescription)")
+        }
+        let parsed: Any
+        do {
+            parsed = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw InstallError.settingsInvalidJSON(
+                "\(settingsPath.lastPathComponent) is not valid JSON, so Pulsar won't touch it. "
+                + "Fix or remove it, then retry. (\(error.localizedDescription))")
+        }
+        guard var root = parsed as? [String: Any] else {
+            throw InstallError.settingsInvalidJSON(
+                "\(settingsPath.lastPathComponent) isn't a JSON object — Pulsar won't touch it.")
+        }
+
+        // Back up before any write (timestamped), same as install.
+        var backupPath: String? = nil
+        let stamp = Int(Date().timeIntervalSince1970)
+        let backup = settingsPath
+            .deletingLastPathComponent()
+            .appendingPathComponent("settings.json.pulsar-bak.\(stamp)")
+        do {
+            if fm.fileExists(atPath: backup.path) { try fm.removeItem(at: backup) }
+            try fm.copyItem(at: settingsPath, to: backup)
+            backupPath = backup.path
+        } catch {
+            throw InstallError.settingsWriteFailed(
+                "Couldn't back up settings.json before editing — aborting to be safe. "
+                + "(\(error.localizedDescription))")
+        }
+
+        var hooks = (root["hooks"] as? [String: Any]) ?? [:]
+        var outcomes: [String] = []
+
+        for managed in managedHooks {
+            let outcome = removeHook(from: &hooks,
+                                     event: managed.event,
+                                     scriptName: managed.scriptName)
+            outcomes.append("\(managed.label): \(outcome)")
+        }
+        // Prune the hooks object entirely if we emptied it, to keep settings tidy.
+        if hooks.isEmpty {
+            root.removeValue(forKey: "hooks")
+        } else {
+            root["hooks"] = hooks
+        }
+
+        // statusLine: remove ONLY if it's Pulsar's installed statusline.sh.
+        if let sl = root["statusLine"] as? [String: Any],
+           let existing = sl["command"] as? String,
+           existing.hasSuffix("skills/pulsar/scripts/statusline.sh") {
+            root.removeValue(forKey: "statusLine")
+            outcomes.append("statusLine: removed")
+        } else if root["statusLine"] != nil {
+            outcomes.append("statusLine: left as-is (not Pulsar's)")
+        } else {
+            outcomes.append("statusLine: not present")
+        }
+
+        // Serialize + validate + atomic-write, identical to install.
+        let outData: Data
+        do {
+            outData = try JSONSerialization.data(
+                withJSONObject: root,
+                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        } catch {
+            throw InstallError.settingsWriteFailed(
+                "Couldn't serialize the updated settings.json: \(error.localizedDescription)")
+        }
+        do {
+            _ = try JSONSerialization.jsonObject(with: outData)
+        } catch {
+            throw InstallError.validationFailed(
+                "Internal error: produced invalid JSON. Your settings.json was NOT modified"
+                + (backupPath.map { " (backup at \($0))" } ?? "") + ".")
+        }
+
+        let tmp = settingsPath.deletingLastPathComponent()
+            .appendingPathComponent(".settings.json.pulsar-tmp.\(UUID().uuidString)")
+        do {
+            try outData.write(to: tmp, options: .atomic)
+            _ = try fm.replaceItemAt(settingsPath, withItemAt: tmp)
+        } catch {
+            try? fm.removeItem(at: tmp)
+            throw InstallError.settingsWriteFailed(
+                "Couldn't write settings.json: \(error.localizedDescription). "
+                + "Your original is unchanged"
+                + (backupPath.map { " (backup at \($0))" } ?? "") + ".")
+        }
+
+        do {
+            let check = try Data(contentsOf: settingsPath)
+            _ = try JSONSerialization.jsonObject(with: check)
+        } catch {
+            throw InstallError.validationFailed(
+                "settings.json failed its post-write validation. "
+                + (backupPath.map { "Restore from \($0) if needed." } ?? ""))
+        }
+
+        return WiringResult(backupPath: backupPath, outcomes: outcomes)
+    }
+
+    /// Remove the Pulsar-owned hook for `scriptName` from an event array, matched
+    /// by the installed path suffix (same ownership test as `upsertHook`). Prunes
+    /// emptied hook-groups and the emptied event key so no dangling shells remain.
+    /// Foreign hooks in the same group/event are untouched.
+    /// Returns "removed" | "not present".
+    private func removeHook(from hooks: inout [String: Any],
+                            event: String,
+                            scriptName: String) -> String {
+        let suffix = "skills/pulsar/scripts/\(scriptName)"
+
+        guard var groups = hooks[event] as? [[String: Any]] else { return "not present" }
+
+        var removedAny = false
+        for gi in groups.indices {
+            guard var inner = groups[gi]["hooks"] as? [[String: Any]] else { continue }
+            let before = inner.count
+            inner.removeAll { entry in
+                (entry["command"] as? String)?.hasSuffix(suffix) == true
+            }
+            if inner.count != before {
+                removedAny = true
+                groups[gi]["hooks"] = inner
+            }
+        }
+
+        // Drop any group whose hooks array is now empty (and had no other keys of
+        // value). Keep groups that still carry hooks.
+        groups.removeAll { group in
+            (group["hooks"] as? [[String: Any]])?.isEmpty ?? false
+        }
+
+        if groups.isEmpty {
+            hooks.removeValue(forKey: event)
+        } else {
+            hooks[event] = groups
+        }
+
+        return removedAny ? "removed" : "not present"
     }
 
     /// Add or update a single Pulsar hook in an event array. Idempotent: an

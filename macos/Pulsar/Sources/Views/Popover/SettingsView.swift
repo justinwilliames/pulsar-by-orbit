@@ -59,6 +59,85 @@ struct SettingsView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(isInstalling)
+
+            // After a successful install the one required action is a Claude Code
+            // restart — surface it as a one-click button, not just a sentence.
+            if didInstall {
+                Button(action: restartClaudeCode) {
+                    Label("Restart Claude Code", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            // Reversibility — the installer edits a stranger's settings.json, so it
+            // must be undoable in-app. Destructive tint; best-effort + non-fatal.
+            Button(role: .destructive, action: uninstallClaudeIntegration) {
+                Label(isUninstalling ? "Removing…" : "Remove Pulsar from Claude Code",
+                      systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(isInstalling || isUninstalling)
+        }
+    }
+
+    /// True once a successful install has run this session — gates the Restart
+    /// button (no point offering a restart before anything's installed).
+    @State private var didInstall = false
+    @State private var isUninstalling = false
+
+    /// Quit + relaunch the Claude Code desktop app if it's running. Best-effort:
+    /// if it can't be found we no-op gracefully (the user restarts it themselves).
+    private func restartClaudeCode() {
+        let bundleID = "com.anthropic.claudefordesktop"
+        let running = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleID)
+
+        guard let appURL = NSWorkspace.shared
+            .urlForApplication(withBundleIdentifier: bundleID) else {
+            statusKind = .info
+            statusMessage = "Couldn't find Claude Code to restart it — quit and reopen it yourself to go live."
+            return
+        }
+
+        for app in running { app.terminate() }
+
+        // Give it a beat to quit, then relaunch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in }
+        }
+        statusKind = .ok
+        statusMessage = "Restarting Claude Code…"
+    }
+
+    private func uninstallClaudeIntegration() {
+        isUninstalling = true
+        statusKind = .info
+        statusMessage = "Removing Pulsar from Claude Code…"
+        Task {
+            do {
+                let installer = ClaudeIntegrationInstaller()
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try installer.uninstall()
+                }.value
+                await MainActor.run {
+                    statusKind = .ok
+                    statusMessage = "Removed Pulsar from Claude Code. Restart Claude Code to finish."
+                    didInstall = false
+                    isUninstalling = false
+                    _ = result
+                }
+            } catch {
+                await MainActor.run {
+                    statusKind = .error
+                    statusMessage = (error as? LocalizedError)?.errorDescription
+                        ?? "Couldn't remove Pulsar from Claude Code: \(error.localizedDescription)"
+                    isUninstalling = false
+                }
+            }
         }
     }
 
@@ -74,9 +153,10 @@ struct SettingsView: View {
                 }.value
                 await MainActor.run {
                     statusKind = .ok
-                    statusMessage = "Installed Pulsar's skill + hooks into Claude Code "
-                        + "(\(result.skillPath)). Start a new Claude Code session to load them."
+                    statusMessage = "Pulsar is wired into Claude Code. Restart Claude Code to go live."
+                    didInstall = true
                     isInstalling = false
+                    _ = result
                 }
             } catch {
                 await MainActor.run {
@@ -206,12 +286,13 @@ struct SettingsView: View {
             // The swarm rides on the head — no head, nothing to orbit.
             .disabled(viewModel.settings?.floatingHeadEnabled == false)
 
-            Picker("Voice register", selection: expletivesBinding) {
-                Text("Polite").tag(false)
-                Text("Potty Mouth").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            Text("REGISTER")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            // Label ABOVE the control — the register choice is the first
+            // personality decision a new user makes; the frame must precede it.
             VStack(alignment: .leading, spacing: 2) {
                 Text("Voice register")
                     .font(.caption.weight(.medium))
@@ -220,6 +301,12 @@ struct SettingsView: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Picker("Voice register", selection: expletivesBinding) {
+                Text("Polite").tag(false)
+                Text("Potty Mouth").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
         }
     }
 

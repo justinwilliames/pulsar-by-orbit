@@ -112,6 +112,23 @@ jobs:
             cp -R assets/portraits "$APP_PATH/Contents/Resources/assets/portraits"
           fi
 
+          # Claude voice-integration payload — the exact files the in-app
+          # installer drops into ~/.claude (skill + hooks + say.sh + the
+          # uninstall script for manual reversal). Mirrors build-pulsar-app.sh's
+          # sync list; without this the CI-built DMG ships with no installer
+          # payload and the in-app "Set up / Remove" buttons are inert.
+          CI_STAGE="$APP_PATH/Contents/Resources/claude-integration"
+          mkdir -p "$CI_STAGE/scripts"
+          cp SKILL.md    "$CI_STAGE/SKILL.md"
+          cp CANON.md    "$CI_STAGE/CANON.md"
+          cp voices.json "$CI_STAGE/voices.json"
+          for f in say.sh session-start-voice.sh stop-hook.sh chime.sh \
+                   turn-start.sh statusline.sh subagent-start.sh subagent-stop.sh \
+                   install-hooks.sh uninstall-hooks.sh; do
+            cp "scripts/$f" "$CI_STAGE/scripts/$f"
+          done
+          chmod +x "$CI_STAGE/scripts/"*.sh 2>/dev/null || true
+
           # Embed Sparkle.framework. The binary loads @rpath/Sparkle.framework
           # and carries an @executable_path/../Frameworks rpath (set in
           # Package.swift), so the framework must live at Contents/Frameworks
@@ -266,7 +283,7 @@ jobs:
             <channel>
               <title>Pulsar</title>
               <link>https://github.com/${GITHUB_REPOSITORY}/releases/latest</link>
-              <description>Pulsar — spoken voice companion for Claude Code.</description>
+              <description>Pulsar gives Claude Code a voice — free, fully local, no account, no API key, nothing leaving your machine.</description>
               <language>en</language>
               <item>
                 <title>Pulsar ${SHORT_VERSION}</title>
@@ -296,7 +313,7 @@ jobs:
           prerelease: true
           make_latest: "false"
           body: |
-            **Pulsar — TTS voice assistant for macOS.** Rolling latest dev build, refreshed on every push to `main`. For tagged stable releases see the [Releases list](https://github.com/justinwilliames/pulsar-by-orbit/releases).
+            **Pulsar gives Claude Code a voice — free, fully local, no account, no API key, nothing leaving your machine.** Rolling latest dev build, refreshed on every push to `main`. For tagged stable releases see the [Releases list](https://github.com/justinwilliames/pulsar-by-orbit/releases).
 
             Built from commit [`${{ github.sha }}`](https://github.com/justinwilliames/pulsar-by-orbit/commit/${{ github.sha }}).
 
@@ -334,7 +351,7 @@ jobs:
           prerelease: false
           make_latest: "true"
           body: |
-            **Pulsar — TTS voice assistant for macOS.**
+            **Pulsar gives Claude Code a voice — free, fully local, no account, no API key, nothing leaving your machine.**
 
             > [!IMPORTANT]
             > **You MUST run a Terminal command before this app will open.**
@@ -364,6 +381,8 @@ jobs:
 
             ## What this is
 
-            A personal macOS text-to-speech tool built around ElevenLabs voice playback and a lightweight local app bundle.
+            Pulsar gives Claude Code a voice — free, fully local, no account, no API key, nothing leaving your machine. It lives in your menu bar and speaks the moment your code is done. Stop watching the screen.
+
+            The `xattr` step above is required because Pulsar is open-source and unsigned — no Apple Developer ID, no $99/yr tax. Run it once. You're done.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

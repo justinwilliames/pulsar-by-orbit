@@ -67,7 +67,13 @@ jobs:
           else
             MARKETING_VERSION="0.0.${{ github.run_number }}"
           fi
-          BUILD_NUMBER="${{ github.run_number }}"
+          # Monotonic, human-meaningful build number derived from the semver
+          # (MAJOR*1e6 + MINOR*1e3 + PATCH). CFBundleVersion and the appcast's
+          # sparkle:version both use this one axis, so Sparkle's update check
+          # compares like for like and only ever sees the number increase.
+          # 10# forces base-10 so a zero-padded patch (e.g. 08) isn't read as octal.
+          IFS='.' read -r _MAJ _MIN _PAT <<< "$MARKETING_VERSION"
+          BUILD_NUMBER=$(( 10#${_MAJ:-0} * 1000000 + 10#${_MIN:-0} * 1000 + 10#${_PAT:-0} ))
           echo "marketing_version=$MARKETING_VERSION" >> "$GITHUB_OUTPUT"
           echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
           echo "Building Pulsar $MARKETING_VERSION (build $BUILD_NUMBER)"
@@ -105,6 +111,11 @@ jobs:
 
           cp "${{ steps.locate.outputs.binary_path }}" "$APP_PATH/Contents/MacOS/Pulsar"
           cp macos/Pulsar/Info.plist "$APP_PATH/Contents/Info.plist"
+          # Stamp the shipped version into the bundle so the app self-reports the
+          # release version (not the stale repo default) and Sparkle compares like
+          # for like (bundle CFBundleVersion vs appcast sparkle:version).
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.marketing_version }}" "$APP_PATH/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.version.outputs.build_number }}" "$APP_PATH/Contents/Info.plist"
           cp macos/Pulsar/Sources/Resources/AppIcon.icns "$APP_PATH/Contents/Resources/AppIcon.icns"
 
           if [ -d assets/portraits ]; then
@@ -260,7 +271,7 @@ jobs:
           DMG_PATH="${{ steps.dmg.outputs.dmg_path }}"
           DMG_NAME="${{ steps.dmg.outputs.dmg_name }}"
           SHORT_VERSION="${GITHUB_REF_NAME#v}"
-          VERSION="${{ github.run_number }}"
+          VERSION="${{ steps.version.outputs.build_number }}"
           DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${DMG_NAME}"
 
           KEY_FILE=$(mktemp)
@@ -290,7 +301,7 @@ jobs:
                 <link>https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}</link>
                 <sparkle:version>${VERSION}</sparkle:version>
                 <sparkle:shortVersionString>${SHORT_VERSION}</sparkle:shortVersionString>
-                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+                <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
                 <pubDate>${PUB_DATE}</pubDate>
                 <enclosure
                   url="${DOWNLOAD_URL}"

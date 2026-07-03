@@ -240,6 +240,10 @@ final class DashboardViewModel {
                 label: dto.label,
                 phase: phase,
                 lastSeen: lastSeen,
+                branch: dto.branch ?? "",
+                repo: dto.repo ?? "",
+                lastAction: dto.last_action ?? "",
+                userNamed: dto.user_named ?? false,
                 drones: drones)
         }
         .sorted { $0.lastSeen > $1.lastSeen }
@@ -255,6 +259,24 @@ final class DashboardViewModel {
     func dismissSession(_ id: String) async {
         missionSessions.removeAll { $0.id == id }
         try? await api.dismissSession(id)
+    }
+
+    /// Manually rename a session — the human title OUTRANKS every auto-source and
+    /// is permanent (the LLM titler can never clobber it). Optimistically updates
+    /// the local row, then POSTs to /session/activity with user_named:true. A
+    /// blank/whitespace name is ignored (the daemon never overwrites with empty).
+    func renameSession(_ id: String, to name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Optimistic local update so the row reflects the new title at once.
+        if let idx = missionSessions.firstIndex(where: { $0.id == id }) {
+            let s = missionSessions[idx]
+            missionSessions[idx] = MissionSession(
+                id: s.id, name: trimmed, label: s.label, phase: s.phase,
+                lastSeen: s.lastSeen, branch: s.branch, repo: s.repo,
+                lastAction: s.lastAction, userNamed: true, drones: s.drones)
+        }
+        try? await api.renameSession(id, to: trimmed)
     }
 
     /// A change to the set of in-flight sub-agent drones, pushed whenever a

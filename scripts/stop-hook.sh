@@ -64,11 +64,45 @@ except: print("")' 2>/dev/null || echo "")
   # aren't real missions and must not flip a phantom row to "Paused".
   case "$S_CWD" in /private/var/folders/*|/var/folders/*|/private/tmp/*|/tmp/*) S_SID="" ;; esac
   if [ -n "$S_SID" ]; then
+    # Session Signature: a ~48-char single-line snippet of the LAST assistant
+    # message — the highest-signal per-row discriminator ("what this session just
+    # did"), updated every turn (unlike the sticky first-message name). Parsed
+    # from the same transcript tail the canon picker reads at step 5; done here so
+    # it rides the phase:"waiting" POST rather than adding a request. Best-effort
+    # and fully guarded — no transcript / no assistant text simply omits it.
+    S_TRANSCRIPT=$(printf '%s' "$EVENT_JSON" | python3 -c 'import sys,json
+try: print(json.load(sys.stdin).get("transcript_path",""))
+except: print("")' 2>/dev/null || echo "")
+    S_ACTION=""
+    if [ -n "$S_TRANSCRIPT" ] && [ -f "$S_TRANSCRIPT" ]; then
+      S_ACTION=$(tail -c 200000 "$S_TRANSCRIPT" 2>/dev/null | python3 -c '
+import sys, json, re
+last = ""
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw or not raw.startswith("{"): continue
+    try: ev = json.loads(raw)
+    except: continue
+    if ev.get("type") != "assistant": continue
+    for chunk in ev.get("message", {}).get("content", []):
+        if chunk.get("type") == "text" and chunk.get("text"):
+            last = chunk["text"]
+# First non-empty line, whitespace-collapsed, capped at 48 chars.
+line = ""
+for l in last.splitlines():
+    l = " ".join(l.split())
+    if l:
+        line = l
+        break
+print(line[:48])
+' 2>/dev/null || echo "")
+    fi
     S_BODY=$(python3 -c 'import sys,json
-sid,cwd=sys.argv[1],sys.argv[2]
+sid,cwd,action=sys.argv[1],sys.argv[2],sys.argv[3]
 d={"session_id":sid,"phase":"waiting"}
 if cwd: d["cwd"]=cwd
-print(json.dumps(d))' "$S_SID" "$S_CWD" 2>/dev/null || echo "")
+if action: d["last_action"]=action
+print(json.dumps(d))' "$S_SID" "$S_CWD" "$S_ACTION" 2>/dev/null || echo "")
     if [ -n "$S_BODY" ]; then
       ( curl -sf --max-time 2 -X POST -H 'Content-Type: application/json' \
           -d "$S_BODY" "$DAEMON/session/activity" >/dev/null 2>&1 || true ) &

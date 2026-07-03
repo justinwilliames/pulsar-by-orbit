@@ -321,6 +321,137 @@ func runAll() async {
         unsetenv("PULSAR_STORAGE")
     }
 
+    // MARK: - SessionRegistry: Session Signature (new fields + rename precedence)
+    //
+    // These drive the REAL SessionRegistry actor against a per-test temp store,
+    // so the live sessions.json and the running app are never touched.
+
+    func makeRegistry() -> (SessionRegistry, URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("session-tests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = dir.appendingPathComponent("sessions.json")
+        return (SessionRegistry(storeOverrideURL: store), store)
+    }
+
+    // An OLD on-disk store (none of the Session Signature fields) must still
+    // decode + render — graceful fallback to today's label, no crash.
+    await test("old store without new fields decodes cleanly") {
+        let (_, store) = makeRegistry()
+        // Hand-write a record with ONLY the pre-Signature keys.
+        let legacy: [String: [String: Any]] = [
+            "s1": [
+                "sessionId": "s1", "label": "claude",
+                "lastSeen": Date().timeIntervalSinceReferenceDate,
+                "phase": "waiting", "dismissed": false,
+            ],
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: legacy)
+        try! data.write(to: store)
+
+        let reg = SessionRegistry(storeOverrideURL: store)
+        let active = await reg.activeSessions(liveSessionIds: ["s1"])
+        await expect(active.count == 1, "legacy record decoded (no crash)")
+        let r = active.first
+        await expect(r?.branch == nil && r?.repo == nil, "new fields default to nil")
+        await expect(r?.lastAction == nil && r?.userNamed == nil, "action/userNamed default nil")
+        await expect(r?.label == "claude", "existing label preserved")
+    }
+
+    // A USER rename must survive a SUBSEQUENT LLM nameOverride:true call — the
+    // worst regression for a trust feature would be a vanishing human title.
+    await test("user rename survives a later nameOverride") {
+        let (reg, _) = makeRegistry()
+        await reg.note(sessionId: "s1", cwd: "/x/claude", phase: "working",
+                       isUserMessage: true, name: "go")   // sticky first-message seed
+        await reg.note(sessionId: "s1", cwd: nil, phase: nil,
+                       name: "Auth Fix", userNamed: true) // human rename
+        await reg.note(sessionId: "s1", cwd: nil, phase: nil,
+                       name: "Some LLM Title", nameOverride: true)  // titler tries to clobber
+        let r = await reg.activeSessions().first
+        await expect(r?.name == "Auth Fix", "human title survived the LLM override")
+        await expect(r?.userNamed == true, "userNamed latched")
+    }
+
+    // LIVE context (branch/repo/lastAction) always takes the freshest value; a
+    // branch switch mid-session tracks.
+    await test("branch/repo/lastAction take the freshest value") {
+        let (reg, _) = makeRegistry()
+        await reg.note(sessionId: "s1", cwd: "/x/claude", phase: "working",
+                       isUserMessage: true, branch: "main", repo: "pulsar",
+                       lastAction: "started")
+        await reg.note(sessionId: "s1", cwd: nil, phase: nil,
+                       branch: "feat/identity", lastAction: "wired the payload")
+        let r = await reg.activeSessions().first
+        await expect(r?.branch == "feat/identity", "branch switch tracked (freshest wins)")
+        await expect(r?.repo == "pulsar", "repo retained when omitted on a later turn")
+        await expect(r?.lastAction == "wired the payload", "lastAction updated")
+    }
+
+    // The LLM titler still works BEFORE any human rename (precedence unchanged
+    // for the non-userNamed path).
+    await test("nameOverride still replaces the seed when not user-named") {
+        let (reg, _) = makeRegistry()
+        await reg.note(sessionId: "s1", cwd: "/x/claude", phase: "working",
+                       isUserMessage: true, name: "go")
+        await reg.note(sessionId: "s1", cwd: nil, phase: nil,
+                       name: "Nice Title", nameOverride: true)
+        let r = await reg.activeSessions().first
+        await expect(r?.name == "Nice Title", "LLM title replaced the local seed")
+        await expect((r?.userNamed ?? false) == false, "userNamed stays false for an LLM title")
+    }
+
+    // MARK: - SessionIdentity: collision backstop (shortTag + non-branch monogram)
+    //
+    // The Session Signature's guaranteed-unique backstop. These drive the REAL
+    // `SessionIdentity` derivations (the same code `MissionSession.shortTag` /
+    // `.monogram` delegate to), so the view can't drift from what's tested.
+
+    // The headline collision case: two sessions IDENTICAL on repo/branch/last-action
+    // but with different ids must get DIFFERENT shortTag AND DIFFERENT monogram —
+    // otherwise two live rows look the same. (Neither derivation touches branch,
+    // so the shared repo/branch/action is irrelevant by construction.)
+    await test("same repo/branch/action, different ids → distinct shortTag + monogram") {
+        let idA = "a7f3c210-1111-4444-8888-000000000001"
+        let idB = "b4e9d871-2222-5555-9999-000000000002"
+        let tagA = SessionIdentity.shortTag(id: idA)
+        let tagB = SessionIdentity.shortTag(id: idB)
+        await expect(tagA == "#a7f3", "shortTag is #-prefixed first 4 id chars")
+        await expect(tagA != tagB, "different ids → different shortTag")
+
+        // userNamed:false → id-derived monogram (NOT branch-derived), so the
+        // shared branch can't collapse them.
+        let monoA = SessionIdentity.monogram(id: idA, userNamed: false, userName: nil)
+        let monoB = SessionIdentity.monogram(id: idB, userNamed: false, userName: nil)
+        await expect(monoA != monoB, "different ids → different monogram (not branch-collapsed)")
+        await expect(monoA.count == 2 && monoB.count == 2, "id monogram is a 2-char pair")
+    }
+
+    // Non-git session (empty branch/repo — Justin's main sessions) must STILL get a
+    // stable, non-blank monogram + shortTag purely from the id.
+    await test("non-git session (no branch) still gets a non-blank id monogram") {
+        let id = "0f1e2d3c-aaaa-bbbb-cccc-ddddeeeeffff"
+        let mono = SessionIdentity.monogram(id: id, userNamed: false, userName: nil)
+        await expect(!mono.isEmpty && mono.count == 2, "non-blank 2-char monogram with no branch")
+        await expect(SessionIdentity.shortTag(id: id) == "#0f1e", "shortTag from id, branch-independent")
+        // Determinism: same id → same derivations across calls (and processes).
+        await expect(SessionIdentity.monogram(id: id, userNamed: false, userName: nil) == mono,
+                     "monogram deterministic for a given id")
+    }
+
+    // A user rename drives the monogram from the PERSON'S NAME, never the id/branch.
+    await test("userNamed monogram = user name initials") {
+        let id = "c0ffee00-3333-6666-aaaa-111122223333"
+        let mono = SessionIdentity.monogram(id: id, userNamed: true, userName: "Auth Fix")
+        await expect(mono == "AF", "two-word user name → both initials, uppercased")
+        let single = SessionIdentity.monogram(id: id, userNamed: true, userName: "billing")
+        await expect(single == "BI", "single-word user name → first two letters")
+        // A userNamed flag but an unusable (punctuation-only) name falls back to the
+        // id pair rather than going blank.
+        let fallback = SessionIdentity.monogram(id: id, userNamed: true, userName: "!!!")
+        await expect(fallback == SessionIdentity.idPair(id), "unusable user name → id-pair fallback, never blank")
+    }
+
     await test("migration: CALDWELL_* → PULSAR_*, PULSAR_ wins, sentinel gates (Fix 3)") {
         let cfg = PulsarConfig.shared
         let dir = FileManager.default.temporaryDirectory

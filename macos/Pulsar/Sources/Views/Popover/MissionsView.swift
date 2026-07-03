@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The Task Mode "Missions" board — live Claude Code work grouped BY SESSION.
 /// Each session is a Pulsar orchestrator parent row with its sub-agent drones
@@ -70,70 +71,11 @@ struct MissionsView: View {
 
     private func sessionGroup(_ session: MissionSession) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            parentRow(session)
+            SessionParentRow(session: session, viewModel: viewModel)
             if !session.drones.isEmpty {
                 nestedDrones(session)
             }
         }
-    }
-
-    /// The orchestrator (Pulsar) parent row: brand mark + session name/label +
-    /// phase status pill + dismiss button. Waiting sessions get an orange wash.
-    private func parentRow(_ session: MissionSession) -> some View {
-        HStack(spacing: 10) {
-            PulsarMark(size: 24)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(secondaryLine(for: session))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            statusPill(session.phase)
-
-            Button {
-                Task { await viewModel.dismissSession(session.id) }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(4)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Dismiss this session")
-        }
-        .padding(8)
-        .background(
-            (session.phase == .waiting ? Color.orange.opacity(0.10) : Color.orbit.opacity(0.08)),
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-    }
-
-    /// Secondary line under the session title — the repo/cwd label, plus the
-    /// drone count when the session has agents running.
-    private func secondaryLine(for session: MissionSession) -> String {
-        let count = session.drones.count
-        if count > 0 {
-            return "\(session.label) · orchestrating \(count) agent\(count == 1 ? "" : "s")"
-        }
-        return session.phase == .waiting ? session.label : "\(session.label) · working"
-    }
-
-    private func statusPill(_ phase: MissionSession.Phase) -> some View {
-        Label(phase.label, systemImage: phase.systemImage)
-            .font(.caption2)
-            .foregroundStyle(phase.tint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(phase.tint.opacity(0.15), in: Capsule())
     }
 
     // MARK: - Nested drones
@@ -270,5 +212,217 @@ struct MissionsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
+    }
+}
+
+// MARK: - Session parent row (identity chip + title + context strip + rename)
+
+/// The orchestrator parent row for one session. Its OWN struct so it can hold the
+/// inline-rename `@State` per row. The identity chip (deterministic colour +
+/// monogram) is the pre-attentive distinguisher — N same-repo sessions become N
+/// different chips; the context strip (branch · last-action · time) names each.
+private struct SessionParentRow: View {
+    let session: MissionSession
+    let viewModel: DashboardViewModel
+
+    @State private var isEditing = false
+    @State private var editingTitle = ""
+    @State private var isHovering = false
+    @FocusState private var titleFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // The jump target is ONLY the leading content (chip + title/context) —
+            // a plain Button that excludes the trailing pill + dismiss (x), so those
+            // controls keep their own hit areas and never fire a jump. Disabled
+            // while renaming so a click in the TextField edits rather than warps.
+            Button(action: openSession) {
+                HStack(spacing: 10) {
+                    // The chip is the parent's RESTING identity; when drones run, the
+                    // nested rows below carry the live portraits. Keeping the chip here
+                    // (not a drone portrait) means the parent stays identifiable even
+                    // mid-swarm.
+                    IdentityChip(color: session.identityColor, monogram: session.monogram, size: 24)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        titleLine
+                        secondaryStrip
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isEditing)   // renaming: clicks edit the field, don't jump
+            .help("Open this session in Claude")
+
+            Spacer(minLength: 8)
+
+            statusPill(session.phase)
+
+            Button {
+                Task { await viewModel.dismissSession(session.id) }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this session")
+        }
+        .padding(8)
+        .background(
+            (session.phase == .waiting ? Color.orange.opacity(0.10) : Color.orbit.opacity(0.08)),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            // A faint highlight on hover so the (clickable) row reads as live —
+            // calm, no border, suppressed while renaming to avoid competing chrome.
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(isHovering && !isEditing ? 0.05 : 0))
+        )
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("Rename") { beginEditing() }
+            Button("Dismiss") { Task { await viewModel.dismissSession(session.id) } }
+        }
+    }
+
+    /// Title line — swaps between a static Text (with a hover-reveal pencil) and
+    /// an inline TextField while renaming. The field is width-capped so it can
+    /// never shove the pill/dismiss off the 360pt row.
+    @ViewBuilder
+    private var titleLine: some View {
+        if isEditing {
+            TextField("Name this session", text: $editingTitle)
+                .textFieldStyle(.plain)
+                .font(.caption.weight(.semibold))
+                .focused($titleFocused)
+                .frame(maxWidth: 190, alignment: .leading)
+                .onSubmit { commitEditing() }
+                .onExitCommand { isEditing = false }   // Esc cancels
+                .onChange(of: titleFocused) { _, focused in
+                    // Losing focus (click away) commits, matching a rename field's
+                    // usual behaviour — no orphaned half-edits.
+                    if !focused && isEditing { commitEditing() }
+                }
+        } else {
+            HStack(spacing: 4) {
+                Text(session.displayTitle)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if isHovering {
+                    Button(action: beginEditing) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Rename this session")
+                    // A calm jump affordance so the row reads as clickable — a
+                    // small "open" glyph revealed on hover, tertiary, no button
+                    // chrome. The actual click is handled by the wrapping Button.
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    /// Under-title context strip: the context line (or orchestration summary while
+    /// drones run) PLUS the always-present `shortTag` as a subtle, monospaced
+    /// trailing tag. The tag is the collision backstop the human can point at — so
+    /// even if colour + branch + last-action all match, the two rows still read
+    /// apart ("the #a7f3 one"). The context line truncates first (lower layout
+    /// priority) so the tag is never the thing that gets clipped off the 360pt row.
+    private var secondaryStrip: some View {
+        HStack(spacing: 5) {
+            Text(secondaryLine)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(0)
+            Text(session.shortTag)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.quaternary)
+                .lineLimit(1)
+                .fixedSize()
+                .layoutPriority(1)
+        }
+    }
+
+    /// Under-title context text. With drones running, keep the orchestration
+    /// summary; otherwise show the session's signature line — the actual
+    /// at-a-glance discriminator that separates same-repo rows.
+    private var secondaryLine: String {
+        let count = session.drones.count
+        if count > 0 {
+            return "orchestrating \(count) agent\(count == 1 ? "" : "s")"
+        }
+        return session.contextLine
+    }
+
+    /// Deep-link into Claude Desktop and navigate to this exact session (no fork).
+    /// Confirmed live: `claude://resume?session=<session_id>`. Guarded so a
+    /// malformed id can never force-unwrap a nil URL.
+    private func openSession() {
+        guard !isEditing,
+              let url = URL(string: "claude://resume?session=\(session.id)")
+        else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func beginEditing() {
+        editingTitle = session.displayTitle
+        isEditing = true
+        titleFocused = true
+    }
+
+    private func commitEditing() {
+        let name = editingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditing = false
+        guard !name.isEmpty, name != session.displayTitle else { return }
+        Task { await viewModel.renameSession(session.id, to: name) }
+    }
+
+    private func statusPill(_ phase: MissionSession.Phase) -> some View {
+        Label(phase.label, systemImage: phase.systemImage)
+            .font(.caption2)
+            .foregroundStyle(phase.tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(phase.tint.opacity(0.15), in: Capsule())
+    }
+}
+
+// MARK: - Identity chip
+
+/// A deterministic colour+monogram chip — the pre-attentive session distinguisher
+/// on the Missions board. Colour is hashed from the session id (an accelerant);
+/// the monogram carries identity as TEXT so it survives colour-blindness and any
+/// hash collision. Palette is sourced from the drone hues so chips and nested
+/// drone rows read as one calm family.
+private struct IdentityChip: View {
+    let color: Color
+    let monogram: String
+    var size: CGFloat = 24
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.265, style: .continuous)
+            .fill(color.opacity(0.9))
+            .frame(width: size, height: size)
+            .overlay(
+                Text(monogram)
+                    .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            )
     }
 }

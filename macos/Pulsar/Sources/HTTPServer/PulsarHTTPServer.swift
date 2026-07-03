@@ -393,6 +393,10 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 label: record.label,
                 phase: record.phase,
                 last_seen: Int(record.lastSeen.timeIntervalSince1970),
+                branch: record.branch ?? "",
+                repo: record.repo ?? "",
+                last_action: record.lastAction ?? "",
+                user_named: record.userNamed ?? false,
                 drones: sessionDrones)
         }
         return SessionsPayload(sessions: sessions)
@@ -444,10 +448,28 @@ final class PulsarHTTPServer: @unchecked Sendable {
         // allowed to REPLACE that one seed. Local/other callers omit it (false),
         // so nothing else can clobber a name. Never overwrites with empty.
         let nameOverride = (body["name_override"] as? Bool) ?? false
+        // `user_named` = true ONLY from a manual user rename (the app's rename
+        // action, or an external caller mimicking it). It latches the human title
+        // as permanent — the LLM titler can never clobber it afterwards. Reuses
+        // this same /session/activity route, so no new endpoint is needed.
+        let userNamed = (body["user_named"] as? Bool) ?? false
+        // LIVE context fields from the hooks (turn-start git reads, Stop-hook
+        // last-assistant snippet). Same nil-trimming idiom as `name`; a non-git
+        // cwd simply omits branch/repo and the UI falls back to the label.
+        let branch = (body["branch"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
+        let repo = (body["repo"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
+        let lastAction = (body["last_action"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
 
         await sessionRegistry.note(
             sessionId: sessionId, cwd: cwd, phase: phase, isUserMessage: isUserMessage,
-            name: name, nameOverride: nameOverride)
+            name: name, nameOverride: nameOverride, userNamed: userNamed,
+            branch: branch, repo: repo, lastAction: lastAction)
         await Self.broadcastSessions(
             sessionRegistry: sessionRegistry, audioQueue: audioQueue,
             sseBroadcaster: sseBroadcaster)
@@ -1617,6 +1639,10 @@ private struct SessionPayload: Encodable, Sendable {
     let label: String
     let phase: String
     let last_seen: Int
+    let branch: String
+    let repo: String
+    let last_action: String
+    let user_named: Bool
     let drones: [SessionDronePayload]
 }
 

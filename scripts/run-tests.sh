@@ -40,6 +40,8 @@ swiftc \
   -o "$BIN" \
   "$ENGINE/AudioQueueActor.swift" \
   "$ENGINE/PulsarConfig.swift" \
+  "$ENGINE/SessionRegistry.swift" \
+  "$ENGINE/SessionIdentity.swift" \
   "$HARNESS"
 
 echo "Running..."

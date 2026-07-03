@@ -119,6 +119,16 @@ struct DaemonAPI: Sendable {
         try await post("session/dismiss", body: ["session_id": id])
     }
 
+    /// Manually rename a session. Reuses /session/activity with user_named:true —
+    /// the daemon latches the human title as permanent (no new endpoint needed).
+    func renameSession(_ id: String, to name: String) async throws {
+        try await post("session/activity", body: [
+            "session_id": id,
+            "name": name,
+            "user_named": true,
+        ])
+    }
+
     // MARK: - Queue Status
 
     func fetchQueueStatus(channel: String? = nil) async throws -> QueueStatusResponse {

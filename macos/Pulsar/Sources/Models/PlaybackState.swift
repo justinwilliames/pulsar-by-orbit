@@ -144,6 +144,12 @@ struct SessionDTO: Codable, Sendable {
     let label: String
     let phase: String
     let last_seen: Int
+    // Optional so a daemon that predates the Session Signature fields still
+    // decodes (belt-and-braces in both directions); the mapper defaults them.
+    let branch: String?
+    let repo: String?
+    let last_action: String?
+    let user_named: Bool?
     let drones: [SessionDroneDTO]
 }
 

@@ -19,12 +19,29 @@ struct SessionRecord: Codable, Sendable {
     /// once and never overwritten, so the board title stays stable across a
     /// session's many turns. Optional (older stores + pre-first-message sessions).
     var name: String?
+    /// The session's current git branch (from the turn-start hook). LIVE context,
+    /// NOT sticky — a mid-session branch switch tracks. Optional: a non-git cwd
+    /// (or an older store) simply has none, and the UI falls back to the label.
+    var branch: String?
+    /// The git repo name (toplevel basename) for the session. LIVE, best-effort;
+    /// a fuller project label than the raw cwd basename when the two differ.
+    var repo: String?
+    /// A short single-line snippet of the LAST assistant message (from the Stop
+    /// hook). LIVE, updated every turn — the highest-signal per-row discriminator
+    /// ("what this session just did"), unlike the sticky first-message name.
+    var lastAction: String?
+    /// True once the USER manually renamed this session. A user name OUTRANKS
+    /// every auto-source (first-message, LLM titler, branch) and is permanent —
+    /// the LLM titler can never clobber it on a later turn. Optional (older
+    /// stores + never-renamed sessions decode as nil == false).
+    var userNamed: Bool?
 
     enum CodingKeys: String, CodingKey {
         case sessionId, label, lastSeen, phase, dismissed, lastUserMessage, name
+        case branch, repo, lastAction, userNamed
     }
 
-    init(sessionId: String, label: String, lastSeen: Date, phase: String, dismissed: Bool, lastUserMessage: Date?, name: String?) {
+    init(sessionId: String, label: String, lastSeen: Date, phase: String, dismissed: Bool, lastUserMessage: Date?, name: String?, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, userNamed: Bool? = nil) {
         self.sessionId = sessionId
         self.label = label
         self.lastSeen = lastSeen
@@ -32,6 +49,10 @@ struct SessionRecord: Codable, Sendable {
         self.dismissed = dismissed
         self.lastUserMessage = lastUserMessage
         self.name = name
+        self.branch = branch
+        self.repo = repo
+        self.lastAction = lastAction
+        self.userNamed = userNamed
     }
 
     init(from decoder: Decoder) throws {
@@ -43,6 +64,12 @@ struct SessionRecord: Codable, Sendable {
         self.dismissed = try c.decode(Bool.self, forKey: .dismissed)
         self.lastUserMessage = try c.decodeIfPresent(Date.self, forKey: .lastUserMessage)
         self.name = try c.decodeIfPresent(String.self, forKey: .name)
+        // decodeIfPresent for all four so an OLD store (written before these
+        // fields existed) still decodes cleanly — they arrive as nil.
+        self.branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        self.repo = try c.decodeIfPresent(String.self, forKey: .repo)
+        self.lastAction = try c.decodeIfPresent(String.self, forKey: .lastAction)
+        self.userNamed = try c.decodeIfPresent(Bool.self, forKey: .userNamed)
     }
 }
 
@@ -114,7 +141,16 @@ actor SessionRegistry {
     /// session's turns. The local sync POST seeds a first-line name immediately;
     /// the opt-in LLM title then arrives with `nameOverride: true` to REPLACE
     /// that one seed. Still never overwrites with an empty name.
-    func note(sessionId: String, cwd: String?, phase: String?, isUserMessage: Bool = false, name: String? = nil, nameOverride: Bool = false) {
+    ///
+    /// `userNamed` = true ONLY from a manual user rename. It sets the name AND
+    /// latches `record.userNamed`, which OUTRANKS everything: once a human has
+    /// named a session, no later `nameOverride` (the LLM titler) may clobber it.
+    /// This closes the known bug where the opt-in titler silently erased a human
+    /// title on the next turn.
+    ///
+    /// `branch`/`repo`/`lastAction` are LIVE context (not sticky) — the freshest
+    /// non-empty value always wins, so a branch switch or a new last-action tracks.
+    func note(sessionId: String, cwd: String?, phase: String?, isUserMessage: Bool = false, name: String? = nil, nameOverride: Bool = false, userNamed: Bool = false, branch: String? = nil, repo: String? = nil, lastAction: String? = nil) {
         let trimmedId = sessionId.trimmingCharacters(in: .whitespaces)
         guard !trimmedId.isEmpty else { return }
 
@@ -123,18 +159,38 @@ actor SessionRegistry {
             .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0).lastPathComponent }
         let trimmedName = name.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { $0.isEmpty ? nil : $0 }
+        let trimmedBranch = branch.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let trimmedRepo = repo.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let trimmedAction = lastAction.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
 
         if var existing = sessions[trimmedId] {
             existing.lastSeen = Date()
             if let phase, !phase.isEmpty { existing.phase = phase }
             if let derivedLabel, !derivedLabel.isEmpty { existing.label = derivedLabel }
             if isUserMessage { existing.lastUserMessage = Date() }
-            // STICKY: set the name only if we don't already have one — the first
-            // user message wins, later turns never overwrite it. EXCEPTION: the
-            // LLM titler (`nameOverride`) may replace the local first-line seed.
-            // Either way, never overwrite with an empty name.
-            if let trimmedName, nameOverride || (existing.name ?? "").isEmpty {
-                existing.name = trimmedName
+            // LIVE context — always take the freshest non-empty value.
+            if let trimmedBranch { existing.branch = trimmedBranch }
+            if let trimmedRepo { existing.repo = trimmedRepo }
+            if let trimmedAction { existing.lastAction = trimmedAction }
+            // Name precedence (highest → lowest):
+            //   1. a user rename latches userNamed and always wins;
+            //   2. once userNamed, NOTHING (not even the LLM `nameOverride`) may
+            //      overwrite — the human title is permanent;
+            //   3. the LLM titler (`nameOverride`) may replace the local seed;
+            //   4. otherwise STICKY: first non-empty wins, later turns don't churn.
+            // Never overwrite with an empty name.
+            if let trimmedName {
+                if userNamed {
+                    existing.name = trimmedName
+                    existing.userNamed = true
+                } else if (existing.userNamed ?? false) {
+                    // A human already named it — ignore auto sources entirely.
+                } else if nameOverride || (existing.name ?? "").isEmpty {
+                    existing.name = trimmedName
+                }
             }
             // A dismiss STICKS through the trailing machine churn (Stop hook,
             // drone stop, /speak). ONLY a genuine new user message un-hides a
@@ -154,7 +210,13 @@ actor SessionRegistry {
                 phase: (phase?.isEmpty == false ? phase! : "working"),
                 dismissed: false,
                 lastUserMessage: isUserMessage ? Date() : nil,
-                name: trimmedName)
+                name: trimmedName,
+                branch: trimmedBranch,
+                repo: trimmedRepo,
+                lastAction: trimmedAction,
+                // A brand-new session created BY a rename latches userNamed so the
+                // human title holds even here (edge case: rename before any turn).
+                userNamed: userNamed ? true : nil)
             schedulePersist()
         }
     }

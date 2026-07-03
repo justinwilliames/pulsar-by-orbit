@@ -47,17 +47,39 @@ prompt=$(printf '%s' "$input" | /usr/bin/jq -r '.prompt // ""' 2>/dev/null)
 local_name=$(printf '%s' "$prompt" | /usr/bin/head -n 1 \
   | /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | /usr/bin/cut -c1-60)
 
+# LIVE context for the Missions board's per-row signature (item: Session
+# Signature). Two cheap, guarded git reads off the session's cwd:
+#   • branch — names the LINE OF WORK, and re-sent EVERY turn so a mid-session
+#     branch switch tracks (it rides this existing per-turn POST — no extra call).
+#   • repo   — the repo toplevel basename, a fuller project label than the raw
+#     cwd basename when they differ.
+# Both are plain command substitutions BEFORE the already-backgrounded curl,
+# ~5-15ms, 2>/dev/null-guarded so a wedged/absent git never blocks the turn. A
+# non-git cwd simply yields empty strings, which the jq guards omit — the board
+# then falls back to the cwd-basename label exactly as before.
+branch=""
+repo=""
+if [ -n "$cwd" ]; then
+  branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  repo=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null | xargs basename 2>/dev/null)
+fi
+
 # Best-effort session-activity ping for the Missions board. Backgrounded,
 # silent, non-fatal. Carries the local first-line name so a good name lands
 # immediately and by default. name_override is NOT set here — the local name is
-# sticky; only the opt-in LLM titler below may overwrite it.
+# sticky; only the opt-in LLM titler below may overwrite it. branch/repo are
+# LIVE (not sticky) — the daemon takes the freshest value each turn.
 body=$(/usr/bin/jq -n \
   --arg sid "$sid" \
   --arg cwd "$cwd" \
   --arg name "$local_name" \
+  --arg branch "$branch" \
+  --arg repo "$repo" \
   '{session_id: $sid, phase: "working", user_message: true}
-   + (if $cwd  != "" then {cwd:  $cwd}  else {} end)
-   + (if $name != "" then {name: $name} else {} end)' 2>/dev/null)
+   + (if $cwd    != "" then {cwd:    $cwd}    else {} end)
+   + (if $name   != "" then {name:   $name}   else {} end)
+   + (if $branch != "" then {branch: $branch} else {} end)
+   + (if $repo   != "" then {repo:   $repo}   else {} end)' 2>/dev/null)
 
 if [ -n "$body" ]; then
   ( curl -sf --max-time 2 -X POST -H 'Content-Type: application/json' \

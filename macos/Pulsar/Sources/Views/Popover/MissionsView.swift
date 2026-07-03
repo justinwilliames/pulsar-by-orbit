@@ -372,10 +372,16 @@ private struct SessionParentRow: View {
     /// Confirmed live: `claude://resume?session=<session_id>`. Guarded so a
     /// malformed id can never force-unwrap a nil URL.
     private func openSession() {
-        guard !isEditing,
-              let url = URL(string: "claude://resume?session=\(session.id)")
-        else { return }
-        NSWorkspace.shared.open(url)
+        guard !isEditing else { return }
+        // Shell out to /usr/bin/open rather than NSWorkspace.shared.open(_:):
+        // this app is LSUIElement=true (menu-bar accessory, no key window), and
+        // from that context NSWorkspace.open silently no-ops for URL schemes.
+        // A separate `open` process routes through LaunchServices reliably and
+        // activates Claude — this is the exact path confirmed working by hand.
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        proc.arguments = ["claude://resume?session=\(session.id)"]
+        try? proc.run()
     }
 
     private func beginEditing() {

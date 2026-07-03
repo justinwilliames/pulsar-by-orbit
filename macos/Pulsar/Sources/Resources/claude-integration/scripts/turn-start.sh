@@ -86,42 +86,72 @@ if [ -n "$body" ]; then
       -d "$body" http://127.0.0.1:7865/session/activity >/dev/null 2>&1 || true ) &
 fi
 
-# LLM-generated mission title — DISCLOSED OPT-IN, default OFF. Gated three ways:
-#   1) the user must have turned on llm_titles_enabled in Settings,
-#   2) once per session (per-session sentinel), so exactly one cheap Haiku call,
-#   3) `claude` must be on PATH.
-# If the flag is off we never call claude — the local name above stands.
-sentinel="$HOME/.claude/.cc-named-$sid"
+# LLM-generated mission title — DISCLOSED OPT-IN (llm_titles_enabled), default OFF.
+# The title reflects the session's CURRENT TASK (drawn from the recent conversation
+# in the transcript), refreshed every few turns so it tracks what the session is
+# actually doing NOW — a session that pivots (e.g. build → review → bugfix) gets a
+# title that keeps up, instead of being frozen on its first message. Off → we never
+# call claude. Backgrounded + watchdog-reaped so it never blocks or lingers.
 
-# Read the opt-in flag fast + non-fatally. If the daemon is down or the field is
-# absent/false, `enabled` stays empty and we skip the LLM path entirely.
+# Read the opt-in flag fast + non-fatally. Absent/false/daemon-down → skip.
 enabled=$(curl -sf --max-time 1 http://127.0.0.1:7865/settings 2>/dev/null \
   | /usr/bin/jq -r '.llm_titles_enabled // false' 2>/dev/null)
 
-if [ "$enabled" = "true" ] && [ "$sid" != "default" ] && [ -n "$prompt" ] \
-   && [ ! -f "$sentinel" ] && command -v claude >/dev/null 2>&1; then
-  : > "$sentinel" 2>/dev/null   # name once per session, even if the call fails
+if [ "$enabled" = "true" ] && [ "$sid" != "default" ] && command -v claude >/dev/null 2>&1; then
+  # Cadence: re-title on turn 1, then every 3rd turn (4, 7, …). Enough to follow a
+  # pivot quickly, without a Haiku call — or a name change — on every single turn.
+  countfile="$HOME/.claude/.cc-titlecount-$sid"
+  tc=$(/bin/cat "$countfile" 2>/dev/null); case "$tc" in ''|*[!0-9]*) tc=0 ;; esac
+  tc=$((tc + 1)); echo "$tc" > "$countfile" 2>/dev/null
+  if [ $(( (tc - 1) % 3 )) -eq 0 ]; then
   (
-    # Fallback = the local first-line name, so even a failed/timed-out model
-    # call leaves the (already-posted) local name in place rather than blanking.
     fallback="$local_name"
 
-    # Run claude BACKGROUNDED with a watchdog. macOS has no `timeout(1)`, and a
-    # wedged `claude -p` would otherwise linger forever holding this subshell.
-    # So: launch it writing to a temp file, capture its PID, arm a watchdog
-    # subshell that SIGKILLs it after 25s, and cancel the watchdog if claude
-    # finishes first. No orphaned processes either way.
+    # CURRENT-TASK context: the most recent user+assistant text from the session
+    # transcript (located by session_id), plus the just-submitted prompt as the
+    # latest signal. This is what makes the title about the task, not the opener.
+    tpath=$(/bin/ls -t "$HOME/.claude/projects/"*"/$sid.jsonl" 2>/dev/null | /usr/bin/head -1)
+    ctx=""
+    if [ -n "$tpath" ]; then
+      ctx=$(/usr/bin/tail -c 200000 "$tpath" 2>/dev/null | /usr/bin/python3 -c '
+import sys, json
+msgs = []
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw or not raw.startswith("{"): continue
+    try: ev = json.loads(raw)
+    except Exception: continue
+    t = ev.get("type")
+    if t not in ("user", "assistant"): continue
+    c = ev.get("message", {}).get("content")
+    parts = []
+    if isinstance(c, str):
+        parts.append(c)
+    elif isinstance(c, list):
+        for ch in c:
+            if isinstance(ch, dict) and ch.get("type") == "text" and ch.get("text"):
+                parts.append(ch["text"])
+    txt = " ".join(" ".join(p.split()) for p in parts).strip()
+    if txt:
+        msgs.append(("User" if t == "user" else "Assistant") + ": " + txt[:400])
+print(("\n".join(msgs[-8:]))[:1800])
+' 2>/dev/null)
+    fi
+    # Always fold in the current prompt as the newest user turn.
+    ctx=$(printf '%s\nUser: %s' "$ctx" "$prompt" | /usr/bin/head -c 2200)
+
     out=$(/usr/bin/mktemp 2>/dev/null) || out=""
     if [ -n "$out" ]; then
-      printf '%s' "Reply with ONLY a 3 to 6 word Title Case name for this coding session. No quotes, no trailing punctuation, no preamble. Task: $prompt" \
-        | /usr/bin/head -c 2000 \
+      printf '%s' "You are naming a Claude Code coding session for a compact sidebar. In 3 to 6 words, Title Case, no quotes, no trailing punctuation, no preamble, name what this session is CURRENTLY working on. Weight the MOST RECENT activity — the task may have shifted from where it began. Reply with ONLY the title.
+
+Recent conversation:
+$ctx" \
+        | /usr/bin/head -c 4000 \
         | PULSAR_NAMING=1 command claude -p --model claude-haiku-4-5-20251001 --settings '{"hooks":{}}' >"$out" 2>/dev/null &
       claude_pid=$!
       ( sleep 25; kill -9 "$claude_pid" 2>/dev/null ) &
       watchdog_pid=$!
       wait "$claude_pid" 2>/dev/null
-      # claude finished (or was killed) — cancel the watchdog so it doesn't
-      # linger, and reap it so no zombie/orphan remains.
       kill "$watchdog_pid" 2>/dev/null
       wait "$watchdog_pid" 2>/dev/null
 
@@ -134,15 +164,15 @@ if [ "$enabled" = "true" ] && [ "$sid" != "default" ] && [ -n "$prompt" ] \
 
     [ -z "$title" ] && title="$fallback"
     if [ -n "$title" ]; then
-      # name_override:true — the LLM title is the ONE caller allowed to replace
-      # the sticky local seed. Still never overwrites with empty (title is
-      # non-empty here).
+      # name_override:true — the LLM title may replace the sticky local seed (but
+      # the daemon still refuses to overwrite a name the user set by hand).
       nbody=$(/usr/bin/jq -n --arg sid "$sid" --arg name "$title" \
         '{session_id: $sid, name: $name, name_override: true}' 2>/dev/null)
       [ -n "$nbody" ] && curl -sf --max-time 6 -X POST -H 'Content-Type: application/json' \
         -d "$nbody" http://127.0.0.1:7865/session/activity >/dev/null 2>&1 || true
     fi
   ) >/dev/null 2>&1 &
+  fi
 fi
 
 exit 0

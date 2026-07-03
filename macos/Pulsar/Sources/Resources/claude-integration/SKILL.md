@@ -230,4 +230,6 @@ User-facing UX is the macOS menu-bar app (`Pulsar.app`) — a three-tab popover 
 
 ## Sub-agents and orchestration
 
+**Spawn sub-agents in the FOREGROUND — do NOT set `run_in_background`.** A backgrounded sub-agent does not appear in Claude Code's sub-agent panel and does not orbit as a drone: it's invisible and inaudible, which defeats the entire point of the crew, and it can stall unseen. Foreground keeps every agent on screen and speaking in its own voice, so you can always see and hear exactly who is working on what. Reserve `run_in_background` only for a genuinely large parallel fan-out where blocking the main thread for the whole run is impractical — and know you lose the live swarm when you do.
+
 When you spawn sub-agents to do work in parallel, **cast each as its matching Pulsar drone** and have it self-announce via `say.sh "<line>" --agent <category>` — a bespoke, in-character line on accept, on any major milestone, and on completion. Each drone speaks in its own voice (see "Voices"), so the user hears the live team rather than one narrator. Keep the lines sparse (accept + real milestones + done), specific to the actual work, and in the drone's character. The main thread keeps speaking as Pulsar (no `--agent`), including any consolidated wrap-up at the end of the task.

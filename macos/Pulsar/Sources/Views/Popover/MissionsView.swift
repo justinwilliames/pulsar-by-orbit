@@ -256,8 +256,12 @@ private struct SessionParentRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .contentShape(Rectangle())
-            .onTapGesture { openSession() }
-            .help("Open this session in Claude")
+            // CLICK-TO-JUMP DISABLED: `claude://resume?session=<id>` RESUMES a
+            // session (forkSession), which spawns a DUPLICATE when the session is
+            // already open — it focuses nothing. There is no exposed "focus the
+            // existing instance" deep-link, so tapping a row must not fire it.
+            // Reconciliation stays via the identity chip + #tag + context line.
+            .help("This session (open it from Claude Desktop's session list)")
 
             Spacer(minLength: 8)
 
@@ -331,12 +335,6 @@ private struct SessionParentRow: View {
                     }
                     .buttonStyle(.plain)
                     .help("Rename this session")
-                    // A calm jump affordance so the row reads as clickable — a
-                    // small "open" glyph revealed on hover, tertiary, no button
-                    // chrome. The actual click is handled by the wrapping Button.
-                    Image(systemName: "arrow.up.forward.app")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
                 }
             }
         }

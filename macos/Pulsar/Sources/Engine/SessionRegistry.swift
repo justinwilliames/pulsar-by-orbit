@@ -35,13 +35,28 @@ struct SessionRecord: Codable, Sendable {
     /// the LLM titler can never clobber it on a later turn. Optional (older
     /// stores + never-renamed sessions decode as nil == false).
     var userNamed: Bool?
+    /// The last time the PreToolUse heartbeat fired for this session — i.e. the
+    /// session was actively using a tool. LIVE, not sticky. The board reads this
+    /// (freshness-windowed) to PULSE the parent as "working now", distinct from
+    /// the phase pill (which is set at turn-start and only cleared at Stop, so it
+    /// falsely reads "working" for an idle-but-unstopped session). Optional.
+    var lastActiveAt: Date?
+    /// A short (≤40 char) description of what the session is doing RIGHT NOW
+    /// ("Editing MissionsView.swift", "Running: swift build") — from the
+    /// PreToolUse heartbeat. LIVE; paired with lastActiveAt. Optional.
+    var currentAction: String?
+    /// The drone category matching the current live work ("voyager"|"nova"|
+    /// "pulsar") — so the board can tint the action line + pulse in the right
+    /// hue. LIVE; paired with lastActiveAt. Optional.
+    var activeCategory: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId, label, lastSeen, phase, dismissed, lastUserMessage, name
         case branch, repo, lastAction, userNamed
+        case lastActiveAt, currentAction, activeCategory
     }
 
-    init(sessionId: String, label: String, lastSeen: Date, phase: String, dismissed: Bool, lastUserMessage: Date?, name: String?, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, userNamed: Bool? = nil) {
+    init(sessionId: String, label: String, lastSeen: Date, phase: String, dismissed: Bool, lastUserMessage: Date?, name: String?, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, userNamed: Bool? = nil, lastActiveAt: Date? = nil, currentAction: String? = nil, activeCategory: String? = nil) {
         self.sessionId = sessionId
         self.label = label
         self.lastSeen = lastSeen
@@ -53,6 +68,9 @@ struct SessionRecord: Codable, Sendable {
         self.repo = repo
         self.lastAction = lastAction
         self.userNamed = userNamed
+        self.lastActiveAt = lastActiveAt
+        self.currentAction = currentAction
+        self.activeCategory = activeCategory
     }
 
     init(from decoder: Decoder) throws {
@@ -70,6 +88,11 @@ struct SessionRecord: Codable, Sendable {
         self.repo = try c.decodeIfPresent(String.self, forKey: .repo)
         self.lastAction = try c.decodeIfPresent(String.self, forKey: .lastAction)
         self.userNamed = try c.decodeIfPresent(Bool.self, forKey: .userNamed)
+        // Live heartbeat fields — decodeIfPresent so an OLD store (pre-heartbeat)
+        // still decodes; they arrive as nil and simply read as "not active".
+        self.lastActiveAt = try c.decodeIfPresent(Date.self, forKey: .lastActiveAt)
+        self.currentAction = try c.decodeIfPresent(String.self, forKey: .currentAction)
+        self.activeCategory = try c.decodeIfPresent(String.self, forKey: .activeCategory)
     }
 }
 
@@ -150,7 +173,14 @@ actor SessionRegistry {
     ///
     /// `branch`/`repo`/`lastAction` are LIVE context (not sticky) — the freshest
     /// non-empty value always wins, so a branch switch or a new last-action tracks.
-    func note(sessionId: String, cwd: String?, phase: String?, isUserMessage: Bool = false, name: String? = nil, nameOverride: Bool = false, userNamed: Bool = false, branch: String? = nil, repo: String? = nil, lastAction: String? = nil) {
+    ///
+    /// `activeNow` = true ONLY from the PreToolUse heartbeat (a MAIN session is
+    /// firing a tool RIGHT NOW). It stamps `lastActiveAt = Date()` and refreshes
+    /// `currentAction`/`activeCategory`, but deliberately DOES NOT touch phase,
+    /// lastUserMessage, or dismissed — it is a pure liveness ping, not a turn/user
+    /// event. `lastSeen` is still refreshed (as for any note) so a live session
+    /// never ages out of the store.
+    func note(sessionId: String, cwd: String?, phase: String?, isUserMessage: Bool = false, name: String? = nil, nameOverride: Bool = false, userNamed: Bool = false, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, activeNow: Bool = false, currentAction: String? = nil, activeCategory: String? = nil) {
         let trimmedId = sessionId.trimmingCharacters(in: .whitespaces)
         guard !trimmedId.isEmpty else { return }
 
@@ -165,6 +195,10 @@ actor SessionRegistry {
             .flatMap { $0.isEmpty ? nil : $0 }
         let trimmedAction = lastAction.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { $0.isEmpty ? nil : $0 }
+        let trimmedCurrentAction = currentAction.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let trimmedActiveCategory = activeCategory.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
 
         if var existing = sessions[trimmedId] {
             existing.lastSeen = Date()
@@ -175,6 +209,13 @@ actor SessionRegistry {
             if let trimmedBranch { existing.branch = trimmedBranch }
             if let trimmedRepo { existing.repo = trimmedRepo }
             if let trimmedAction { existing.lastAction = trimmedAction }
+            // LIVE heartbeat — a PreToolUse ping stamps activity WITHOUT touching
+            // phase / lastUserMessage / dismissed (see the note() docstring).
+            if activeNow {
+                existing.lastActiveAt = Date()
+                existing.currentAction = trimmedCurrentAction
+                existing.activeCategory = trimmedActiveCategory
+            }
             // Name precedence (highest → lowest):
             //   1. a user rename latches userNamed and always wins;
             //   2. once userNamed, NOTHING (not even the LLM `nameOverride`) may
@@ -216,7 +257,12 @@ actor SessionRegistry {
                 lastAction: trimmedAction,
                 // A brand-new session created BY a rename latches userNamed so the
                 // human title holds even here (edge case: rename before any turn).
-                userNamed: userNamed ? true : nil)
+                userNamed: userNamed ? true : nil,
+                // Edge case: a heartbeat arrives before turn-start ever created the
+                // record. Stamp liveness so the very first tool call already pulses.
+                lastActiveAt: activeNow ? Date() : nil,
+                currentAction: activeNow ? trimmedCurrentAction : nil,
+                activeCategory: activeNow ? trimmedActiveCategory : nil)
             schedulePersist()
         }
     }

@@ -176,27 +176,6 @@ struct MissionsView: View {
             .modifier(BreathingModifier(active: running))
     }
 
-    /// A calm "breathing" pulse for a running drone portrait — a small
-    /// scale + opacity oscillation that reads as living work, not a toy. Inert
-    /// (identity) when `active` is false, so paused/done/blocked drones sit still.
-    private struct BreathingModifier: ViewModifier {
-        let active: Bool
-        @State private var breathe = false
-
-        func body(content: Content) -> some View {
-            content
-                .scaleEffect(active && breathe ? 1.06 : 1.0)
-                .opacity(active && breathe ? 0.82 : 1.0)
-                .animation(
-                    active
-                        ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
-                        : .default,
-                    value: breathe)
-                .onAppear { if active { breathe = true } }
-                .onChange(of: active) { _, isActive in breathe = isActive }
-        }
-    }
-
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "sparkles")
@@ -212,6 +191,31 @@ struct MissionsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
+    }
+}
+
+// MARK: - Breathing pulse (shared)
+
+/// A calm "breathing" pulse — a small scale + opacity oscillation that reads as
+/// living work, not a toy. Inert (identity) when `active` is false, so
+/// paused/done/blocked things sit still. Used by BOTH the running drone portrait
+/// AND the parent IdentityChip (which breathes while the MAIN session is actively
+/// using a tool). File-private so both views can share the one implementation.
+private struct BreathingModifier: ViewModifier {
+    let active: Bool
+    @State private var breathe = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(active && breathe ? 1.06 : 1.0)
+            .opacity(active && breathe ? 0.82 : 1.0)
+            .animation(
+                active
+                    ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
+                    : .default,
+                value: breathe)
+            .onAppear { if active { breathe = true } }
+            .onChange(of: active) { _, isActive in breathe = isActive }
     }
 }
 
@@ -247,7 +251,12 @@ private struct SessionParentRow: View {
                 // nested rows below carry the live portraits. Keeping the chip here
                 // (not a drone portrait) means the parent stays identifiable even
                 // mid-swarm.
+                // The chip BREATHES while the main session is actively using a
+                // tool (activeNow) — the same living-work pulse the drone portraits
+                // use, so a working main session visibly reads as alive rather than
+                // relying on the (turn-long, stale-prone) phase pill alone.
                 IdentityChip(color: session.identityColor, monogram: session.monogram, size: 24)
+                    .modifier(BreathingModifier(active: session.activeNow))
 
                 VStack(alignment: .leading, spacing: 2) {
                     titleLine
@@ -350,7 +359,12 @@ private struct SessionParentRow: View {
         HStack(spacing: 5) {
             Text(secondaryLine)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                // While the main session is actively working (and not orchestrating
+                // drones), the line becomes the LIVE signal — "<Drone> · <action>"
+                // tinted in the active drone's hue — so the eye lands on it. Any
+                // other time it's the calm tertiary context strip.
+                .foregroundStyle(showLiveActivity ? AnyShapeStyle(session.activeColor)
+                                                   : AnyShapeStyle(.tertiary))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .layoutPriority(0)
@@ -363,13 +377,27 @@ private struct SessionParentRow: View {
         }
     }
 
-    /// Under-title context text. With drones running, keep the orchestration
-    /// summary; otherwise show the session's signature line — the actual
-    /// at-a-glance discriminator that separates same-repo rows.
+    /// True when the LIVE-activity line should replace the calm context strip: the
+    /// main session is actively using a tool AND it isn't orchestrating drones
+    /// (drones keep their own "orchestrating N agents" summary + live portraits).
+    private var showLiveActivity: Bool {
+        session.activeNow && session.drones.isEmpty
+    }
+
+    /// Under-title context text. Precedence:
+    ///   1. drones running → the orchestration summary (unchanged);
+    ///   2. else main session working now → "<Drone> · <action>" (the real-time
+    ///      "an agent is working here" signal);
+    ///   3. else → the session's signature line (branch · last-action · time).
     private var secondaryLine: String {
         let count = session.drones.count
         if count > 0 {
             return "orchestrating \(count) agent\(count == 1 ? "" : "s")"
+        }
+        if session.activeNow {
+            let action = session.currentAction.trimmingCharacters(in: .whitespacesAndNewlines)
+            return action.isEmpty ? session.activeName
+                                  : "\(session.activeName) · \(action)"
         }
         return session.contextLine
     }

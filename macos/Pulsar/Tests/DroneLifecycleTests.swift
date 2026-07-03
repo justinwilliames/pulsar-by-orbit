@@ -401,6 +401,34 @@ func runAll() async {
         await expect((r?.userNamed ?? false) == false, "userNamed stays false for an LLM title")
     }
 
+    // LIVE heartbeat: a PreToolUse ping stamps lastActiveAt + currentAction +
+    // activeCategory WITHOUT clobbering phase / lastUserMessage. This is the core
+    // of the "main session working now" feature.
+    await test("heartbeat stamps activeNow/currentAction without touching phase") {
+        let (reg, _) = makeRegistry()
+        // A normal turn-start first (phase working, user message moves the window).
+        await reg.note(sessionId: "s1", cwd: "/x/pulsar", phase: "working",
+                       isUserMessage: true, name: "go")
+        // Then a pure heartbeat — no phase, no user_message.
+        await reg.note(sessionId: "s1", cwd: nil, phase: nil,
+                       activeNow: true, currentAction: "Editing MissionsView.swift",
+                       activeCategory: "nova")
+        let r = await reg.activeSessions().first
+        await expect(r?.lastActiveAt != nil, "heartbeat stamped lastActiveAt")
+        await expect(r?.currentAction == "Editing MissionsView.swift", "currentAction recorded")
+        await expect(r?.activeCategory == "nova", "activeCategory recorded")
+        await expect(r?.phase == "working", "phase untouched by the heartbeat")
+        await expect(r?.name == "go", "name untouched by the heartbeat")
+        // A live session within the daemon's 30s window reads as active.
+        if let la = r?.lastActiveAt {
+            await expect(Date().timeIntervalSince(la) <= 30, "lastActiveAt is fresh (within 30s window)")
+        }
+    }
+
+    // NOTE: MissionSession.activeColor/.activeName (live-activity resolution) is
+    // NOT unit-tested here — DroneRegistry imports SwiftUI (Color), so it isn't
+    // compiled into this Foundation-only harness. It's covered by the app build.
+
     // MARK: - SessionIdentity: collision backstop (shortTag + non-branch monogram)
     //
     // The Session Signature's guaranteed-unique backstop. These drive the REAL

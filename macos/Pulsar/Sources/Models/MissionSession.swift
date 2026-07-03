@@ -38,12 +38,25 @@ struct MissionSession: Identifiable, Equatable {
     /// session index (empty when none). The primary auto-source for the board
     /// title — this is what the mission actually IS in the sidebar.
     let sidebarTitle: String
+    /// True when this MAIN session is actively using a tool right now (its
+    /// PreToolUse heartbeat landed within the daemon's 30s freshness window). The
+    /// real-time "an agent is working here" signal — distinct from the phase pill,
+    /// which stays "Working" for a whole turn even when idle.
+    let activeNow: Bool
+    /// What the session is doing right now ("Editing MissionsView.swift"), empty
+    /// unless `activeNow`.
+    let currentAction: String
+    /// The drone category for the live work ("voyager"|"nova"|"pulsar"), empty
+    /// unless `activeNow`. Drives `activeColor` / `activeName`.
+    let activeCategory: String
     /// The session's in-flight sub-agent drones, as running mission rows.
     let drones: [MissionTask]
 
     init(id: String, name: String, label: String, phase: Phase, lastSeen: Date,
          branch: String = "", repo: String = "", lastAction: String = "",
-         userNamed: Bool = false, sidebarTitle: String = "", drones: [MissionTask]) {
+         userNamed: Bool = false, sidebarTitle: String = "",
+         activeNow: Bool = false, currentAction: String = "", activeCategory: String = "",
+         drones: [MissionTask]) {
         self.id = id
         self.name = name
         self.label = label
@@ -54,7 +67,23 @@ struct MissionSession: Identifiable, Equatable {
         self.lastAction = lastAction
         self.userNamed = userNamed
         self.sidebarTitle = sidebarTitle
+        self.activeNow = activeNow
+        self.currentAction = currentAction
+        self.activeCategory = activeCategory
         self.drones = drones
+    }
+
+    /// The tint for the live-activity signal: the drone's locked hue when
+    /// `activeCategory` names a real drone (voyager/nova), else Pulsar indigo
+    /// (`.orbit`) for "pulsar" / unknown / empty.
+    var activeColor: Color {
+        isDrone(activeCategory) ? droneColor(for: activeCategory) : .orbit
+    }
+
+    /// The name for the live-activity signal: the drone's Role.capitalized —
+    /// e.g. "Voyager", "Nova" — when a real drone, else "Pulsar".
+    var activeName: String {
+        isDrone(activeCategory) ? activeCategory.capitalized : "Pulsar"
     }
 
     /// Branches too generic to serve as a title on their own — a "main" row tells

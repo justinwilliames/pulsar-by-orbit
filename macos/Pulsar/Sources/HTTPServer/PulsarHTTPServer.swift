@@ -388,6 +388,12 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 .sorted { $0.agentId < $1.agentId }
                 .map { SessionDronePayload(agent_id: $0.agentId, category: $0.category) }
             let sidebar = SidebarTitles.shared.title(for: record.sessionId) ?? ""
+            // A MAIN session counts as "active now" only if its last PreToolUse
+            // heartbeat landed within the last 30s — so the pulse fades shortly
+            // after the session goes quiet, instead of the phase pill's turn-long
+            // staleness. This is the whole point of the heartbeat layer.
+            let activeNow = record.lastActiveAt
+                .map { Date().timeIntervalSince($0) <= 30 } ?? false
             return SessionPayload(
                 session_id: record.sessionId,
                 name: record.name ?? "",
@@ -399,6 +405,9 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 last_action: record.lastAction ?? "",
                 user_named: record.userNamed ?? false,
                 sidebar_title: sidebar,
+                active_now: activeNow,
+                current_action: activeNow ? (record.currentAction ?? "") : "",
+                active_category: activeNow ? (record.activeCategory ?? "") : "",
                 drones: sessionDrones)
         }
         return SessionsPayload(sessions: sessions)
@@ -467,11 +476,24 @@ final class PulsarHTTPServer: @unchecked Sendable {
         let lastAction = (body["last_action"] as? String).flatMap {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
         }
+        // LIVE heartbeat fields from the PreToolUse hook. `active_now` = true means
+        // a MAIN session is firing a tool RIGHT NOW; the registry stamps liveness
+        // WITHOUT touching phase/lastUserMessage/dismissed. current_action /
+        // active_category ride along to tint + label the pulse. Other callers omit
+        // active_now (false), so nothing else marks a session live.
+        let activeNow = (body["active_now"] as? Bool) ?? false
+        let currentAction = (body["current_action"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
+        let activeCategory = (body["active_category"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
 
         await sessionRegistry.note(
             sessionId: sessionId, cwd: cwd, phase: phase, isUserMessage: isUserMessage,
             name: name, nameOverride: nameOverride, userNamed: userNamed,
-            branch: branch, repo: repo, lastAction: lastAction)
+            branch: branch, repo: repo, lastAction: lastAction,
+            activeNow: activeNow, currentAction: currentAction, activeCategory: activeCategory)
         await Self.broadcastSessions(
             sessionRegistry: sessionRegistry, audioQueue: audioQueue,
             sseBroadcaster: sseBroadcaster)
@@ -1647,6 +1669,12 @@ private struct SessionPayload: Encodable, Sendable {
     let user_named: Bool
     /// The REAL Claude Desktop sidebar title, resolved locally (empty when none).
     let sidebar_title: String
+    /// LIVE heartbeat layer (PreToolUse). `active_now` = the main session fired a
+    /// tool within the last 30s; the board pulses the parent + shows the action.
+    /// current_action/active_category are "" unless active_now.
+    let active_now: Bool
+    let current_action: String
+    let active_category: String
     let drones: [SessionDronePayload]
 }
 

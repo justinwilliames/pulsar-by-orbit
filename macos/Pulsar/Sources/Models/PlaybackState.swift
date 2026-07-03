@@ -153,6 +153,11 @@ struct SessionDTO: Codable, Sendable {
     /// The REAL Claude Desktop sidebar title (optional so an older daemon that
     /// omits it still decodes); the mapper defaults it to "".
     let sidebar_title: String?
+    /// LIVE heartbeat layer (PreToolUse). Optional so an older daemon that omits
+    /// them still decodes; the mapper defaults to false/"".
+    let active_now: Bool?
+    let current_action: String?
+    let active_category: String?
     let drones: [SessionDroneDTO]
 }
 

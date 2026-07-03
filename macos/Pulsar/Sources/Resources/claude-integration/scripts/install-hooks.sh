@@ -7,6 +7,7 @@
 #   • Stop            → chime.sh               (free turn-end sound, no voice)
 #   • SessionStart    → session-start-voice.sh (bespoke turn-end voice directive)
 #   • UserPromptSubmit→ turn-start.sh          (stamps turn start for chime.sh)
+#   • PreToolUse      → pretooluse.sh          (live "working now" heartbeat)
 #   • SubagentStart   → subagent-start.sh      (registers a drone's presence)
 #   • SubagentStop    → subagent-stop.sh       (fades a drone out)
 #   • statusLine      → statusline.sh          (Pulsar's persona-aware bar)
@@ -24,13 +25,14 @@ STOP_HOOK="$SCRIPT_DIR/stop-hook.sh"
 SESSION_HOOK="$SCRIPT_DIR/session-start-voice.sh"
 CHIME_HOOK="$SCRIPT_DIR/chime.sh"
 TURNSTART_HOOK="$SCRIPT_DIR/turn-start.sh"
+PRETOOL_HOOK="$SCRIPT_DIR/pretooluse.sh"
 SUBSTART_HOOK="$SCRIPT_DIR/subagent-start.sh"
 SUBSTOP_HOOK="$SCRIPT_DIR/subagent-stop.sh"
 STATUSLINE="$SCRIPT_DIR/statusline.sh"
 SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 
 for f in "$STOP_HOOK" "$SESSION_HOOK" "$CHIME_HOOK" "$TURNSTART_HOOK" \
-         "$SUBSTART_HOOK" "$SUBSTOP_HOOK" "$STATUSLINE"; do
+         "$PRETOOL_HOOK" "$SUBSTART_HOOK" "$SUBSTOP_HOOK" "$STATUSLINE"; do
   [ -f "$f" ] || { echo "Error: missing hook script $f" >&2; exit 1; }
   chmod +x "$f"
 done
@@ -42,7 +44,8 @@ mkdir -p "$(dirname "$SETTINGS")"
 cp "$SETTINGS" "$SETTINGS.pulsar-bak.$(date +%s 2>/dev/null || echo bak)" 2>/dev/null || true
 
 STOP_HOOK="$STOP_HOOK" SESSION_HOOK="$SESSION_HOOK" CHIME_HOOK="$CHIME_HOOK" \
-TURNSTART_HOOK="$TURNSTART_HOOK" SUBSTART_HOOK="$SUBSTART_HOOK" \
+TURNSTART_HOOK="$TURNSTART_HOOK" PRETOOL_HOOK="$PRETOOL_HOOK" \
+SUBSTART_HOOK="$SUBSTART_HOOK" \
 SUBSTOP_HOOK="$SUBSTOP_HOOK" STATUSLINE="$STATUSLINE" SETTINGS="$SETTINGS" python3 <<'PY'
 import json, os, sys
 
@@ -51,6 +54,7 @@ stop_cmd = os.environ["STOP_HOOK"]
 session_cmd = os.environ["SESSION_HOOK"]
 chime_cmd = os.environ["CHIME_HOOK"]
 turnstart_cmd = os.environ["TURNSTART_HOOK"]
+pretool_cmd = os.environ["PRETOOL_HOOK"]
 substart_cmd = os.environ["SUBSTART_HOOK"]
 substop_cmd = os.environ["SUBSTOP_HOOK"]
 statusline_cmd = os.environ["STATUSLINE"]
@@ -79,6 +83,10 @@ added_stop = ensure("Stop", stop_cmd, 5)
 added_session = ensure("SessionStart", session_cmd, 5)
 added_chime = ensure("Stop", chime_cmd, 5)
 added_turnstart = ensure("UserPromptSubmit", turnstart_cmd, 5)
+# PreToolUse — the live "working now" heartbeat, fired on every mid-turn tool
+# call. Appended ADDITIVELY alongside any existing PreToolUse hooks; ensure()
+# only adds when this exact command is absent, so re-running is a no-op.
+added_pretool = ensure("PreToolUse", pretool_cmd, 5)
 # Drone hooks — appended ADDITIVELY alongside any existing SubagentStart/
 # SubagentStop hooks (e.g. claudata, delegation-ledger). ensure() only adds
 # when this exact command is absent, so re-running is a no-op.
@@ -109,6 +117,7 @@ print(f"Stop hook (voice):     {'added' if added_stop else 'already present'}")
 print(f"Stop hook (chime):     {'added' if added_chime else 'already present'}")
 print(f"SessionStart hook:     {'added' if added_session else 'already present'}")
 print(f"UserPromptSubmit hook: {'added' if added_turnstart else 'already present'}")
+print(f"PreToolUse hook:       {'added' if added_pretool else 'already present'}")
 print(f"SubagentStart hook:    {'added' if added_substart else 'already present'}")
 print(f"SubagentStop hook:     {'added' if added_substop else 'already present'}")
 print(f"statusLine:            {sl_status}")

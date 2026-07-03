@@ -11,8 +11,8 @@ import Foundation
 /// THE COLLISION PROBLEM this closes: the identity colour is a 7-hue hash, so two
 /// sessions collide on colour ~1/7 of the time (guaranteed past 7 same-repo
 /// sessions). The old monogram derived from BRANCH initials, so N sessions on the
-/// same repo+branch (or non-git sessions with no branch at all — Justin's main
-/// sessions run in a non-git folder) collapsed to the SAME two letters. Colour +
+/// same repo+branch (or non-git sessions with no branch at all — a session whose
+/// cwd is not a git repo) collapsed to the SAME two letters. Colour +
 /// monogram could therefore be identical across two live rows.
 ///
 /// The fix, both guaranteed-distinct because both key on the always-unique

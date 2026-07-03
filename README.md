@@ -1,16 +1,19 @@
-# Pulsar
+<div align="center">
+
+<img src="assets/readme/pulsar-header.png" alt="Pulsar — it tells you the moment your code is done" width="640" />
 
 <p align="center">
-  <img src="assets/readme/pulsar.png" width="200" alt="Pulsar" />
+  <a href="https://github.com/justinwilliames/pulsar-by-orbit/actions/workflows/package-dmg.yml"><img src="https://github.com/justinwilliames/pulsar-by-orbit/actions/workflows/package-dmg.yml/badge.svg" alt="Build Pulsar" /></a>
+  <a href="https://github.com/justinwilliames/pulsar-by-orbit/releases/latest"><img src="https://img.shields.io/github/v/release/justinwilliames/pulsar-by-orbit?include_prereleases&label=latest&color=6366F1" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/license-MIT-6366F1" alt="License MIT" />
+  <img src="https://img.shields.io/badge/macOS-26%2B-6366F1" alt="macOS 26+" />
 </p>
 
-[![Build Pulsar](https://github.com/justinwilliames/pulsar-by-orbit/actions/workflows/package-dmg.yml/badge.svg)](https://github.com/justinwilliames/pulsar-by-orbit/actions/workflows/package-dmg.yml)
+</div>
 
 **Pulsar is a voice companion that lives in your menu bar and tells you — out loud — the moment your code is done, so you stop babysitting the screen.** It's a macOS menu-bar app for Claude Code. It speaks with a free, fully-local Mac voice: no account, no API key, no per-word cost, and nothing leaving your machine. Every line is synthesised by the built-in macOS `say` engine and played back on the spot.
 
 It has a set of signature lines — *"Pushed."*, *"All green."*, *"Sorted."* — **[Pulsar's canon](CANON.md)**, the fallback floor for any turn Claude doesn't compose its own line on.
-
-Forked from [speak](https://github.com/tomc98/speak) by Thomas Csere.
 
 **[→ Download the latest release](https://github.com/justinwilliames/pulsar-by-orbit/releases/latest)**
 
@@ -138,9 +141,14 @@ If you want Pulsar quieter, edit the suppression rules in `SKILL.md`.
 
 ---
 
+## Credits
+
+Pulsar grew out of [speak](https://github.com/tomc98/speak) by Thomas Csere — MIT-licensed, and the foundation the voice engine is built on.
+
 ## License
 
-MIT — same as upstream [tomc98/speak](https://github.com/tomc98/speak).
+MIT — see [LICENSE](LICENSE).
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=justinwilliames%2Fcomet-by-orbit%2Cjustinwilliames%2Fpulsar-by-orbit%2Cjustinwilliames%2Forbit-for-claude%2Cjustinwilliames%2Forion-by-orbit&type=date&legend=top-left">

@@ -34,12 +34,16 @@ struct MissionSession: Identifiable, Equatable {
     let lastAction: String
     /// True when the user manually renamed this session — the definitive title.
     let userNamed: Bool
+    /// The REAL Claude Desktop sidebar title, resolved locally from the app's
+    /// session index (empty when none). The primary auto-source for the board
+    /// title — this is what the mission actually IS in the sidebar.
+    let sidebarTitle: String
     /// The session's in-flight sub-agent drones, as running mission rows.
     let drones: [MissionTask]
 
     init(id: String, name: String, label: String, phase: Phase, lastSeen: Date,
          branch: String = "", repo: String = "", lastAction: String = "",
-         userNamed: Bool = false, drones: [MissionTask]) {
+         userNamed: Bool = false, sidebarTitle: String = "", drones: [MissionTask]) {
         self.id = id
         self.name = name
         self.label = label
@@ -49,6 +53,7 @@ struct MissionSession: Identifiable, Equatable {
         self.repo = repo
         self.lastAction = lastAction
         self.userNamed = userNamed
+        self.sidebarTitle = sidebarTitle
         self.drones = drones
     }
 
@@ -58,14 +63,18 @@ struct MissionSession: Identifiable, Equatable {
 
     /// The board title. Precedence, highest → lowest:
     ///   1. a user rename (definitive);
-    ///   2. the sticky/first-message name (or LLM title, which replaced the seed);
-    ///   3. a NON-generic branch (names the line of work when there's no name);
-    ///   4. the cwd label;
-    ///   5. a short id tag.
-    /// Branch outranks the label but NOT a real name — a good first message beats
-    /// "feat/x", while a bare repo label loses to it.
+    ///   2. the REAL Claude Desktop sidebar title (what the mission IS);
+    ///   3. the sticky/first-message name (or LLM title, which replaced the seed);
+    ///   4. a NON-generic branch (names the line of work when there's no name);
+    ///   5. the cwd label;
+    ///   6. a short id tag.
+    /// The sidebar title is the crux feature — it's the exact name the human sees
+    /// in Claude Desktop — so it leads every auto-source, losing only to a manual
+    /// rename. Branch outranks the label but NOT a real name.
     var displayTitle: String {
         if userNamed, !name.isEmpty { return name }
+        let sidebar = sidebarTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sidebar.isEmpty { return sidebar }
         if !name.isEmpty { return name }
         let b = branch.trimmingCharacters(in: .whitespaces)
         if !b.isEmpty, !Self.genericBranches.contains(b.lowercased()) { return b }

@@ -150,6 +150,9 @@ struct SessionDTO: Codable, Sendable {
     let repo: String?
     let last_action: String?
     let user_named: Bool?
+    /// The REAL Claude Desktop sidebar title (optional so an older daemon that
+    /// omits it still decodes); the mapper defaults it to "".
+    let sidebar_title: String?
     let drones: [SessionDroneDTO]
 }
 

@@ -387,6 +387,7 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 .filter { $0.sessionId == record.sessionId }
                 .sorted { $0.agentId < $1.agentId }
                 .map { SessionDronePayload(agent_id: $0.agentId, category: $0.category) }
+            let sidebar = SidebarTitles.shared.title(for: record.sessionId) ?? ""
             return SessionPayload(
                 session_id: record.sessionId,
                 name: record.name ?? "",
@@ -397,6 +398,7 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 repo: record.repo ?? "",
                 last_action: record.lastAction ?? "",
                 user_named: record.userNamed ?? false,
+                sidebar_title: sidebar,
                 drones: sessionDrones)
         }
         return SessionsPayload(sessions: sessions)
@@ -1643,6 +1645,8 @@ private struct SessionPayload: Encodable, Sendable {
     let repo: String
     let last_action: String
     let user_named: Bool
+    /// The REAL Claude Desktop sidebar title, resolved locally (empty when none).
+    let sidebar_title: String
     let drones: [SessionDronePayload]
 }
 

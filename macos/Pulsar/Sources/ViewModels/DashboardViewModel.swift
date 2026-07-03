@@ -244,6 +244,7 @@ final class DashboardViewModel {
                 repo: dto.repo ?? "",
                 lastAction: dto.last_action ?? "",
                 userNamed: dto.user_named ?? false,
+                sidebarTitle: dto.sidebar_title ?? "",
                 drones: drones)
         }
         .sorted { $0.lastSeen > $1.lastSeen }
@@ -274,7 +275,8 @@ final class DashboardViewModel {
             missionSessions[idx] = MissionSession(
                 id: s.id, name: trimmed, label: s.label, phase: s.phase,
                 lastSeen: s.lastSeen, branch: s.branch, repo: s.repo,
-                lastAction: s.lastAction, userNamed: true, drones: s.drones)
+                lastAction: s.lastAction, userNamed: true,
+                sidebarTitle: s.sidebarTitle, drones: s.drones)
         }
         try? await api.renameSession(id, to: trimmed)
     }

@@ -498,6 +498,69 @@ func runAll() async {
 
         unsetenv("PULSAR_STORAGE")
     }
+
+    // MARK: - MissionSession.displayTitle precedence (sidebar title tier)
+    //
+    // Mirrors MissionSession.displayTitle EXACTLY (that type imports SwiftUI, so
+    // it isn't compiled into this Foundation-only harness — keep this replica in
+    // lockstep with the real precedence ladder in
+    // Sources/Models/MissionSession.swift).
+    //   1. userNamed rename  >  2. sidebarTitle  >  3. name  >
+    //   4. non-generic branch  >  5. label  >  6. "#"+id-prefix
+    func displayTitle(id: String, name: String, label: String, branch: String,
+                      userNamed: Bool, sidebarTitle: String) -> String {
+        let generic: Set<String> = ["main", "master", "trunk", "develop", "dev", "head"]
+        if userNamed, !name.isEmpty { return name }
+        let sidebar = sidebarTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sidebar.isEmpty { return sidebar }
+        if !name.isEmpty { return name }
+        let b = branch.trimmingCharacters(in: .whitespaces)
+        if !b.isEmpty, !generic.contains(b.lowercased()) { return b }
+        if !label.isEmpty { return label }
+        return "#" + String(id.prefix(4))
+    }
+
+    await test("displayTitle: sidebar wins over name/branch/label, loses to userNamed") {
+        // sidebarTitle beats name (the LLM/first-message title).
+        await expect(
+            displayTitle(id: "a7f3b2", name: "First message here", label: "pulsar",
+                         branch: "feat/x", userNamed: false,
+                         sidebarTitle: "Comet, Pulsar, Orion enhancements")
+                == "Comet, Pulsar, Orion enhancements",
+            "sidebarTitle outranks name")
+
+        // But a manual rename still wins over the sidebar title.
+        await expect(
+            displayTitle(id: "a7f3b2", name: "My Rename", label: "pulsar",
+                         branch: "feat/x", userNamed: true,
+                         sidebarTitle: "Sidebar Name") == "My Rename",
+            "userNamed outranks sidebarTitle")
+
+        // Empty/whitespace sidebar falls through to name.
+        await expect(
+            displayTitle(id: "a7f3b2", name: "The Name", label: "pulsar",
+                         branch: "feat/x", userNamed: false,
+                         sidebarTitle: "   ") == "The Name",
+            "blank sidebarTitle falls through to name")
+
+        // No sidebar, no name → non-generic branch; generic branch skipped.
+        await expect(
+            displayTitle(id: "a7f3b2", name: "", label: "pulsar",
+                         branch: "feat/titles", userNamed: false,
+                         sidebarTitle: "") == "feat/titles",
+            "no sidebar/name → non-generic branch")
+        await expect(
+            displayTitle(id: "a7f3b2", name: "", label: "pulsar",
+                         branch: "main", userNamed: false,
+                         sidebarTitle: "") == "pulsar",
+            "generic branch skipped → label")
+
+        // Nothing set → short id tag.
+        await expect(
+            displayTitle(id: "a7f3b299", name: "", label: "",
+                         branch: "", userNamed: false, sidebarTitle: "") == "#a7f3",
+            "empty everything → #id-prefix")
+    }
 }
 
 // MARK: - Entry point

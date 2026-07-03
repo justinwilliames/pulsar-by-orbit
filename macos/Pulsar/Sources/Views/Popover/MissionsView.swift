@@ -236,24 +236,27 @@ private struct SessionParentRow: View {
             // a plain Button that excludes the trailing pill + dismiss (x), so those
             // controls keep their own hit areas and never fire a jump. Disabled
             // while renaming so a click in the TextField edits rather than warps.
-            Button(action: openSession) {
-                HStack(spacing: 10) {
-                    // The chip is the parent's RESTING identity; when drones run, the
-                    // nested rows below carry the live portraits. Keeping the chip here
-                    // (not a drone portrait) means the parent stays identifiable even
-                    // mid-swarm.
-                    IdentityChip(color: session.identityColor, monogram: session.monogram, size: 24)
+            // The jump target is the leading content (chip + title/context). It is
+            // NOT a Button: the title area contains a nested rename Button (the
+            // pencil), and SwiftUI breaks hit-testing for a Button nested in another
+            // Button's label — that silently swallowed every row tap. An
+            // onTapGesture coexists with the child rename Button (the child wins its
+            // own hits; this catches the rest). openSession() self-guards !isEditing.
+            HStack(spacing: 10) {
+                // The chip is the parent's RESTING identity; when drones run, the
+                // nested rows below carry the live portraits. Keeping the chip here
+                // (not a drone portrait) means the parent stays identifiable even
+                // mid-swarm.
+                IdentityChip(color: session.identityColor, monogram: session.monogram, size: 24)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        titleLine
-                        secondaryStrip
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    titleLine
+                    secondaryStrip
                 }
-                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
-            .disabled(isEditing)   // renaming: clicks edit the field, don't jump
+            .contentShape(Rectangle())
+            .onTapGesture { openSession() }
             .help("Open this session in Claude")
 
             Spacer(minLength: 8)
@@ -280,8 +283,13 @@ private struct SessionParentRow: View {
         .overlay(
             // A faint highlight on hover so the (clickable) row reads as live —
             // calm, no border, suppressed while renaming to avoid competing chrome.
+            // allowsHitTesting(false) is LOAD-BEARING: a filled Shape hit-tests even
+            // at opacity 0, so without this the overlay sat on top of the row and
+            // ATE every click — which is why neither the Button nor the onTapGesture
+            // ever fired. Purely visual now; taps pass through to the row.
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color.primary.opacity(isHovering && !isEditing ? 0.05 : 0))
+                .allowsHitTesting(false)
         )
         .onHover { isHovering = $0 }
         .contextMenu {
@@ -377,7 +385,7 @@ private struct SessionParentRow: View {
         // this app is LSUIElement=true (menu-bar accessory, no key window), and
         // from that context NSWorkspace.open silently no-ops for URL schemes.
         // A separate `open` process routes through LaunchServices reliably and
-        // activates Claude — this is the exact path confirmed working by hand.
+        // activates Claude — the exact path confirmed working.
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         proc.arguments = ["claude://resume?session=\(session.id)"]

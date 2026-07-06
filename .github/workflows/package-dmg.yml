@@ -123,6 +123,20 @@ jobs:
             cp -R assets/portraits "$APP_PATH/Contents/Resources/assets/portraits"
           fi
 
+          # Face PNGs (Pulsar + drone mouth/blink frames + OrbitLogo): SPM copies
+          # them into the build's resource bundle; extract into Contents/Resources
+          # so Bundle.main / NSImage(named:) can find them. WITHOUT this the DMG
+          # shipped with BLANK heads — the local build-pulsar-app.sh did this copy,
+          # CI did not (a parity gap that blanked every public release's faces).
+          RES_BUNDLE=$(find macos/Pulsar/.build -name "Pulsar_Pulsar.bundle" -path "*/release/*" 2>/dev/null | head -1)
+          if [ -n "$RES_BUNDLE" ]; then
+            find "$RES_BUNDLE" -maxdepth 1 -name "*.png" -exec cp {} "$APP_PATH/Contents/Resources/" \;
+            echo "Copied $(ls "$APP_PATH/Contents/Resources/"*.png 2>/dev/null | wc -l | tr -d ' ') face/logo PNGs from the SPM resource bundle."
+          else
+            echo "::error::SPM resource bundle (Pulsar_Pulsar.bundle) not found — heads would ship BLANK"
+            exit 1
+          fi
+
           # Claude voice-integration payload — the exact files the in-app
           # installer drops into ~/.claude (skill + hooks + say.sh + the
           # uninstall script for manual reversal). Mirrors build-pulsar-app.sh's

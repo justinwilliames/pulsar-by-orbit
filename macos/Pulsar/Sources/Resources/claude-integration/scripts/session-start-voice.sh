@@ -27,7 +27,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SAY="$SCRIPT_DIR/say.sh"
 
 # Daemon up? If not, stay dormant — emit nothing.
-curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1 || exit 0
+#
+# BOOT-RACE GUARD: after a reboot, Claude Code sessions can start BEFORE launchd
+# finishes bringing the Pulsar daemon up. A single probe would lose that race and
+# mark the whole session voice-dormant even though the daemon lands a second later.
+# So poll briefly (~5s) for it to come up. This is CHEAP when the daemon is down
+# for real (a refused localhost connection fails instantly, so each miss costs only
+# the 0.5s sleep) and INSTANT when it's already up (first probe wins) — it only
+# ever waits during the narrow post-boot window.
+_up=""
+for _ in $(seq 1 10); do
+  if curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1; then _up=1; break; fi
+  sleep 0.5
+done
+[ -z "$_up" ] && exit 0
 
 # One settings fetch; parse everything from it.
 SETTINGS=$(curl -sf --connect-timeout 1 "$DAEMON/settings" 2>/dev/null || echo "{}")

@@ -402,10 +402,13 @@ actor AudioQueueActor {
     /// refresh kept a GHOST (a drone whose Stop was lost) immortal for as long as
     /// any live sibling of the same category kept speaking. With that refresh
     /// removed, the backstop no longer needs to cover a silent long-runner via
-    /// speech, so it can be much shorter: 10 min self-heals a genuinely dropped
-    /// Stop quickly while still comfortably outlasting any real gap between a
-    /// spawn and its reliable Stop.
-    static let droneStaleAfter: TimeInterval = 600
+    /// speech, so the backstop only needs to outlast a real sub-agent's lifetime.
+    /// 30 min: a genuinely dropped Stop self-heals within the half hour, while a
+    /// long-running sub-agent keeps its drone (and its portrait on the board —
+    /// the operator watches those) for the full duration instead of vanishing at
+    /// 10 min. Also keeps the parent session reading "working" via hasDrones for
+    /// the whole run rather than false-healing to paused mid-work.
+    static let droneStaleAfter: TimeInterval = 1800
 
     /// Record a newly-spawned sub-agent as in-flight under its drone category.
     ///

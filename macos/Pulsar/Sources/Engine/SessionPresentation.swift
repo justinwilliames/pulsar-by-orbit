@@ -99,10 +99,18 @@ enum SessionPresentation {
     /// Heartbeat freshness window for "actively using a tool right now".
     static let activeWindow: TimeInterval = 30
     /// Ceiling on how long a phase=="working" session may sit with NO recent
-    /// heartbeat and NO fresh user message before the board stops believing the
-    /// latch and self-heals to waiting. Covers long model "thinking" gaps between
-    /// tools without letting a dropped Stop lie for 14 days.
-    static let workingCeiling: TimeInterval = 300
+    /// heartbeat, NO in-flight drone, and NO fresh user message before the board
+    /// stops believing the latch and self-heals to waiting.
+    ///
+    /// This must comfortably outlast a real WORKING gap — the big one being a
+    /// long sub-agent run: the sub-agent does the work while the MAIN session
+    /// fires no tools, so the parent's heartbeat goes quiet for many minutes even
+    /// though it's genuinely busy (the exact "shows paused while a sub-agent is
+    /// running" bug). 30 min covers deep sub-agent work and long model thinking;
+    /// a genuinely dropped Stop still clears within the half hour instead of the
+    /// old 14-day phantom. Erring toward "working" is deliberate — on a
+    /// what's-happening board, a briefly-stale "working" beats a false "paused".
+    static let workingCeiling: TimeInterval = 1800
 
     /// The transmit-4/render-3 status per the engineering pair's state machine:
     ///   • "active"  — heartbeat within 30s (self-expiring truth);

@@ -664,11 +664,19 @@ func runAll() async {
             phase: "working", lastActiveAt: now.addingTimeInterval(-120),
             lastUserMessage: now.addingTimeInterval(-60), hasDrones: false, now: now)
         await expect(s.status == "working" && !s.stale, "recent user msg keeps working alive")
-        // THE PHANTOM-WORKING KILL: phase latched "working", nothing moved for
-        // 10 minutes → self-heals to waiting with stale provenance.
+        // REGRESSION (the "paused while a sub-agent is running" bug): main loop
+        // quiet ~7 min (sub-agent doing the work, no attached drone), turn still
+        // open → must stay WORKING, not false-heal to paused. Would have broken
+        // under the old 300s ceiling.
         s = SessionPresentation.deriveStatus(
-            phase: "working", lastActiveAt: now.addingTimeInterval(-600),
-            lastUserMessage: now.addingTimeInterval(-600), hasDrones: false, now: now)
+            phase: "working", lastActiveAt: now.addingTimeInterval(-420),
+            lastUserMessage: now.addingTimeInterval(-420), hasDrones: false, now: now)
+        await expect(s.status == "working" && !s.stale, "7min-quiet working turn stays working (sub-agent run)")
+        // THE PHANTOM-WORKING KILL: phase latched "working", nothing moved for
+        // over 30 minutes → self-heals to waiting with stale provenance.
+        s = SessionPresentation.deriveStatus(
+            phase: "working", lastActiveAt: now.addingTimeInterval(-2000),
+            lastUserMessage: now.addingTimeInterval(-2000), hasDrones: false, now: now)
         await expect(s.status == "waiting" && s.stale, "dropped Stop self-heals → waiting+stale")
         // Clean Stop edge → waiting, NOT stale.
         s = SessionPresentation.deriveStatus(

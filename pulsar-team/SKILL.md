@@ -246,7 +246,7 @@ Each drone reads R4 and writes a ≤300-word sign-off:
 
 For each drone at each spawn, pick the model by the *reasoning depth its lens demands this round*:
 
-- **Fable 5 (`claude-fable-5`)** — apex tier, reserved for the R4 cross-round orchestrator synthesis (where depth AND judgment are both load-bearing) or any single lens where the target is unusually complex and judgment-heavy. Costs ~2× Opus — use sparingly, not by default.
+- **Fable 5 (`claude-fable-5`)** — apex tier, reserved for the R4 cross-round orchestrator synthesis (where depth AND judgment are both load-bearing) or any single lens where the target is unusually complex and judgment-heavy. Costs ~2× Opus — use sparingly, not by default. If Fable is unavailable (access lapsed), substitute Opus 4.8 with ultrathink for that lens — never silently drop apex work to Sonnet.
 - **Opus** — deep, judgement-heavy lenses: architecture + correctness (Sentinel), data-model + scaling (Voyager), brand/narrative taste (Nebula), and the synthesis/escalation seat (Pulsar). Also any drone whose Round-3 convergence or Round-4 synthesis hinges on reconciling conflicting evidence.
 - **Sonnet** — craft, flow, and positioning lenses that are sharp but bounded: UI craft (Nova), UX flow (Atlas), growth story (Echo). Sonnet is the default for these — reach for Opus only if the specific target makes the lens unusually deep this round.
 - **Haiku** — genuinely narrow, high-volume sub-tasks a lens might spin off (tag every string, check every route, enumerate every error state). Not for a full drone diagnosis.

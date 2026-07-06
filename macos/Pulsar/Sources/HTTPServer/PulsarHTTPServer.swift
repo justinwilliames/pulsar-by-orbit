@@ -422,7 +422,12 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 sidebar_title: sidebar,
                 active_now: activeNow,
                 current_action: activeNow ? (record.currentAction ?? "") : "",
-                active_category: activeNow ? (record.activeCategory ?? "") : "",
+                // The last-known worker category is emitted ALWAYS (not gated on
+                // activeNow) so the board can keep the drone you were just working
+                // with on the row while the turn WAITS for you — it only snaps back
+                // to Pulsar if the session genuinely never had a specific drone.
+                // The live-action line/pulse still gate on active_now above.
+                active_category: record.activeCategory ?? "",
                 title: title,
                 status: derived.status,
                 stale: derived.stale,

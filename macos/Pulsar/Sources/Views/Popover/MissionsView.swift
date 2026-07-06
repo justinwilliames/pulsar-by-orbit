@@ -390,9 +390,17 @@ private struct SessionParentRow: View {
     /// reads as the anchor above its swarm.
     @ViewBuilder
     private var parentMark: some View {
+        // The category PERSISTS: the drone you were last working with stays on the
+        // row while the turn waits for you ("Nova's still here, waiting on your
+        // reply"), instead of snapping back to Pulsar the instant it goes idle.
+        // Only a genuinely-live row breathes; a waiting one holds its last face
+        // still. Pure-Pulsar/never-worked sessions get the per-session identity
+        // ring so they still read apart; a specific drone rings in its own hue.
         let live = isLive
-        let category = live ? (session.activeCategory.isEmpty ? "pulsar" : session.activeCategory) : "pulsar"
-        let ring = live ? session.activeColor : session.identityColor
+        let category = session.activeCategory.isEmpty ? "pulsar" : session.activeCategory
+        let hasSpecificDrone = category != "pulsar"
+        let ring = live ? session.activeColor
+            : (hasSpecificDrone ? droneColor(for: session.activeCategory) : session.identityColor)
         Image(nsImage: NSImage(named: "\(category)-mouth-0")
                 ?? NSImage(named: "pulsar-mouth-0") ?? NSImage())
             .resizable()

@@ -268,16 +268,9 @@ private struct SessionParentRow: View {
             // onTapGesture coexists with the child rename Button (the child wins its
             // own hits; this catches the rest). openSession() self-guards !isEditing.
             HStack(spacing: 10) {
-                // The chip is the parent's RESTING identity; when drones run, the
-                // nested rows below carry the live portraits. Keeping the chip here
-                // (not a drone portrait) means the parent stays identifiable even
-                // mid-swarm.
-                // The chip BREATHES while the main session is actively using a
-                // tool (activeNow) — the same living-work pulse the drone portraits
-                // use, so a working main session visibly reads as alive rather than
-                // relying on the (turn-long, stale-prone) phase pill alone.
-                IdentityChip(color: session.identityColor, monogram: session.monogram, size: 24)
-                    .modifier(BreathingModifier(active: session.activeNow))
+                // LIVE → the working drone's FACE (breathing); IDLE → the resting
+                // monogram identity chip. See `parentMark`.
+                parentMark
 
                 VStack(alignment: .leading, spacing: 2) {
                     titleLine
@@ -382,6 +375,34 @@ private struct SessionParentRow: View {
     /// dropped on LIVE rows — activity is the signal there.
     private var isLive: Bool {
         session.activeNow || !session.drones.isEmpty
+    }
+
+    /// The leading mark. LIVE → the working drone's PORTRAIT (a real robot face),
+    /// breathing: the `activeCategory` decides whose face — build work wears
+    /// Nova's green face, exploring Voyager's amber, orchestration/other Pulsar's
+    /// indigo — so a glance shows WHO is working, which is what the operator
+    /// actually watches for. IDLE → the deterministic monogram chip, the
+    /// per-session distinguisher when there's nothing live to show. A little
+    /// larger than the 26pt nested drone portraits so the parent still reads as
+    /// the anchor above its swarm.
+    @ViewBuilder
+    private var parentMark: some View {
+        if isLive {
+            let cat = session.activeCategory.isEmpty ? "pulsar" : session.activeCategory
+            Image(nsImage: NSImage(named: "\(cat)-mouth-0")
+                    ?? NSImage(named: "pulsar-mouth-0") ?? NSImage())
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(session.activeColor, lineWidth: 1.5))
+                .modifier(BreathingModifier(active: true))
+        } else {
+            IdentityChip(color: session.identityColor, monogram: session.monogram, size: 24)
+        }
     }
 
     private var secondaryStrip: some View {

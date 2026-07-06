@@ -403,7 +403,24 @@ struct FloatingHeadsView: View {
         if !viewModel.isShowActiveAgents, isDrone(viewModel.playback.currentAgentCategory) {
             return nil
         }
-        return viewModel.playback.currentText
+        return Self.clampedCaption(viewModel.playback.currentText)
+    }
+
+    /// A subtitle is a GLANCEABLE line, not a transcript. A very long spoken line
+    /// (esp. a drone's status announcement) grew the bubble past the bottom of the
+    /// screen and hard-cropped. Cap the DISPLAYED text at ~4 lines — the full line
+    /// still plays as audio and is kept verbatim in history. Truncates on a word
+    /// boundary with an ellipsis so it reads as intentionally shortened, not cut.
+    static let maxCaptionChars = 220
+    static func clampedCaption(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxCaptionChars else { return trimmed }
+        let cut = String(trimmed.prefix(maxCaptionChars))
+        if let lastSpace = cut.lastIndex(of: " ") {
+            return cut[..<lastSpace].trimmingCharacters(in: .whitespaces) + "…"
+        }
+        return cut + "…"
     }
 
     /// A stable identity for the caption's speaker — the drone category, else

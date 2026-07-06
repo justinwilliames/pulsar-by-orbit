@@ -72,17 +72,24 @@ KEYWORDS = [
     (("write", "draft", "copy", "doc", "changelog", "prose", "blog", "content"), "nebula"),
 ]
 
+# "general-purpose" is the DEFAULT spawn type — almost every real sub-agent
+# uses it, with the actual role stated in the prompt ("refactor the view",
+# "review the diff", "explore the repo"). Hard-mapping it to atlas made the
+# WHOLE crew show as identical grey atlas drones, hiding what each is doing.
+# So for a generalist type, prefer the keyword match on the task text FIRST;
+# atlas is the fallback only when the task gives no role signal at all.
+GENERALIST_TYPES = {"general-purpose", "general", "generalist", ""}
+
 category = TYPE_MAP.get(agent_type, "")
-if not category:
+if not category or agent_type in GENERALIST_TYPES:
     for words, cat in KEYWORDS:
         if any(w in agent_type for w in words) or any(w in prompt for w in words):
             category = cat
             break
 if not category:
-    # Genuinely unrecognised: not in TYPE_MAP and no keyword hit. Emit the
-    # distinct "unknown" category (the daemon/registry renders it as a neutral
-    # drone). Atlas is NEVER a fallback — it is reserved for general-purpose.
-    category = "unknown"
+    # A generalist type with no role signal → atlas (its reserved home);
+    # a genuinely unrecognised type with no keyword hit → the neutral "unknown".
+    category = "atlas" if agent_type in GENERALIST_TYPES else "unknown"
 
 out = {"agent_id": agent_id, "category": category}
 if session_id:

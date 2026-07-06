@@ -23,15 +23,16 @@ struct MissionsView: View {
         }
     }
 
-    /// "N sessions · M paused" summary from live counts, with the paused
-    /// segment rendered in the waiting-phase ORANGE so it actually reads (plain
-    /// .secondary made it invisible). Composed as a single Text so the two tints
-    /// sit on one line.
+    /// Summary line, activity-forward: lead with what's HAPPENING (working/active
+    /// sessions, green) then what's parked (paused, orange). The board's job is
+    /// "what's happening across my sessions right now" — so the live count is the
+    /// headline, not the waiting count. Composed as one Text so the tints share a
+    /// line.
     private var summaryLine: Text {
-        let count = sessions.count
-        let paused = sessions.filter { $0.phase == .waiting }.count
-        var line = Text("\(count) session\(count == 1 ? "" : "s")")
-            .foregroundColor(.secondary)
+        let working = sessions.filter { $0.phase != .waiting }.count
+        let paused = sessions.count - working
+        var line = Text("\(working) working")
+            .foregroundColor(working > 0 ? .green : .secondary)
         if paused > 0 {
             line = line
                 + Text(" · ").foregroundColor(.secondary)
@@ -310,7 +311,11 @@ private struct SessionParentRow: View {
         }
         .padding(8)
         .background(
-            (session.phase == .waiting ? Color.orange.opacity(0.10) : Color.orbit.opacity(0.08)),
+            // LIVE rows glow in their drone's hue; waiting rows stay orange;
+            // idle rows keep the calm orbit tint.
+            (isLive ? session.activeColor.opacity(0.12)
+                    : session.phase == .waiting ? Color.orange.opacity(0.10)
+                    : Color.orbit.opacity(0.08)),
             in: RoundedRectangle(cornerRadius: 8)
         )
         .overlay(
@@ -369,39 +374,43 @@ private struct SessionParentRow: View {
         }
     }
 
-    /// Under-title context strip: the context line (or orchestration summary while
-    /// drones run) PLUS the always-present `shortTag` as a subtle, monospaced
-    /// trailing tag. The tag is the collision backstop the human can point at — so
-    /// even if colour + branch + last-action all match, the two rows still read
-    /// apart ("the #a7f3 one"). The context line truncates first (lower layout
-    /// priority) so the tag is never the thing that gets clipped off the 360pt row.
-    private var secondaryStrip: some View {
-        HStack(spacing: 5) {
-            Text(secondaryLine)
-                .font(.caption2)
-                // While the main session is actively working (and not orchestrating
-                // drones), the line becomes the LIVE signal — "<Drone> · <action>"
-                // tinted in the active drone's hue — so the eye lands on it. Any
-                // other time it's the calm tertiary context strip.
-                .foregroundStyle(showLiveActivity ? AnyShapeStyle(session.activeColor)
-                                                   : AnyShapeStyle(.tertiary))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(0)
-            Text(session.shortTag)
-                .font(.caption2.monospaced())
-                .foregroundStyle(.quaternary)
-                .lineLimit(1)
-                .fixedSize()
-                .layoutPriority(1)
-        }
+    /// Under-title context strip. When the row is LIVE (activeNow or drones running)
+    /// the activity line is the visual hero: a small breathing dot in the session's
+    /// active hue precedes the text, which renders at `.caption.weight(.medium)` in
+    /// that same hue. On an idle row the calm treatment is preserved exactly as-is
+    /// (`.caption2`, `.tertiary`, plus the trailing `shortTag`). The `shortTag` is
+    /// dropped on LIVE rows — activity is the signal there.
+    private var isLive: Bool {
+        session.activeNow || !session.drones.isEmpty
     }
 
-    /// True when the LIVE-activity line should replace the calm context strip: the
-    /// main session is actively using a tool AND it isn't orchestrating drones
-    /// (drones keep their own "orchestrating N agents" summary + live portraits).
-    private var showLiveActivity: Bool {
-        session.activeNow && session.drones.isEmpty
+    private var secondaryStrip: some View {
+        HStack(spacing: 5) {
+            if isLive {
+                Circle()
+                    .fill(session.activeColor)
+                    .frame(width: 6, height: 6)
+                    .modifier(BreathingModifier(active: true))
+                Text(secondaryLine)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(AnyShapeStyle(session.activeColor))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } else {
+                Text(secondaryLine)
+                    .font(.caption2)
+                    .foregroundStyle(AnyShapeStyle(.tertiary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(0)
+                Text(session.shortTag)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.quaternary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .layoutPriority(1)
+            }
+        }
     }
 
     /// Under-title context text. Precedence:

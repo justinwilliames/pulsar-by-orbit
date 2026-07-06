@@ -42,12 +42,22 @@ tool=$(printf '%s' "$input" | /usr/bin/jq -r '.tool_name // ""' 2>/dev/null)
 [ "$tool" = "Task" ] && exit 0
 
 # Categorise the tool into an ACTIVE drone category (mirrors subagent-start.sh's
-# taxonomy): read-ish tools → voyager (explorer), write/exec → nova (builder),
-# anything else → pulsar (the generic orchestrator).
+# taxonomy) so the board shows WHICH kind of work is happening — not one drone for
+# everything. Read-ish → voyager (explorer); file writes → nova (builder); a Bash
+# command is split by WHAT it does — tests/builds/checks → sentinel (verifying),
+# everything else → pulsar (generic orchestration). Bash used to map to nova, and
+# since Bash + edits are the commonest tools that made almost EVERY session read
+# as Nova; splitting Bash restores variety and meaning to the face.
 case "$tool" in
   Read|Grep|Glob|LS|WebFetch|WebSearch|NotebookRead) category="voyager" ;;
   Edit|Write|MultiEdit|NotebookEdit)                 category="nova" ;;
-  Bash)                                              category="nova" ;;
+  Bash)
+    cmd=$(printf '%s' "$input" | /usr/bin/jq -r '.tool_input.command // ""' 2>/dev/null)
+    case "$cmd" in
+      *test*|*build*|*lint*|*pytest*|*jest*|*vitest*|*xcodebuild*|*cargo*|*" check"*)
+        category="sentinel" ;;   # running tests / builds / checks = verifying
+      *) category="pulsar" ;;    # generic command execution = orchestrator
+    esac ;;
   *)                                                 category="pulsar" ;;
 esac
 

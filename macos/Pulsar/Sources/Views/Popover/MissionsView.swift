@@ -219,9 +219,9 @@ struct MissionsView: View {
 
 /// A calm "breathing" pulse — a small scale + opacity oscillation that reads as
 /// living work, not a toy. Inert (identity) when `active` is false, so
-/// paused/done/blocked things sit still. Used by BOTH the running drone portrait
-/// AND the parent IdentityChip (which breathes while the MAIN session is actively
-/// using a tool). File-private so both views can share the one implementation.
+/// paused/done/blocked things sit still. Used by BOTH the nested drone portraits
+/// AND the parent face (which breathes while the session is live). File-private
+/// so both views share the one implementation.
 private struct BreathingModifier: ViewModifier {
     let active: Bool
     @State private var breathe = false
@@ -377,32 +377,33 @@ private struct SessionParentRow: View {
         session.activeNow || !session.drones.isEmpty
     }
 
-    /// The leading mark. LIVE → the working drone's PORTRAIT (a real robot face),
-    /// breathing: the `activeCategory` decides whose face — build work wears
-    /// Nova's green face, exploring Voyager's amber, orchestration/other Pulsar's
-    /// indigo — so a glance shows WHO is working, which is what the operator
-    /// actually watches for. IDLE → the deterministic monogram chip, the
-    /// per-session distinguisher when there's nothing live to show. A little
-    /// larger than the 26pt nested drone portraits so the parent still reads as
-    /// the anchor above its swarm.
+    /// The leading mark is ALWAYS a face — every session is a Pulsar orchestrator
+    /// at rest, wearing a specific drone's face only while that drone works.
+    ///   • LIVE  → the working drone's portrait (by `activeCategory`), breathing,
+    ///     ringed in its hue: build work wears Nova's green face, exploring
+    ///     Voyager's amber, orchestration/MCP/other Pulsar's indigo — so a glance
+    ///     shows WHO is working.
+    ///   • IDLE  → Pulsar's own face, still, ringed in the session's deterministic
+    ///     identity colour — the per-session distinguisher (backed by the `#tag`
+    ///     in the context line), so N resting sessions still read apart.
+    /// 28pt, a touch larger than the 26pt nested drone portraits, so the parent
+    /// reads as the anchor above its swarm.
     @ViewBuilder
     private var parentMark: some View {
-        if isLive {
-            let cat = session.activeCategory.isEmpty ? "pulsar" : session.activeCategory
-            Image(nsImage: NSImage(named: "\(cat)-mouth-0")
-                    ?? NSImage(named: "pulsar-mouth-0") ?? NSImage())
-                .resizable()
-                .interpolation(.high)
-                .scaledToFill()
-                .frame(width: 28, height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(session.activeColor, lineWidth: 1.5))
-                .modifier(BreathingModifier(active: true))
-        } else {
-            IdentityChip(color: session.identityColor, monogram: session.monogram, size: 24)
-        }
+        let live = isLive
+        let category = live ? (session.activeCategory.isEmpty ? "pulsar" : session.activeCategory) : "pulsar"
+        let ring = live ? session.activeColor : session.identityColor
+        Image(nsImage: NSImage(named: "\(category)-mouth-0")
+                ?? NSImage(named: "pulsar-mouth-0") ?? NSImage())
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+            .frame(width: 28, height: 28)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(ring, lineWidth: 1.5))
+            .modifier(BreathingModifier(active: live))
     }
 
     private var secondaryStrip: some View {
@@ -491,28 +492,3 @@ private struct SessionParentRow: View {
     }
 }
 
-// MARK: - Identity chip
-
-/// A deterministic colour+monogram chip — the pre-attentive session distinguisher
-/// on the Missions board. Colour is hashed from the session id (an accelerant);
-/// the monogram carries identity as TEXT so it survives colour-blindness and any
-/// hash collision. Palette is sourced from the drone hues so chips and nested
-/// drone rows read as one calm family.
-private struct IdentityChip: View {
-    let color: Color
-    let monogram: String
-    var size: CGFloat = 24
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.265, style: .continuous)
-            .fill(color.opacity(0.9))
-            .frame(width: size, height: size)
-            .overlay(
-                Text(monogram)
-                    .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-            )
-    }
-}

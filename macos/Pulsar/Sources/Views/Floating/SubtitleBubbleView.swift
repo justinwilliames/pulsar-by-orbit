@@ -35,10 +35,12 @@ struct SubtitleBubbleView: View {
     /// drone's colour themes the rim when a sub-agent owns the line.
     var activeColor: Color = .orbitLight
 
-    /// Bubble box max width. Kept NARROWER than the hosting panel width (280) by
-    /// ≥ the glow/shadow radius on each side, so the outer glow fades fully
-    /// inside the panel and never hard-cuts at the left/right edge.
-    static let maxWidth: CGFloat = 248
+    /// Bubble box max width. Widened so a long line wraps into a SHORT, readable
+    /// block instead of a tall narrow column (which stacked ~13 lines and ran off
+    /// the bottom of the screen). The hosting panel is this same width; the caption
+    /// is inset from the panel edge by the glow margin (see FloatingHeadsView's
+    /// captionEdgePadding), so the outer glow still fades fully inside the panel.
+    static let maxWidth: CGFloat = 440
     private let tailHeight: CGFloat = 8
     /// Reserve on every side for the bubble's outer glow/shadow to fade before
     /// the panel edge (max core-shadow radius ≈ 11pt + rim blur ≈ 6pt). Used by

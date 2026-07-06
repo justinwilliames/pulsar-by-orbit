@@ -11,11 +11,15 @@ struct MissionsView: View {
 
     private var sessions: [MissionSession] {
         viewModel.missionSessions.sorted {
-            // Needs-you floats to the top; then most-recent first.
+            // Working/active sessions float to the top; paused ("Needs you")
+            // sessions sit beneath them. Within each group, most-recent first,
+            // keyed on the USER's own last message (the board's real recency key
+            // — machine churn can't reorder rows), falling back to lastSeen only
+            // against an older daemon that doesn't ship it.
             if ($0.phase == .waiting) != ($1.phase == .waiting) {
-                return $0.phase == .waiting
+                return $1.phase == .waiting   // a working peer outranks a paused one
             }
-            return $0.lastSeen > $1.lastSeen
+            return ($0.lastUserMessage ?? $0.lastSeen) > ($1.lastUserMessage ?? $1.lastSeen)
         }
     }
 
@@ -176,18 +180,34 @@ struct MissionsView: View {
             .modifier(BreathingModifier(active: running))
     }
 
+    /// The empty state leads with the DEFINITION — the one sentence the 2026-07-06
+    /// review found the feature never had (Echo's line in the sand: it ships
+    /// user-visible in v1). Pulsar's own portrait anchors it (the solo-Pulsar
+    /// anchor the engineering pair endorsed for the crew's event-scoped idle),
+    /// replacing the generic sparkles glyph.
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 28))
-                .foregroundStyle(Color.orbit)
-            Text("No active missions")
+            Image(nsImage: NSImage(named: "pulsar-mouth-0") ?? NSImage())
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+                .frame(width: 34, height: 34)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.orbitLight.opacity(0.7), lineWidth: 1.5)
+                )
+            Text("No missions yet")
                 .font(.caption.weight(.medium))
-            Text("When Claude Code sessions run, they'll appear here grouped by session.")
+            Text("Every Claude session you've got running — flagged the moment one needs you back.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Start a Claude Code session and it appears here.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)

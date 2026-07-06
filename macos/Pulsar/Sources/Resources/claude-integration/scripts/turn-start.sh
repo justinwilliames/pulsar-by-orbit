@@ -47,6 +47,19 @@ prompt=$(printf '%s' "$input" | /usr/bin/jq -r '.prompt // ""' 2>/dev/null)
 local_name=$(printf '%s' "$prompt" | /usr/bin/head -n 1 \
   | /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | /usr/bin/cut -c1-60)
 
+# SESSION-KIND classifier (Missions admission control). A scheduled-task /
+# automation fire submits machine XML as its prompt — it is NOT a human session
+# and must never count as a mission (it would inflate the board count AND move
+# the 7-day window, since these arrive as user_message:true). We still POST the
+# activity (so the record exists and is debuggable) but stamp kind:"scheduled";
+# the daemon excludes that kind from the board at the payload boundary. The
+# LLM titler is ALSO skipped for these (it would otherwise overwrite the ghost
+# marker with a human-looking title and smuggle the row back onto the board).
+kind=""
+case "$prompt" in
+  "<scheduled-task"*|"<automation"*|"<cloud-routine"*|"<cron"*) kind="scheduled" ;;
+esac
+
 # LIVE context for the Missions board's per-row signature (item: Session
 # Signature). Two cheap, guarded git reads off the session's cwd:
 #   • branch — names the LINE OF WORK, and re-sent EVERY turn so a mid-session
@@ -75,11 +88,13 @@ body=$(/usr/bin/jq -n \
   --arg name "$local_name" \
   --arg branch "$branch" \
   --arg repo "$repo" \
+  --arg kind "$kind" \
   '{session_id: $sid, phase: "working", user_message: true}
    + (if $cwd    != "" then {cwd:    $cwd}    else {} end)
    + (if $name   != "" then {name:   $name}   else {} end)
    + (if $branch != "" then {branch: $branch} else {} end)
-   + (if $repo   != "" then {repo:   $repo}   else {} end)' 2>/dev/null)
+   + (if $repo   != "" then {repo:   $repo}   else {} end)
+   + (if $kind   != "" then {kind:   $kind}   else {} end)' 2>/dev/null)
 
 if [ -n "$body" ]; then
   ( curl -sf --max-time 2 -X POST -H 'Content-Type: application/json' \
@@ -97,7 +112,7 @@ fi
 enabled=$(curl -sf --max-time 1 http://127.0.0.1:7865/settings 2>/dev/null \
   | /usr/bin/jq -r '.llm_titles_enabled // false' 2>/dev/null)
 
-if [ "$enabled" = "true" ] && [ "$sid" != "default" ] && command -v claude >/dev/null 2>&1; then
+if [ "$enabled" = "true" ] && [ "$sid" != "default" ] && [ -z "$kind" ] && command -v claude >/dev/null 2>&1; then
   # Cadence: re-title on turn 1, then every 3rd turn (4, 7, …). Enough to follow a
   # pivot quickly, without a Haiku call — or a name change — on every single turn.
   countfile="$HOME/.claude/.cc-titlecount-$sid"

@@ -112,7 +112,7 @@ If none of the gates apply: **speak.** Compose the line at the right weight and 
 {base}/scripts/say.sh "Explorer's off — scanning the repo now." --agent voyager
 ```
 
-- **`--priority`** jumps the queue for something the user should hear first.
+- **`--priority`** jumps the queue and is exempt from the 60s stale-purge (180s ceiling) — for Pulsar's orchestration beats and genuine user-blockers ONLY, never drone lines.
 - **`--agent <category>`** speaks the line in a drone's voice (see "Voices" below) — use it for sub-agent self-announcements. The main thread speaks as Pulsar (no `--agent`).
 - **Don't use `--voice`** — it's the old ElevenLabs flag and does nothing on the local `say` engine. Voice selection is via `--agent`.
 
@@ -219,17 +219,28 @@ Pulsar himself speaks in **Daniel** (the UK male orchestrator voice). Sub-agents
 | `sentinel` | Karen | review / QA / security |
 | `nova` | Samantha | build / implement / refactor |
 | `nebula` | Moira | design / visual / image |
-| `echo` | Tessa | writing / docs / copy |
+| `echo` | Tessa | writing / docs / copy — **retained as a defined character but retired as an auto-category; creative/copy/docs routes to `nebula` instead** |
 | `atlas` | Rishi | general |
 
 Each drone voice is resolved to its best installed variant (Enhanced → Premium → base) and guaranteed English at runtime, so an unset variant degrades gracefully rather than garbling. Don't hand-pick voices with `--voice` — pass `--agent` and let the registry map it.
 
 ## UI
 
-User-facing UX is the macOS menu-bar app (`Pulsar.app`) — a three-tab popover (**History**, **Cache**, **Settings**) plus an animated floating portrait that auto-appears top-left when Pulsar speaks and auto-hides when the queue empties. Sub-agent drones orbit as sibling heads while their agents run, the speaker taking centre.
+User-facing UX is the macOS menu-bar app (`Pulsar.app`) — a three-tab popover (**Team**, **Settings**, **Missions** — opt-in, hidden unless Task Mode is enabled in Settings) plus an animated floating portrait that auto-appears top-left when Pulsar speaks and auto-hides when the queue empties. Sub-agent drones orbit as sibling heads while their agents run, the speaker taking centre.
 
 ## Sub-agents and orchestration
 
 **Spawn sub-agents in the FOREGROUND — do NOT set `run_in_background`.** A backgrounded sub-agent does not appear in Claude Code's sub-agent panel and does not orbit as a drone: it's invisible and inaudible, which defeats the entire point of the crew, and it can stall unseen. Foreground keeps every agent on screen and speaking in its own voice, so you can always see and hear exactly who is working on what. Reserve `run_in_background` only for a genuinely large parallel fan-out where blocking the main thread for the whole run is impractical — and know you lose the live swarm when you do.
 
 When you spawn sub-agents to do work in parallel, **cast each as its matching Pulsar drone** and have it self-announce via `say.sh "<line>" --agent <category>` — a bespoke, in-character line on accept, on any major milestone, and on completion. Each drone speaks in its own voice (see "Voices"), so the user hears the live team rather than one narrator. Keep the lines sparse (accept + real milestones + done), specific to the actual work, and in the drone's character. The main thread keeps speaking as Pulsar (no `--agent`), including any consolidated wrap-up at the end of the task.
+
+**Pulsar's orchestration beats — the conductor narrates between the acts.** During a fan-out the drones own the mid-scene chatter, so without explicit beats Pulsar goes silent until turn-end and the user loses the thread. Fire a short Pulsar line (no `--agent`) with `--priority` at exactly these moments:
+- **Spawn beat** — the moment a fan-out launches, naming who's on what: `say.sh "Sending Nova at the row anatomy and Voyager into the payload." --priority`
+- **Collect beat** — when a batch of results lands or a round boundary passes, one line of synthesis: `say.sh "Both back — Voyager found the stale latch; verdict forming." --priority`
+- The existing turn-end wrap stays. Keep each beat one phrase; drone lines never use `--priority` (if everything jumps the queue, nothing does). Expected feel: solo turns are all Pulsar; a 3-drone build is ~one-third Pulsar; a full team review keeps Pulsar audible at every round boundary.
+
+**All drones speak FIRST PERSON** — "I'd ship this", "I found the bug", never "Nova would ship this" or any third-person self-reference. This applies to every drone in every context: say.sh lines, sub-agent chat output, and all deliverable files.
+
+## Sync home
+
+Sync home: ~/code/pulsar (repo root, canonical — hardlinked to ~/.claude/skills/pulsar; the Sources/Resources copies are build artifacts).

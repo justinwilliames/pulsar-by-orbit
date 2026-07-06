@@ -110,6 +110,10 @@ struct HistoryItem: Sendable {
     let timestamp: Date
     let duration: Double?
     let failed: Bool
+    /// Drone category that spoke the line (nil = Pulsar). Makes talk-share
+    /// measurable from /history — before this, voice was a hardcoded label and
+    /// speaker attribution was impossible (2026-07-06 voice audit §2).
+    let agent: String?
 }
 
 struct QueueStatusSnapshot: Encodable, Sendable {
@@ -614,6 +618,17 @@ actor AudioQueueActor {
     /// Current waiting-queue depth, for asserting `muteNow` drops queued lines.
     func _test_queueDepth() -> Int { queue.count }
 
+    /// Waiting-queue ids in order, for asserting the priority-lane ordering.
+    func _test_queueIds() -> [String] { queue.map(\.id) }
+
+    /// Test seam: the exact enqueue insertion + purge path WITHOUT starting the
+    /// playback worker (ordering asserts must not race a consuming worker).
+    /// Preserves the entry's `enqueuedAt` so purge-ceiling tests can age entries.
+    func _test_enqueue(_ entry: AudioEntry) {
+        purgeStaleWaiters()
+        insert(entry)
+    }
+
     /// Whether an id is currently marked pending-removal (deferred).
     func _test_isPending(id: String) -> Bool { pendingRemoval.contains(id) }
 
@@ -660,8 +675,20 @@ actor AudioQueueActor {
     /// lines always get in.
     static let staleWaiterSeconds: TimeInterval = 60
 
+    /// A PRIORITY waiter gets a longer leash before the purge takes it — the
+    /// orchestrator's spawn/collect beats and genuine user-blockers should
+    /// survive a drone-chatter backlog (a 60s tail-drop is right for drones,
+    /// wrong for the conductor) — but NOT immunity, so a wedged queue still
+    /// self-clears. (2026-07-06 voice audit §4.)
+    static let priorityStaleWaiterSeconds: TimeInterval = 180
+
     /// Add an entry to the queue. Returns queue depth after insertion, or
     /// nil if the queue was full and the entry was dropped.
+    ///
+    /// A `priority` entry JUMPS the queue: it inserts after the last queued
+    /// priority entry (stable order within the priority class) rather than
+    /// appending — making the long-documented `--priority` flag actually true.
+    /// Never touches `currentEntry`; a playing line is never pre-empted.
     func enqueue(_ entry: AudioEntry) -> Int? {
         // Self-clear before the cap check: drop any waiting entries that have
         // sat unplayed too long, so a stuck/backed-up queue never permanently
@@ -674,7 +701,7 @@ actor AudioQueueActor {
         }
         var stamped = entry
         stamped.enqueuedAt = Date()
-        queue.append(stamped)
+        insert(stamped)
         if !workerRunning {
             workerRunning = true
             Task { await runWorker() }
@@ -682,15 +709,30 @@ actor AudioQueueActor {
         return queue.count
     }
 
-    /// Drop WAITING entries whose `enqueuedAt` is older than `staleWaiterSeconds`.
-    /// Only touches `queue` (waiters) — never `currentEntry` (the line actually
-    /// playing). Returns the number purged.
+    /// Insertion core shared by `enqueue` and the test seam — ONE code path for
+    /// the priority-lane ordering. Priority inserts after the last queued
+    /// priority entry (stable within the class); normal appends.
+    private func insert(_ stamped: AudioEntry) {
+        if stamped.priority {
+            let insertAt = queue.lastIndex(where: { $0.priority }).map { $0 + 1 } ?? 0
+            queue.insert(stamped, at: insertAt)
+        } else {
+            queue.append(stamped)
+        }
+    }
+
+    /// Drop WAITING entries whose `enqueuedAt` is older than their staleness
+    /// ceiling (60s normal, 180s priority). Only touches `queue` (waiters) —
+    /// never `currentEntry` (the line actually playing). Returns the number
+    /// purged. Every victim is logged BY NAME (id + agent + text prefix) — a
+    /// bare count made drops undiagnosable (2026-07-06 voice audit §4).
     @discardableResult
     private func purgeStaleWaiters(now: Date = Date()) -> Int {
-        let before = queue.count
         var dropped: [AudioEntry] = []
         queue.removeAll { entry in
-            let stale = now.timeIntervalSince(entry.enqueuedAt) > Self.staleWaiterSeconds
+            let ceiling = entry.priority
+                ? Self.priorityStaleWaiterSeconds : Self.staleWaiterSeconds
+            let stale = now.timeIntervalSince(entry.enqueuedAt) > ceiling
             if stale { dropped.append(entry) }
             return stale
         }
@@ -703,8 +745,9 @@ actor AudioQueueActor {
             for entry in dropped {
                 readyContinuations.removeValue(forKey: entry.id)
                 discardResolved(id: entry.id)
+                NSLog("[AudioQueue] 🧹 purged stale waiter \(entry.id.prefix(8)) agent=\(entry.agentCategory ?? "pulsar")\(entry.priority ? " PRIORITY" : "") '\(entry.text.prefix(60))'")
             }
-            NSLog("[AudioQueue] 🧹 purged \(purged) stale waiter(s) (>\(Int(Self.staleWaiterSeconds))s unplayed)")
+            NSLog("[AudioQueue] 🧹 purged \(purged) stale waiter(s)")
         }
         return purged
     }
@@ -1229,6 +1272,7 @@ actor AudioQueueActor {
             "duration": item.duration as Any,
             "type": type,
             "failed": item.failed,
+            "agent": item.agent as Any,
         ]
     }
 
@@ -1238,7 +1282,8 @@ actor AudioQueueActor {
             id: entry.id, voice: entry.voiceLabel,
             text: entry.fullText.isEmpty ? entry.text : entry.fullText,
             channel: entry.channel, timestamp: entry.createdAt,
-            duration: duration, failed: failed
+            duration: duration, failed: failed,
+            agent: entry.agentCategory
         )
         history.append(item)
         if history.count > maxHistory {

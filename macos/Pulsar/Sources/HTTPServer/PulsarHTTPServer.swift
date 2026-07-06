@@ -382,18 +382,33 @@ final class PulsarHTTPServer: @unchecked Sendable {
         let liveSessionIds = Set(drones.compactMap(\.sessionId))
         let records = await sessionRegistry.activeSessions(liveSessionIds: liveSessionIds)
 
-        let sessions: [SessionPayload] = records.map { record in
+        let sessions: [SessionPayload] = records.compactMap { record in
+            // ADMISSION CONTROL (R4 item 2): scheduled-task/automation records
+            // never reach the board. The `kind` stamp is authoritative; the
+            // ghost-name prefix check is the belt for legacy records written
+            // before the classifier existed.
+            if record.kind == "scheduled" { return nil }
+            guard SessionPresentation.isInteractive(name: record.name) else { return nil }
+
             let sessionDrones = drones
                 .filter { $0.sessionId == record.sessionId }
                 .sorted { $0.agentId < $1.agentId }
                 .map { SessionDronePayload(agent_id: $0.agentId, category: $0.category) }
             let sidebar = SidebarTitles.shared.title(for: record.sessionId) ?? ""
-            // A MAIN session counts as "active now" only if its last PreToolUse
-            // heartbeat landed within the last 30s — so the pulse fades shortly
-            // after the session goes quiet, instead of the phase pill's turn-long
-            // staleness. This is the whole point of the heartbeat layer.
-            let activeNow = record.lastActiveAt
-                .map { Date().timeIntervalSince($0) <= 30 } ?? false
+
+            // SERVER-RESOLVED truth (R4 item 3): one title, one status, computed
+            // where all the inputs live. The raw fields still ship below as the
+            // debug layer, but the view renders these two and stops adjudicating.
+            let title = SessionPresentation.resolveTitle(
+                userNamed: record.userNamed ?? false, name: record.name,
+                sidebarTitle: sidebar, branch: record.branch,
+                label: record.label, sessionId: record.sessionId)
+            let derived = SessionPresentation.deriveStatus(
+                phase: record.phase,
+                lastActiveAt: record.lastActiveAt,
+                lastUserMessage: record.lastUserMessage,
+                hasDrones: !sessionDrones.isEmpty)
+            let activeNow = derived.status == "active"
             return SessionPayload(
                 session_id: record.sessionId,
                 name: record.name ?? "",
@@ -408,6 +423,11 @@ final class PulsarHTTPServer: @unchecked Sendable {
                 active_now: activeNow,
                 current_action: activeNow ? (record.currentAction ?? "") : "",
                 active_category: activeNow ? (record.activeCategory ?? "") : "",
+                title: title,
+                status: derived.status,
+                stale: derived.stale,
+                last_user_message: record.lastUserMessage.map { Int($0.timeIntervalSince1970) } ?? 0,
+                is_mission: derived.status == "waiting",
                 drones: sessionDrones)
         }
         return SessionsPayload(sessions: sessions)
@@ -488,12 +508,20 @@ final class PulsarHTTPServer: @unchecked Sendable {
         let activeCategory = (body["active_category"] as? String).flatMap {
             $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
         }
+        // Session-kind stamp from the ingest classifier (turn-start.sh sends
+        // kind:"scheduled" for scheduled-task/automation fires). Sticky on the
+        // record; the payload boundary excludes non-interactive kinds from the
+        // board entirely — admission control before presentation (R4 item 2).
+        let kind = (body["kind"] as? String).flatMap {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        }
 
         await sessionRegistry.note(
             sessionId: sessionId, cwd: cwd, phase: phase, isUserMessage: isUserMessage,
             name: name, nameOverride: nameOverride, userNamed: userNamed,
             branch: branch, repo: repo, lastAction: lastAction,
-            activeNow: activeNow, currentAction: currentAction, activeCategory: activeCategory)
+            activeNow: activeNow, currentAction: currentAction, activeCategory: activeCategory,
+            kind: kind)
         await Self.broadcastSessions(
             sessionRegistry: sessionRegistry, audioQueue: audioQueue,
             sseBroadcaster: sseBroadcaster)
@@ -1342,9 +1370,15 @@ final class PulsarHTTPServer: @unchecked Sendable {
         // through the same envelope/lip-sync path. No network, no API key, no
         // spend. (ElevenLabs removed.)
         let entryId = Self.nextEntryId()
+        // voiceLabel carries the SPEAKER, not a hardcoded "Pulsar" — a tagged
+        // drone line is labelled by its capitalized category so /history can
+        // attribute who actually spoke (2026-07-06 voice audit §2).
+        let speakerLabel = agentCategory.flatMap {
+            $0.isEmpty ? nil : $0.capitalized
+        } ?? "Pulsar"
         let entry = AudioEntry(
             id: entryId, text: String(text.prefix(100)), voiceId: "native",
-            voiceLabel: "Pulsar", createdAt: Date(), channel: channel,
+            voiceLabel: speakerLabel, createdAt: Date(), channel: channel,
             priority: priority, fullText: text, isReplay: false,
             audioURL: nil, engine: "native", agentCategory: agentCategory)
         guard let position = await audioQueue.enqueue(entry) else {
@@ -1675,6 +1709,19 @@ private struct SessionPayload: Encodable, Sendable {
     let active_now: Bool
     let current_action: String
     let active_category: String
+    /// SERVER-RESOLVED presentation truth (R4 item 3). `title` is the one board
+    /// title; `status` is the 4-state machine's answer ("active"|"working"|
+    /// "waiting") with `stale` marking the idle-fallback provenance (a dropped
+    /// Stop self-healed to waiting). `last_user_message` is the 7-day window's
+    /// actual gate + sort key — on the wire so the board is auditable.
+    /// `is_mission` = this session needs the user (the noun, as a field).
+    /// The raw fields above remain as the debug layer; clients should render
+    /// ONLY these resolved fields.
+    let title: String
+    let status: String
+    let stale: Bool
+    let last_user_message: Int
+    let is_mission: Bool
     let drones: [SessionDronePayload]
 }
 

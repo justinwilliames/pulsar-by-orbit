@@ -49,6 +49,17 @@ struct MissionSession: Identifiable, Equatable {
     /// The drone category for the live work ("voyager"|"nova"|"pulsar"), empty
     /// unless `activeNow`. Drives `activeColor` / `activeName`.
     let activeCategory: String
+    /// The SERVER-RESOLVED board title (2026-07-06 review, R4 item 3). When
+    /// non-empty it wins outright — the daemon owns title truth (cleaned sidebar
+    /// title, user-rename precedence, the lot) and this view stops adjudicating.
+    /// Empty only against an older daemon, where the legacy chain still applies.
+    let resolvedTitle: String
+    /// True when the server marked this row's waiting state as the idle-fallback
+    /// self-heal (a dropped Stop), not a clean turn-end. Debug provenance.
+    let stale: Bool
+    /// When the USER last messaged this session — the board's real recency key.
+    /// nil against an older daemon (sort falls back to lastSeen).
+    let lastUserMessage: Date?
     /// The session's in-flight sub-agent drones, as running mission rows.
     let drones: [MissionTask]
 
@@ -56,6 +67,7 @@ struct MissionSession: Identifiable, Equatable {
          branch: String = "", repo: String = "", lastAction: String = "",
          userNamed: Bool = false, sidebarTitle: String = "",
          activeNow: Bool = false, currentAction: String = "", activeCategory: String = "",
+         resolvedTitle: String = "", stale: Bool = false, lastUserMessage: Date? = nil,
          drones: [MissionTask]) {
         self.id = id
         self.name = name
@@ -70,6 +82,9 @@ struct MissionSession: Identifiable, Equatable {
         self.activeNow = activeNow
         self.currentAction = currentAction
         self.activeCategory = activeCategory
+        self.resolvedTitle = resolvedTitle
+        self.stale = stale
+        self.lastUserMessage = lastUserMessage
         self.drones = drones
     }
 
@@ -101,6 +116,11 @@ struct MissionSession: Identifiable, Equatable {
     /// in Claude Desktop — so it leads every auto-source, losing only to a manual
     /// rename. Branch outranks the label but NOT a real name.
     var displayTitle: String {
+        // The daemon's resolved title wins outright (server owns truth — the
+        // 2026-07-06 review's "one title, resolved where the inputs live").
+        // The legacy chain below survives only for an older daemon that
+        // doesn't ship `title` yet.
+        if !resolvedTitle.isEmpty { return resolvedTitle }
         if userNamed, !name.isEmpty { return name }
         let sidebar = sidebarTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         if !sidebar.isEmpty { return sidebar }

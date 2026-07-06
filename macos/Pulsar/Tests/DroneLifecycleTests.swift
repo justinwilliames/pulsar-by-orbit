@@ -589,6 +589,138 @@ func runAll() async {
                          branch: "", userNamed: false, sidebarTitle: "") == "#a7f3",
             "empty everything → #id-prefix")
     }
+
+    // MARK: - SessionPresentation (2026-07-06 review — R4 items 2+3)
+
+    await test("SessionPresentation.isInteractive — admission control") {
+        await expect(!SessionPresentation.isInteractive(name: "<scheduled-task name=\"command-centre-poll\">"),
+                     "scheduled-task ghost is NOT interactive")
+        await expect(!SessionPresentation.isInteractive(name: "  <SCHEDULED-TASK id=1>"),
+                     "case-insensitive + leading whitespace still caught")
+        await expect(!SessionPresentation.isInteractive(name: "<automation trigger=\"cron\">"),
+                     "automation prefix caught")
+        await expect(SessionPresentation.isInteractive(name: "Fix the login bug"),
+                     "human prompt admitted")
+        await expect(SessionPresentation.isInteractive(name: "<div> should render as text"),
+                     "generic XML-ish human prompt still admitted")
+        await expect(SessionPresentation.isInteractive(name: nil),
+                     "no name ≠ ghost — admitted")
+        await expect(SessionPresentation.isInteractive(name: ""),
+                     "empty name admitted")
+    }
+
+    await test("SessionPresentation.cleanSidebarTitle — decoration stripper") {
+        await expect(SessionPresentation.cleanSidebarTitle(
+            "2026-07-03 - Skills Review And Fable Training - Discussing Improvements")
+            == "Skills Review And Fable Training",
+            "full convention → date + status stripped")
+        await expect(SessionPresentation.cleanSidebarTitle("2026-07-02 - Comet Pulsar Orion Enhancements")
+            == "Comet Pulsar Orion Enhancements",
+            "date-only prefix → date stripped, topic kept (no status to drop)")
+        await expect(SessionPresentation.cleanSidebarTitle("2026-07-03 - A - B - C") == "A - B",
+            "4-part convention keeps middle parts, drops last")
+        await expect(SessionPresentation.cleanSidebarTitle("Just A Plain Title") == "Just A Plain Title",
+            "non-convention title untouched")
+        await expect(SessionPresentation.cleanSidebarTitle("Not-A-Date - Topic - Status")
+            == "Not-A-Date - Topic - Status",
+            "no date prefix → untouched even with dashes")
+        await expect(SessionPresentation.cleanSidebarTitle("") == "", "empty stays empty")
+    }
+
+    await test("SessionPresentation.resolveTitle — one title, server-side") {
+        await expect(SessionPresentation.resolveTitle(
+            userNamed: true, name: "My Rename", sidebarTitle: "2026-07-03 - X - Y",
+            branch: "feat/z", label: "pulsar", sessionId: "a7f3") == "My Rename",
+            "user rename beats everything")
+        await expect(SessionPresentation.resolveTitle(
+            userNamed: false, name: "first msg", sidebarTitle: "2026-07-03 - Real Topic - Done",
+            branch: "", label: "pulsar", sessionId: "a7f3") == "Real Topic",
+            "cleaned sidebar beats sticky name")
+        await expect(SessionPresentation.resolveTitle(
+            userNamed: false, name: "", sidebarTitle: "",
+            branch: "main", label: "pulsar", sessionId: "a7f3") == "pulsar",
+            "generic branch skipped → label")
+        await expect(SessionPresentation.resolveTitle(
+            userNamed: false, name: "", sidebarTitle: "",
+            branch: "", label: "", sessionId: "a7f3b299") == "#a7f3",
+            "nothing → #id tag")
+    }
+
+    await test("SessionPresentation.deriveStatus — heartbeat is the authority") {
+        let now = Date()
+        // Heartbeat 5s ago → active, regardless of phase.
+        var s = SessionPresentation.deriveStatus(
+            phase: "working", lastActiveAt: now.addingTimeInterval(-5),
+            lastUserMessage: nil, hasDrones: false, now: now)
+        await expect(s.status == "active" && !s.stale, "fresh heartbeat → active")
+        // Drones in flight → working even with no heartbeat.
+        s = SessionPresentation.deriveStatus(
+            phase: "working", lastActiveAt: nil,
+            lastUserMessage: nil, hasDrones: true, now: now)
+        await expect(s.status == "working" && !s.stale, "drones → working")
+        // Turn open, heartbeat 2min stale, user message 1min ago → still working
+        // (long model-thinking gap covered by the ceiling).
+        s = SessionPresentation.deriveStatus(
+            phase: "working", lastActiveAt: now.addingTimeInterval(-120),
+            lastUserMessage: now.addingTimeInterval(-60), hasDrones: false, now: now)
+        await expect(s.status == "working" && !s.stale, "recent user msg keeps working alive")
+        // THE PHANTOM-WORKING KILL: phase latched "working", nothing moved for
+        // 10 minutes → self-heals to waiting with stale provenance.
+        s = SessionPresentation.deriveStatus(
+            phase: "working", lastActiveAt: now.addingTimeInterval(-600),
+            lastUserMessage: now.addingTimeInterval(-600), hasDrones: false, now: now)
+        await expect(s.status == "waiting" && s.stale, "dropped Stop self-heals → waiting+stale")
+        // Clean Stop edge → waiting, NOT stale.
+        s = SessionPresentation.deriveStatus(
+            phase: "waiting", lastActiveAt: now.addingTimeInterval(-600),
+            lastUserMessage: now.addingTimeInterval(-600), hasDrones: false, now: now)
+        await expect(s.status == "waiting" && !s.stale, "clean Stop → waiting, not stale")
+    }
+
+    await test("AudioQueue priority lane — jump + stable class order") {
+        let (actor, _) = await makeActor()
+        func entry(_ id: String, priority: Bool, agedSeconds: TimeInterval = 0) -> AudioEntry {
+            var e = AudioEntry(
+                id: id, text: "line \(id)", voiceId: "native", voiceLabel: "Pulsar",
+                createdAt: Date(), channel: nil, priority: priority, fullText: "line \(id)",
+                isReplay: false, audioURL: nil, engine: "native", agentCategory: nil)
+            e.enqueuedAt = Date().addingTimeInterval(-agedSeconds)
+            return e
+        }
+        // Worker-free seam: same insertion code path as enqueue, no consumer racing.
+        await actor._test_enqueue(entry("n1", priority: false))
+        await actor._test_enqueue(entry("n2", priority: false))
+        await actor._test_enqueue(entry("p1", priority: true))
+        await actor._test_enqueue(entry("p2", priority: true))
+        await actor._test_enqueue(entry("n3", priority: false))
+        let order = await actor._test_queueIds()
+        await expect(order == ["p1", "p2", "n1", "n2", "n3"],
+                     "priority lane jumps, stable within class (got: \(order))")
+    }
+
+    await test("AudioQueue purge — 60s drops normals, 180s ceiling spares priority") {
+        let (actor, _) = await makeActor()
+        func entry(_ id: String, priority: Bool, agedSeconds: TimeInterval) -> AudioEntry {
+            var e = AudioEntry(
+                id: id, text: "line \(id)", voiceId: "native", voiceLabel: "Pulsar",
+                createdAt: Date(), channel: nil, priority: priority, fullText: "line \(id)",
+                isReplay: false, audioURL: nil, engine: "native", agentCategory: "voyager")
+            e.enqueuedAt = Date().addingTimeInterval(-agedSeconds)
+            return e
+        }
+        // 90s-old normal (past 60s → purged) vs 90s-old priority (under 180s →
+        // survives) vs 200s-old priority (past 180s → purged: no immunity).
+        await actor._test_enqueue(entry("old-normal", priority: false, agedSeconds: 90))
+        await actor._test_enqueue(entry("old-priority", priority: true, agedSeconds: 90))
+        await actor._test_enqueue(entry("ancient-priority", priority: true, agedSeconds: 200))
+        // The purge runs at the head of the next insertion.
+        await actor._test_enqueue(entry("fresh", priority: false, agedSeconds: 0))
+        let order = await actor._test_queueIds()
+        await expect(!order.contains("old-normal"), "90s normal purged (60s ceiling)")
+        await expect(order.contains("old-priority"), "90s priority SURVIVES (180s ceiling)")
+        await expect(!order.contains("ancient-priority"), "200s priority purged — no immunity")
+        await expect(order.contains("fresh"), "fresh entry queued")
+    }
 }
 
 // MARK: - Entry point

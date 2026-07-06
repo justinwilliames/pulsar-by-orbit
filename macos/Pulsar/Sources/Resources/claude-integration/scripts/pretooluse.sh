@@ -79,8 +79,13 @@ elif tool in ("Read", "NotebookRead"):
 elif tool in ("Grep", "Glob"):
     action = "Searching"
 elif tool == "Bash":
-    cmd = " ".join(str(ti.get("command", "")).split())
-    action = ("Running: " + cmd[:28]) if cmd else "Running"
+    # SECURITY (2026-07-06 review, R4 item 5): NEVER ship raw command text —
+    # shell fragments can carry paths/tokens/args and this string crosses the
+    # local HTTP boundary and renders on the board. The tool_input.description
+    # field is the model-authored, display-safe verb phrase; fall back to a
+    # generic verb when absent.
+    desc = " ".join(str(ti.get("description", "")).split())
+    action = desc if desc else "Running a command"
 elif tool in ("WebFetch", "WebSearch"):
     action = "Searching the web"
 else:

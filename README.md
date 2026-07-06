@@ -119,6 +119,7 @@ ln -s ~/code/pulsar ~/.claude/skills/pulsar
 
 - **Speaks at every Claude Code turn-end** — a completion ping, so you know it's done without watching the screen.
 - **The drone swarm** — sub-agents show up as orbiting companion drones and the speaker lip-syncs. See [Meet the swarm](#meet-the-swarm).
+- **Missions (Task Mode, opt-in)** — every Claude session you've got running, flagged the moment one needs you back. A board in the popover grouping live work by session, with the crew nested under each one. Off by default; flip it on in Settings.
 - **Menu-bar popover** — History, Cache, and Settings tabs. See what was said, replay cached lines, set the persona.
 - **Floating portrait** — an animated portrait appears in the top-left corner while Pulsar is speaking. Draggable, stays across all Spaces, hides when the queue empties.
 - **Mute toggle** — one click in the popover header. The menu-bar icon changes so you know you're muted.

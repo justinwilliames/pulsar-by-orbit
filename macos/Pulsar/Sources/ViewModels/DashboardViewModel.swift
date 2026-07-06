@@ -221,10 +221,24 @@ final class DashboardViewModel {
         let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
         return envelope.sessions.compactMap { dto -> MissionSession? in
             let lastSeen = Date(timeIntervalSince1970: TimeInterval(dto.last_seen))
-            let phase = MissionSession.Phase(rawValue: dto.phase) ?? .working
-            // A live session (drones in flight) survives the client-side window
-            // even if last_seen is stale — mirrors the server's live guard.
-            guard lastSeen > cutoff || !dto.drones.isEmpty else { return nil }
+            let lastUserMessage = (dto.last_user_message).flatMap {
+                $0 > 0 ? Date(timeIntervalSince1970: TimeInterval($0)) : nil
+            }
+            // The SERVER-RESOLVED status is authoritative when present: "active"
+            // and "working" render as the working phase (with `activeNow` carrying
+            // the live pulse), "waiting" as the paused phase. The raw `phase`
+            // latch survives only as the fallback for an older daemon.
+            let phase: MissionSession.Phase
+            if let status = dto.status {
+                phase = status == "waiting" ? .waiting : .working
+            } else {
+                phase = MissionSession.Phase(rawValue: dto.phase) ?? .working
+            }
+            // Client-side belt-and-braces on the recency window — keyed on the
+            // USER's own activity when the daemon ships it (the board's real
+            // gate), falling back to last_seen against an older daemon.
+            let recency = lastUserMessage ?? lastSeen
+            guard recency > cutoff || !dto.drones.isEmpty else { return nil }
             let drones = dto.drones.map { d -> MissionTask in
                 let role = DroneRegistry.role(for: d.category).capitalized
                 return MissionTask(
@@ -248,9 +262,12 @@ final class DashboardViewModel {
                 activeNow: dto.active_now ?? false,
                 currentAction: dto.current_action ?? "",
                 activeCategory: dto.active_category ?? "",
+                resolvedTitle: dto.title ?? "",
+                stale: dto.stale ?? false,
+                lastUserMessage: lastUserMessage,
                 drones: drones)
         }
-        .sorted { $0.lastSeen > $1.lastSeen }
+        .sorted { ($0.lastUserMessage ?? $0.lastSeen) > ($1.lastUserMessage ?? $1.lastSeen) }
     }
 
     /// Load the current session board once (on Missions view appear / connect).
@@ -281,7 +298,11 @@ final class DashboardViewModel {
                 lastAction: s.lastAction, userNamed: true,
                 sidebarTitle: s.sidebarTitle,
                 activeNow: s.activeNow, currentAction: s.currentAction,
-                activeCategory: s.activeCategory, drones: s.drones)
+                activeCategory: s.activeCategory,
+                // Optimistic resolved title too — the server will confirm on the
+                // next sessions broadcast, but the row must show the rename NOW.
+                resolvedTitle: trimmed, stale: s.stale,
+                lastUserMessage: s.lastUserMessage, drones: s.drones)
         }
         try? await api.renameSession(id, to: trimmed)
     }

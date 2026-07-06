@@ -49,14 +49,20 @@ struct SessionRecord: Codable, Sendable {
     /// "pulsar") — so the board can tint the action line + pulse in the right
     /// hue. LIVE; paired with lastActiveAt. Optional.
     var activeCategory: String?
+    /// Session-kind stamp from the ingest classifier ("scheduled" for
+    /// scheduled-task/automation fires). nil/empty = interactive (human).
+    /// A "scheduled" record is stored (debuggable) but NEVER admitted to the
+    /// board — R4 item 2's admission control. STICKY: once stamped, later
+    /// unstamped notes (heartbeats carry no kind) don't clear it.
+    var kind: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId, label, lastSeen, phase, dismissed, lastUserMessage, name
         case branch, repo, lastAction, userNamed
-        case lastActiveAt, currentAction, activeCategory
+        case lastActiveAt, currentAction, activeCategory, kind
     }
 
-    init(sessionId: String, label: String, lastSeen: Date, phase: String, dismissed: Bool, lastUserMessage: Date?, name: String?, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, userNamed: Bool? = nil, lastActiveAt: Date? = nil, currentAction: String? = nil, activeCategory: String? = nil) {
+    init(sessionId: String, label: String, lastSeen: Date, phase: String, dismissed: Bool, lastUserMessage: Date?, name: String?, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, userNamed: Bool? = nil, lastActiveAt: Date? = nil, currentAction: String? = nil, activeCategory: String? = nil, kind: String? = nil) {
         self.sessionId = sessionId
         self.label = label
         self.lastSeen = lastSeen
@@ -71,6 +77,7 @@ struct SessionRecord: Codable, Sendable {
         self.lastActiveAt = lastActiveAt
         self.currentAction = currentAction
         self.activeCategory = activeCategory
+        self.kind = kind
     }
 
     init(from decoder: Decoder) throws {
@@ -93,6 +100,7 @@ struct SessionRecord: Codable, Sendable {
         self.lastActiveAt = try c.decodeIfPresent(Date.self, forKey: .lastActiveAt)
         self.currentAction = try c.decodeIfPresent(String.self, forKey: .currentAction)
         self.activeCategory = try c.decodeIfPresent(String.self, forKey: .activeCategory)
+        self.kind = try c.decodeIfPresent(String.self, forKey: .kind)
     }
 }
 
@@ -180,7 +188,7 @@ actor SessionRegistry {
     /// lastUserMessage, or dismissed — it is a pure liveness ping, not a turn/user
     /// event. `lastSeen` is still refreshed (as for any note) so a live session
     /// never ages out of the store.
-    func note(sessionId: String, cwd: String?, phase: String?, isUserMessage: Bool = false, name: String? = nil, nameOverride: Bool = false, userNamed: Bool = false, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, activeNow: Bool = false, currentAction: String? = nil, activeCategory: String? = nil) {
+    func note(sessionId: String, cwd: String?, phase: String?, isUserMessage: Bool = false, name: String? = nil, nameOverride: Bool = false, userNamed: Bool = false, branch: String? = nil, repo: String? = nil, lastAction: String? = nil, activeNow: Bool = false, currentAction: String? = nil, activeCategory: String? = nil, kind: String? = nil) {
         let trimmedId = sessionId.trimmingCharacters(in: .whitespaces)
         guard !trimmedId.isEmpty else { return }
 
@@ -199,6 +207,8 @@ actor SessionRegistry {
             .flatMap { $0.isEmpty ? nil : $0 }
         let trimmedActiveCategory = activeCategory.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { $0.isEmpty ? nil : $0 }
+        let trimmedKind = kind.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
 
         if var existing = sessions[trimmedId] {
             existing.lastSeen = Date()
@@ -209,6 +219,9 @@ actor SessionRegistry {
             if let trimmedBranch { existing.branch = trimmedBranch }
             if let trimmedRepo { existing.repo = trimmedRepo }
             if let trimmedAction { existing.lastAction = trimmedAction }
+            // Kind is STICKY once stamped — heartbeats/Stop notes carry no kind
+            // and must not launder a scheduled record back to interactive.
+            if let trimmedKind, existing.kind == nil { existing.kind = trimmedKind }
             // LIVE heartbeat — a PreToolUse ping stamps activity WITHOUT touching
             // phase / lastUserMessage / dismissed (see the note() docstring).
             if activeNow {
@@ -262,7 +275,8 @@ actor SessionRegistry {
                 // record. Stamp liveness so the very first tool call already pulses.
                 lastActiveAt: activeNow ? Date() : nil,
                 currentAction: activeNow ? trimmedCurrentAction : nil,
-                activeCategory: activeNow ? trimmedActiveCategory : nil)
+                activeCategory: activeNow ? trimmedActiveCategory : nil,
+                kind: trimmedKind)
             schedulePersist()
         }
     }

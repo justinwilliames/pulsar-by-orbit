@@ -42,6 +42,7 @@ swiftc \
   "$ENGINE/PulsarConfig.swift" \
   "$ENGINE/SessionRegistry.swift" \
   "$ENGINE/SessionIdentity.swift" \
+  "$ENGINE/SessionPresentation.swift" \
   "$HARNESS"
 
 echo "Running..."

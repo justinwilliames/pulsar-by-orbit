@@ -137,6 +137,8 @@ Save to <output-dir>/R1-<drone-lowercase>.md.
 `~/code/pulsar/scripts/say.sh "<bespoke in-character line>" --agent <category>`
 The line must be specific to the actual work — never generic. Keep it sparse: accept + real milestones + done only.
 
+**Orchestrator round-boundary beats:** the running session (Pulsar, no `--agent`) fires ONE short `say.sh "<line>" --priority` at each round boundary — R1 launch, R1→R2, R2→R3, R3→R4, R4→R5, and the final tally — naming what just resolved ("Round two's in: the engineers merged their fixes; design settled the pill"). One phrase each, never more; the drones own the mid-round chatter. This keeps the conductor audible (~30% of lines in a full review) instead of silent until the wrap.
+
 ### Round 2 — Paired cross-reference (3 pairs + 1 solo)
 
 Drones pair across disciplines so no one talks only to their own kind.

@@ -158,6 +158,17 @@ struct SessionDTO: Codable, Sendable {
     let active_now: Bool?
     let current_action: String?
     let active_category: String?
+    /// SERVER-RESOLVED presentation truth (2026-07-06 review, R4 item 3): the
+    /// one `title`, the honest `status` ("active"|"working"|"waiting"),
+    /// idle-fallback `stale` provenance, the window's real gate+sort key
+    /// `last_user_message`, and `is_mission` (this session needs the user).
+    /// All optional so an older daemon still decodes; the mapper falls back to
+    /// the legacy client-side derivations when absent.
+    let title: String?
+    let status: String?
+    let stale: Bool?
+    let last_user_message: Int?
+    let is_mission: Bool?
     let drones: [SessionDroneDTO]
 }
 

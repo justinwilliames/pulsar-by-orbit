@@ -189,7 +189,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Task mode (beta)")
                         .font(.caption.weight(.medium))
-                    Text("Adds a Missions tab — a persistent board of every active Claude Code agent and its status, so you can see at a glance which run needs you. Off by default.")
+                    Text("Adds a Missions tab: every Claude session you've got running — flagged the moment one needs you back. Off by default.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

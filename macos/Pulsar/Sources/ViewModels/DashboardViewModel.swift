@@ -240,11 +240,22 @@ final class DashboardViewModel {
             let recency = lastUserMessage ?? lastSeen
             guard recency > cutoff || !dto.drones.isEmpty else { return nil }
             let drones = dto.drones.map { d -> MissionTask in
-                let role = DroneRegistry.role(for: d.category).capitalized
+                // Normalise the category to lowercase HERE — the same rule the
+                // floating swarm applies at every read (inFlightCategories /
+                // activeSpeaker / participantCharacterKeys all `.lowercased()`).
+                // Both views resolve a drone's face + hue through DroneRegistry,
+                // which is case-insensitive, but the Missions parent-face builds a
+                // raw "<category>-mouth-0" frame key that is NOT — so a non-lowercase
+                // category (e.g. "Voyager") would fall back to Pulsar's face on the
+                // board while the swarm still showed the real drone. Lowercasing at
+                // this single decode site keeps the two identities in lockstep
+                // without touching either view's render code.
+                let category = d.category.lowercased()
+                let role = DroneRegistry.role(for: category).capitalized
                 return MissionTask(
                     id: d.agent_id,
                     title: role.isEmpty ? "Agent" : role,
-                    category: d.category,
+                    category: category,
                     status: .running,
                     detail: "Running")
             }
@@ -261,7 +272,10 @@ final class DashboardViewModel {
                 sidebarTitle: dto.sidebar_title ?? "",
                 activeNow: dto.active_now ?? false,
                 currentAction: dto.current_action ?? "",
-                activeCategory: dto.active_category ?? "",
+                // Same lowercase normalisation as the nested drones above (and as
+                // the swarm's activeSpeaker) so the parent face + ring on the board
+                // agree with the swarm's centre/orbit identity for the same work.
+                activeCategory: (dto.active_category ?? "").lowercased(),
                 resolvedTitle: dto.title ?? "",
                 stale: dto.stale ?? false,
                 lastUserMessage: lastUserMessage,

@@ -172,10 +172,25 @@ case "${ACTION:-speak}" in
     # absent env → empty → omitted, and the daemon falls back to cross-session.
     SESSION_ID="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 
-    # Build JSON body using python3 for safe serialization
+    # Build JSON body using python3 for safe serialization.
+    # CAP FOR LENGTH AT THE SOURCE: a spoken line is a glance, not a paragraph.
+    # Trim to <= MAX_SPOKEN_CHARS, cut at the LAST sentence end within the budget
+    # (else the last word boundary) so it always ends cleanly — NO ellipsis, ever.
+    # Bounds both the audio and the subtitle bubble, so no line from Pulsar OR a
+    # drone can overflow or need truncating downstream.
     BODY=$(python3 -c "
-import json, sys
-d = {'text': sys.argv[1]}
+import json, sys, re
+MAX_SPOKEN_CHARS = 200
+text = sys.argv[1]
+if len(text) > MAX_SPOKEN_CHARS:
+    window = text[:MAX_SPOKEN_CHARS]
+    ends = list(re.finditer(r'[.!?](?:\s|\$)', window))
+    if ends:
+        text = window[:ends[-1].end()].rstrip()
+    else:
+        sp = window.rfind(' ')
+        text = (window[:sp] if sp > 0 else window).rstrip()
+d = {'text': text}
 if sys.argv[2]: d['voice'] = sys.argv[2]
 if sys.argv[3]: d['channel'] = sys.argv[3]
 if sys.argv[4] == 'true': d['priority'] = True

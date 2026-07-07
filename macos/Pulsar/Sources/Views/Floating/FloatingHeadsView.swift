@@ -411,21 +411,14 @@ struct FloatingHeadsView: View {
         return Self.clampedCaption(viewModel.playback.currentText)
     }
 
-    /// A generous SAFETY cap so a pathologically long line can't grow the (now
-    /// full-width) bubble past the bottom of the screen. Normal lines — including
-    /// long drone status announcements — sit well under this and show in full; only
-    /// a genuine wall of text (600+ chars) gets truncated on a word boundary with an
-    /// ellipsis. The full line always plays as audio and is kept verbatim in history.
-    static let maxCaptionChars = 600
+    /// NO display truncation and NO ellipsis, ever. Voice lines are capped for
+    /// length at the SOURCE (say.sh trims each spoken line to a sentence boundary
+    /// under its length budget), so by the time a line reaches the bubble it's
+    /// already short enough to show in full. This is just a whitespace trim.
     static func clampedCaption(_ text: String?) -> String? {
         guard let text else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > maxCaptionChars else { return trimmed }
-        let cut = String(trimmed.prefix(maxCaptionChars))
-        if let lastSpace = cut.lastIndex(of: " ") {
-            return cut[..<lastSpace].trimmingCharacters(in: .whitespaces) + "…"
-        }
-        return cut + "…"
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// A stable identity for the caption's speaker — the drone category, else

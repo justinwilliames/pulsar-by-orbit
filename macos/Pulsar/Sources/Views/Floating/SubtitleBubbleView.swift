@@ -40,7 +40,7 @@ struct SubtitleBubbleView: View {
     /// the bottom of the screen). The hosting panel is this same width; the caption
     /// is inset from the panel edge by the glow margin (see FloatingHeadsView's
     /// captionEdgePadding), so the outer glow still fades fully inside the panel.
-    static let maxWidth: CGFloat = 440
+    static let maxWidth: CGFloat = 308
     private let tailHeight: CGFloat = 8
     /// Reserve on every side for the bubble's outer glow/shadow to fade before
     /// the panel edge (max core-shadow radius ≈ 11pt + rim blur ≈ 6pt). Used by

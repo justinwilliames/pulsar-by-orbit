@@ -90,7 +90,12 @@ struct FloatingHeadsView: View {
                 captionZone
             }
         }
-        .frame(width: Self.headZoneWidth)
+        // The container must be as wide as the PANEL (== SubtitleBubbleView.maxWidth),
+        // not the 240 head zone — otherwise the caption is capped at 240 and a long
+        // line stacks into a tall narrow column that overflows the screen (and the
+        // panel's height math, which assumes the full width, under-sizes it → crop).
+        // The head keeps its own 240 frame and stays centred within this wider box.
+        .frame(width: SubtitleBubbleView.maxWidth)
         .frame(maxHeight: .infinity, alignment: layout.captionEdge == .above ? .bottom : .top)
         .onChange(of: captionSource) { _, _ in updateCaption() }
         .onChange(of: viewModel.playback.isPlaying) { _, _ in updateCaption() }
@@ -411,7 +416,7 @@ struct FloatingHeadsView: View {
     /// screen and hard-cropped. Cap the DISPLAYED text at ~4 lines — the full line
     /// still plays as audio and is kept verbatim in history. Truncates on a word
     /// boundary with an ellipsis so it reads as intentionally shortened, not cut.
-    static let maxCaptionChars = 220
+    static let maxCaptionChars = 180
     static func clampedCaption(_ text: String?) -> String? {
         guard let text else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

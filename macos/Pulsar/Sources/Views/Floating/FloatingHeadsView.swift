@@ -411,12 +411,12 @@ struct FloatingHeadsView: View {
         return Self.clampedCaption(viewModel.playback.currentText)
     }
 
-    /// A subtitle is a GLANCEABLE line, not a transcript. A very long spoken line
-    /// (esp. a drone's status announcement) grew the bubble past the bottom of the
-    /// screen and hard-cropped. Cap the DISPLAYED text at ~4 lines — the full line
-    /// still plays as audio and is kept verbatim in history. Truncates on a word
-    /// boundary with an ellipsis so it reads as intentionally shortened, not cut.
-    static let maxCaptionChars = 180
+    /// A generous SAFETY cap so a pathologically long line can't grow the (now
+    /// full-width) bubble past the bottom of the screen. Normal lines — including
+    /// long drone status announcements — sit well under this and show in full; only
+    /// a genuine wall of text (600+ chars) gets truncated on a word boundary with an
+    /// ellipsis. The full line always plays as audio and is kept verbatim in history.
+    static let maxCaptionChars = 600
     static func clampedCaption(_ text: String?) -> String? {
         guard let text else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

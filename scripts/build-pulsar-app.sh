@@ -41,6 +41,13 @@ mkdir -p "$CLAUDE_STAGE/scripts"
 cp "$REPO_ROOT/SKILL.md"    "$CLAUDE_STAGE/SKILL.md"
 cp "$REPO_ROOT/CANON.md"    "$CLAUDE_STAGE/CANON.md"
 cp "$REPO_ROOT/voices.json" "$CLAUDE_STAGE/voices.json"
+# pulsar-team skill (SKILL.md + scripts) — canonical at repo pulsar-team/;
+# without this re-sync the embedded copy forks silently (found 2026-07-20:
+# it had to be hand-copied on every edit).
+mkdir -p "$CLAUDE_STAGE/skills/pulsar-team/scripts"
+cp "$REPO_ROOT/pulsar-team/SKILL.md" "$CLAUDE_STAGE/skills/pulsar-team/SKILL.md"
+cp "$REPO_ROOT/pulsar-team/scripts/"*.sh "$CLAUDE_STAGE/skills/pulsar-team/scripts/" 2>/dev/null || true
+chmod +x "$CLAUDE_STAGE/skills/pulsar-team/scripts/"*.sh 2>/dev/null || true
 for f in say.sh session-start-voice.sh stop-hook.sh chime.sh turn-start.sh pretooluse.sh statusline.sh subagent-start.sh subagent-stop.sh install-hooks.sh uninstall-hooks.sh; do
   cp "$REPO_ROOT/scripts/$f" "$CLAUDE_STAGE/scripts/$f"
 done

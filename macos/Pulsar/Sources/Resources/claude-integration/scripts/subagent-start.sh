@@ -60,11 +60,22 @@ TYPE_MAP = {
     "build": "nova", "builder": "nova", "general-purpose": "atlas",
     "artist": "nebula", "design": "nebula", "designer": "nebula",
     "write": "nebula", "writer": "nebula", "scribe": "nebula",
+    "marketer": "iris", "marketing": "iris",
     "general": "atlas", "generalist": "atlas",
 }
 
 # Keyword fallback when agent_type is absent/unknown. Ordered: first hit wins.
+# NOTE: this whole python block sits inside shell single-quotes — NO
+# apostrophes in comments or strings here, or the script fails to parse.
+# The iris tuple runs FIRST: its terms are unambiguous marketing signals, and
+# several would otherwise be swallowed upstream ("paid search" hits the
+# voyager "search" keyword; "deliverability review" hits the sentinel
+# "review"). Drafting/copy terms stay with nebula (nebula owns creative
+# EXECUTION; iris owns marketing strategy, channels, and measurement).
 KEYWORDS = [
+    (("lifecycle", "braze", "deliverab", "paid media", "paid search", "seo",
+      "sem ", "marketing", "retention", "winback", "win-back", "activation",
+      "segment", "utm", "cac", "ltv", "attribution", "crm", "hubspot"), "iris"),
     (("explore", "search", "find", "investigat", "locate", "research"), "voyager"),
     (("review", "audit", "critique", "security", "vulnerab", "lint"), "sentinel"),
     (("build", "implement", "refactor", "compile", "code", "fix"), "nova"),

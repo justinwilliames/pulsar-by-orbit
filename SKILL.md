@@ -244,4 +244,4 @@ When you spawn sub-agents to do work in parallel, **cast each as its matching Pu
 
 ## Sync home
 
-Sync home: ~/code/pulsar (repo root, canonical — hardlinked to ~/.claude/skills/pulsar; the Sources/Resources copies are build artifacts).
+Sync home: ~/code/pulsar (repo root, canonical — ~/.claude/skills/pulsar is a symlink to it, so live == canonical by construction; the Sources/Resources copies are build artifacts re-synced by build-pulsar-app.sh).

@@ -31,6 +31,7 @@ struct RosterView: View {
             "nebula":   "Makes it beautiful — design, images, icons, and visual polish.",
             "echo":     "Writes it up — docs, changelogs, copy, and clear prose.",
             "atlas":    "The all-rounder — picks up whatever general task needs doing.",
+            "iris":     "Runs marketing — brand, paid media, search, SEO, content, and the full lifecycle.",
         ]
         // `unknown` is an internal fallback for rendering an unrecognised agent in
         // the swarm — NOT a showcased team member. Keep it out of "Meet the team".

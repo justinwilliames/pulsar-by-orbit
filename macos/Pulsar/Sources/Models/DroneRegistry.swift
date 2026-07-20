@@ -35,7 +35,7 @@ enum DroneRegistry {
         let color: Color
         let voice: String
         /// Single-character role badge shown in the portrait corner (E=explorer,
-        /// R=reviewer, B=builder, A=artist, W=writer, G=generalist).
+        /// R=reviewer, B=builder, A=artist, W=writer, G=generalist, M=marketer).
         let badge: String
         let motion: MotionTrait
     }
@@ -52,10 +52,11 @@ enum DroneRegistry {
     /// Only DEFAULT-installed voices are used — ones macOS enumerates via
     /// AVSpeechSynthesisVoice (so `say` always finds them). Tara/Aman are NOT
     /// enumerated / are Siri-clashed, so they silently fell back to Daniel — hence
-    /// this roster sticks to the seven reliable gendered English voices. Each is
+    /// this roster sticks to the eight reliable gendered English voices. Each is
     /// UNIQUE and matches the character's gender + aesthetic. Three male voices
     /// exist (Daniel, Rishi, Fred), so the three male characters are Pulsar,
-    /// Voyager, Atlas; the four female voices go to the four female characters.
+    /// Voyager, Atlas; the five female voices (Karen, Samantha, Moira, Tessa,
+    /// Kathy) go to the five female characters.
     ///   • pulsar   (M, orchestrator)         → Daniel   (en-GB) — authoritative conductor
     ///   • voyager  (M, rugged explorer)      → Fred     (en-US) — gruff, characterful (the
     ///     only remaining default male; a touch retro, which suits a rugged scout)
@@ -64,11 +65,14 @@ enum DroneRegistry {
     ///   • nebula   (F, artist)               → Moira    (en-IE) — warm, lyrical
     ///   • echo     (F, writer/communicator)  → Tessa    (en-ZA) — clear, articulate
     ///   • atlas    (M, sturdy generalist)    → Rishi    (en-IN) — deep, steady
+    ///   • iris     (F, marketing: brand/paid/search/SEO/content/lifecycle) → Kathy (en-US) — warm, engaging communicator
     /// Colours: voyager/nova/nebula unchanged. echo/sentinel/atlas were
     /// re-separated (the old cyan/teal/slate blurred together) per the colour-
     /// distinctness review — echo → deeper teal, sentinel → bluer azure, atlas →
     /// deep grape #8040C0 (0.50 R, 0.25 G, 0.75 B), ΔE76 ≥ 34 from both
     /// pulsar-indigo (#818CF8) and nebula-magenta (#E95CD1) at thumbnail size.
+    /// iris → warm coral-rose #F26178 (0.949 R, 0.380 G, 0.471 B), min ΔE76 ≥ 51
+    /// from every sibling (nearest is nebula-magenta) — the open warm-red lane.
     /// Motion: each character moves to its persona — explorer restless+fast,
     /// reviewer near-still, builder bouncy, artist smooth/flowing, writer steady,
     /// generalist neutral.
@@ -85,6 +89,8 @@ enum DroneRegistry {
               motion: MotionTrait(bobAmplitude: 1.6, bobFrequency: 1.0,  activeScale: 2.4)),  // teal — steady
         Drone(category: "atlas",    role: "generalist", color: Color(red: 0.50, green: 0.25, blue: 0.75), voice: "Rishi",    badge: "G",
               motion: MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9,  activeScale: 2.4)),  // deep grape #8040C0 — ΔE>34 from both pulsar-indigo + nebula-magenta
+        Drone(category: "iris",     role: "marketer",   color: Color(red: 0.949, green: 0.380, blue: 0.471), voice: "Kathy",   badge: "M",
+              motion: MotionTrait(bobAmplitude: 2.2, bobFrequency: 1.15, activeScale: 2.45)), // coral-rose #F26178 — warm, rhythmic; ΔE76≥51 from every sibling
         // "unknown" — a neutral catch-all for unrecognised agent categories.
         // Desaturated mid-grey rim so it reads as "generic agent" without competing
         // with any named drone hue. Shares Daniel's voice (Pulsar's), but voice does

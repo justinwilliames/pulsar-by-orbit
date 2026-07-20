@@ -43,7 +43,7 @@ That's the whole list. The voice runs on macOS's built-in `say` — there's no a
 ## Meet the swarm
 
 <p align="center">
-  <img src="assets/readme/drone-swarm.png" alt="Meet the swarm — Pulsar and the six drones" />
+  <img src="assets/readme/drone-swarm.png" alt="Meet the swarm — Pulsar and the seven drones" />
 </p>
 
 Claude Code spawns sub-agents to fan work out — one to search the codebase, another to review it, a third to build. Pulsar makes that visible. When a sub-agent starts, a companion **drone** appears and orbits the Pulsar portrait; when it finishes, the drone fades out. Whichever character is speaking swaps to centre stage and lip-syncs the line, its colour lighting the subtitle glow.
@@ -56,6 +56,7 @@ Seven characters, each with its own voice and role:
 - **Nova** — builder. Writing and refactoring.
 - **Nebula** — artist. Design and visual work.
 - **Echo** — writer. Docs and copy.
+- **Iris** — marketer. Brand, paid, search, SEO, content, and lifecycle — the full marketing lens.
 - **Atlas** — the generalist, for everything that doesn't fit the others.
 
 The swarm is wired through Claude Code's `SubagentStart` and `SubagentStop` hooks (installed for you in step 4). A background sweep clears out any drone whose stop signal never arrived, and the current set survives a restart — so what's on screen matches what's actually running.

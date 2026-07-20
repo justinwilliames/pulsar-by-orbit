@@ -88,7 +88,8 @@ if [ -n "$RESOURCE_BUNDLE" ] && [ -d "$RESOURCE_BUNDLE" ]; then
            nova-mouth-0.png nova-mouth-1.png nova-mouth-2.png nova-mouth-3.png nova-mouth-4.png nova-blink.png \
            nebula-mouth-0.png nebula-mouth-1.png nebula-mouth-2.png nebula-mouth-3.png nebula-mouth-4.png nebula-blink.png \
            echo-mouth-0.png echo-mouth-1.png echo-mouth-2.png echo-mouth-3.png echo-mouth-4.png echo-blink.png \
-           atlas-mouth-0.png atlas-mouth-1.png atlas-mouth-2.png atlas-mouth-3.png atlas-mouth-4.png atlas-blink.png; do
+           atlas-mouth-0.png atlas-mouth-1.png atlas-mouth-2.png atlas-mouth-3.png atlas-mouth-4.png atlas-blink.png \
+           iris-mouth-0.png iris-mouth-1.png iris-mouth-2.png iris-mouth-3.png iris-mouth-4.png iris-blink.png; do
     src="$RESOURCE_BUNDLE/$f"
     if [ -f "$src" ]; then
       cp "$src" "$APP_BUNDLE/Contents/Resources/$f"

@@ -11,7 +11,7 @@ struct SessionRecord: Codable, Sendable {
     var phase: String  // "working" | "waiting"
     var dismissed: Bool
     /// When the USER last sent a message in this session (UserPromptSubmit). This
-    /// — NOT lastSeen — drives the 7-day recency window and the board sort, so
+    /// — NOT lastSeen — drives the 48h recency window and the board sort, so
     /// drone/speak/Stop churn can't keep a stale session "recent". Optional so a
     /// store written by an older build (no such field) still decodes.
     var lastUserMessage: Date?
@@ -110,7 +110,7 @@ struct SessionRecord: Codable, Sendable {
 ///
 /// A session is `note()`d on turn start (working), sub-agent start/stop
 /// (working), any tagged speak line (working), and turn end (waiting). The board
-/// shows sessions active in the last 7 days that the user hasn't dismissed.
+/// shows sessions active in the last 48 hours that the user hasn't dismissed.
 actor SessionRegistry {
     static let shared = SessionRegistry()
 
@@ -125,18 +125,20 @@ actor SessionRegistry {
             ?? PulsarConfig.shared.storageRoot.appendingPathComponent("sessions.json")
     }
 
-    /// Default window: a session is shown if it was seen within the last 7 days
-    /// and hasn't been dismissed.
-    static let activeWindow: TimeInterval = 7 * 24 * 3600
+    /// Default window: a session is shown if it was seen within the last 48
+    /// hours and hasn't been dismissed. (Tightened from 7 days, 2026-07-20 —
+    /// Justin: the board is "what's happening now-ish", and week-old sessions
+    /// were noise.)
+    static let activeWindow: TimeInterval = 48 * 3600
 
     // MARK: - Retention bounds
     //
-    // The board only ever SHOWS sessions within `activeWindow` (7 days). These
+    // The board only ever SHOWS sessions within `activeWindow` (48h). These
     // bounds are the store's actual RETENTION policy — without them the on-disk
     // map grew forever (a read-time filter is not a retention policy). They run
     // on load and before every persist, so the file can never grow unbounded.
 
-    /// Hard TTL for a live (non-dismissed) record. Well past the 7-day display
+    /// Hard TTL for a live (non-dismissed) record. Well past the 48h display
     /// window, so a record is only physically dropped long after it stopped
     /// showing — never yanking a session the user might still see.
     static let liveTTL: TimeInterval = 14 * 24 * 3600
@@ -297,7 +299,7 @@ actor SessionRegistry {
     /// `lastSeen` — so drone/speak/Stop churn can't keep a session on the board
     /// without the user messaging. A session qualifies when it is not dismissed
     /// AND either:
-    ///   • the user messaged it within `seconds` (the 7-day window), OR
+    ///   • the user messaged it within `seconds` (the 48h window), OR
     ///   • it currently has ≥1 in-flight drone (`liveSessionIds`) — the guard so
     ///     live work never vanishes, even before the first user message lands or
     ///     after the window would otherwise expire mid-run.

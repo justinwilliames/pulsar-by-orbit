@@ -215,10 +215,11 @@ final class DashboardViewModel {
 
     /// Map the wire envelope to view models: phase string → Phase, last_seen →
     /// Date, each drone → a .running MissionTask. Client-side belt-and-braces:
-    /// drop sessions whose last_seen is older than 7 days, and sort newest-first
+    /// drop sessions whose recency is older than 48 hours, and sort newest-first
     /// (the server already does both, but a stale reconnect payload can't leak).
+    /// Mirror of `SessionRegistry.activeWindow` — keep the two in lockstep.
     private static func mapSessions(_ envelope: SessionsEnvelope) -> [MissionSession] {
-        let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
+        let cutoff = Date().addingTimeInterval(-48 * 3600)
         return envelope.sessions.compactMap { dto -> MissionSession? in
             let lastSeen = Date(timeIntervalSince1970: TimeInterval(dto.last_seen))
             let lastUserMessage = (dto.last_user_message).flatMap {

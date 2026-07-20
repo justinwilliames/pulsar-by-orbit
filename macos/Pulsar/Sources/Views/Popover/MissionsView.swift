@@ -3,11 +3,24 @@ import AppKit
 
 /// The Task Mode "Missions" board — live Claude Code work grouped BY SESSION.
 /// Each session is a Pulsar orchestrator parent row with its sub-agent drones
-/// nested beneath. Shows sessions the user messaged in the last 7 days (plus any
-/// with live drones); each has a dismiss (x) to hide it. A "Needs you" session
-/// (its turn ended, waiting on the user) is tinted so it's impossible to miss.
+/// nested beneath. Shows sessions the user messaged in the last 48 hours (plus
+/// any with live drones); each has a dismiss (x) to hide it. A "Needs you"
+/// session (its turn ended, waiting on the user) is tinted so it's impossible
+/// to miss.
 struct MissionsView: View {
     let viewModel: DashboardViewModel
+
+    /// Resolve a category to the frame key that will actually RENDER. A category
+    /// whose frame set isn't bundled (e.g. "unknown", or a category from a newer
+    /// daemon this build ships no art for) falls back to Pulsar's face — and
+    /// every colour on the row must follow the SAME resolution, or the row wears
+    /// Pulsar's picture with another drone's hue (the exact desync flagged
+    /// 2026-07-20). One resolver, used by faces and hues alike.
+    static func resolvedFrameKey(_ category: String?) -> String {
+        guard let raw = category?.lowercased(), !raw.isEmpty,
+              NSImage(named: "\(raw)-mouth-0") != nil else { return "pulsar" }
+        return raw
+    }
 
     private var sessions: [MissionSession] {
         viewModel.missionSessions.sorted {
@@ -119,17 +132,20 @@ struct MissionsView: View {
     /// carry the drone's OWN hue, and a running portrait breathes gently so live
     /// work reads as alive. Calm on purpose — this is a menu-bar list.
     private func droneRow(_ task: MissionTask) -> some View {
-        let category = task.category
-        let name = (category ?? "pulsar").capitalized
-        let role = DroneRegistry.role(for: category).capitalized
-        let hue = droneColor(for: category)
+        // Resolve ONCE, then derive face, hue, name, and role from the same key —
+        // an unrenderable category ("unknown", future cast) collapses to Pulsar
+        // wholesale rather than showing Pulsar's face in a foreign colour.
+        let key = Self.resolvedFrameKey(task.category)
+        let name = key.capitalized
+        let role = DroneRegistry.role(for: key).capitalized
+        let hue = droneColor(for: key)
         // The pill uses the drone's own hue while running so the cast is
         // distinguishable at a glance; terminal states keep their semantic
         // colour (done=secondary, blocked=red, paused=orange).
         let pillTint = task.status == .running ? hue : task.status.tint
 
         return HStack(spacing: 10) {
-            dronePortrait(category, running: task.status == .running)
+            dronePortrait(key, running: task.status == .running)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
@@ -160,14 +176,12 @@ struct MissionsView: View {
     }
 
     /// Small static drone portrait (mouth-0 frame), colour-bordered by drone hue.
-    /// Falls back to the Pulsar frame for unknown/nil categories. A `running`
-    /// portrait breathes — a gentle scale+opacity oscillation — so live work
-    /// feels alive without turning the list into a toy.
-    private func dronePortrait(_ category: String?, running: Bool) -> some View {
-        let key = category ?? "pulsar"
-        let image = NSImage(named: "\(key)-mouth-0")
-            ?? NSImage(named: "pulsar-mouth-0")
-            ?? NSImage()
+    /// Takes a PRE-RESOLVED frame key (`resolvedFrameKey`), so the face and its
+    /// border colour derive from the same identity and can never disagree. A
+    /// `running` portrait breathes — a gentle scale+opacity oscillation — so live
+    /// work feels alive without turning the list into a toy.
+    private func dronePortrait(_ key: String, running: Bool) -> some View {
+        let image = NSImage(named: "\(key)-mouth-0") ?? NSImage()
         return Image(nsImage: image)
             .resizable()
             .interpolation(.high)
@@ -176,7 +190,7 @@ struct MissionsView: View {
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(droneColor(for: category), lineWidth: 1.5)
+                    .strokeBorder(droneColor(for: key), lineWidth: 1.5)
             )
             .modifier(BreathingModifier(active: running))
     }
@@ -306,7 +320,7 @@ private struct SessionParentRow: View {
         .background(
             // LIVE rows glow in their drone's hue; waiting rows stay orange;
             // idle rows keep the calm orbit tint.
-            (isLive ? session.activeColor.opacity(0.12)
+            (isLive ? resolvedActiveColor.opacity(0.12)
                     : session.phase == .waiting ? Color.orange.opacity(0.10)
                     : Color.orbit.opacity(0.08)),
             in: RoundedRectangle(cornerRadius: 8)
@@ -377,15 +391,36 @@ private struct SessionParentRow: View {
         session.activeNow || !session.drones.isEmpty
     }
 
+    /// `activeCategory` resolved to what this build can actually RENDER — falls
+    /// back to "pulsar" when the category's frame set isn't bundled ("unknown",
+    /// or a category from a newer daemon). EVERY live colour and name in this
+    /// row derives from this one resolution, so the face, ring, glow, dot, and
+    /// name can never disagree (the Pulsar-face-in-a-foreign-colour desync).
+    private var resolvedCategory: String {
+        MissionsView.resolvedFrameKey(session.activeCategory)
+    }
+
+    /// The live-activity hue, keyed to the RESOLVED category: a renderable
+    /// drone's locked colour, else Pulsar indigo. Replaces `session.activeColor`
+    /// (which keyed on the raw category and desynced from the fallback face).
+    private var resolvedActiveColor: Color {
+        resolvedCategory == "pulsar" ? .orbit : droneColor(for: resolvedCategory)
+    }
+
+    /// The live-activity name, keyed to the same resolution as the face.
+    private var resolvedActiveName: String {
+        resolvedCategory == "pulsar" ? "Pulsar" : resolvedCategory.capitalized
+    }
+
     /// The leading mark is ALWAYS a face — every session is a Pulsar orchestrator
     /// at rest, wearing a specific drone's face only while that drone works.
     ///   • LIVE  → the working drone's portrait (by `activeCategory`), breathing,
     ///     ringed in its hue: build work wears Nova's green face, exploring
     ///     Voyager's amber, orchestration/MCP/other Pulsar's indigo — so a glance
     ///     shows WHO is working.
-    ///   • IDLE  → Pulsar's own face, still, ringed in the session's deterministic
-    ///     identity colour — the per-session distinguisher (backed by the `#tag`
-    ///     in the context line), so N resting sessions still read apart.
+    ///   • IDLE  → Pulsar's own face, still, ringed in Pulsar's calm indigo.
+    ///     Colour always means DRONE ATTRIBUTION, never session identity — the
+    ///     per-session distinguisher is the title + `#tag` in the context line.
     /// 28pt, a touch larger than the 26pt nested drone portraits, so the parent
     /// reads as the anchor above its swarm.
     @ViewBuilder
@@ -394,15 +429,19 @@ private struct SessionParentRow: View {
         // row while the turn waits for you ("Nova's still here, waiting on your
         // reply"), instead of snapping back to Pulsar the instant it goes idle.
         // Only a genuinely-live row breathes; a waiting one holds its last face
-        // still. Pure-Pulsar/never-worked sessions get the per-session identity
-        // ring so they still read apart; a specific drone rings in its own hue.
+        // still. Face AND ring both key on `resolvedCategory` — one resolution,
+        // no Pulsar-face-with-foreign-ring desync. COLOUR MEANS ATTRIBUTION
+        // (2026-07-20, Justin): a ring hue always names the drone whose face it
+        // wraps — so a resting Pulsar face rings in Pulsar's own calm indigo,
+        // never the old per-session identityColor (that palette reused the drone
+        // hues, so idle rows read as "Pulsar's picture in another drone's
+        // colour"). Per-session distinctness stays with the title + #tag.
         let live = isLive
-        let category = session.activeCategory.isEmpty ? "pulsar" : session.activeCategory
+        let category = resolvedCategory
         let hasSpecificDrone = category != "pulsar"
-        let ring = live ? session.activeColor
-            : (hasSpecificDrone ? droneColor(for: session.activeCategory) : session.identityColor)
-        Image(nsImage: NSImage(named: "\(category)-mouth-0")
-                ?? NSImage(named: "pulsar-mouth-0") ?? NSImage())
+        let ring = live ? resolvedActiveColor
+            : (hasSpecificDrone ? droneColor(for: category) : Color.orbit.opacity(0.65))
+        Image(nsImage: NSImage(named: "\(category)-mouth-0") ?? NSImage())
             .resizable()
             .interpolation(.high)
             .scaledToFill()
@@ -418,12 +457,12 @@ private struct SessionParentRow: View {
         HStack(spacing: 5) {
             if isLive {
                 Circle()
-                    .fill(session.activeColor)
+                    .fill(resolvedActiveColor)
                     .frame(width: 6, height: 6)
                     .modifier(BreathingModifier(active: true))
                 Text(secondaryLine)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(AnyShapeStyle(session.activeColor))
+                    .foregroundStyle(AnyShapeStyle(resolvedActiveColor))
                     .lineLimit(1)
                     .truncationMode(.tail)
             } else {
@@ -455,8 +494,8 @@ private struct SessionParentRow: View {
         }
         if session.activeNow {
             let action = session.currentAction.trimmingCharacters(in: .whitespacesAndNewlines)
-            return action.isEmpty ? session.activeName
-                                  : "\(session.activeName) · \(action)"
+            return action.isEmpty ? resolvedActiveName
+                                  : "\(resolvedActiveName) · \(action)"
         }
         return session.contextLine
     }

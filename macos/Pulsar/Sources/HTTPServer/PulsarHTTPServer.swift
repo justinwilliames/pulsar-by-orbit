@@ -469,7 +469,7 @@ final class PulsarHTTPServer: @unchecked Sendable {
             $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0
         }
         // `user_message` = true ONLY from the UserPromptSubmit hook — the sole
-        // signal that moves the 7-day recency window + sort. Everything else
+        // signal that moves the 48h recency window + sort. Everything else
         // (Stop hook, etc.) leaves it false so it drives phase, not the window.
         let isUserMessage = (body["user_message"] as? Bool) ?? false
         // Sticky session name from the first user message (registry ignores it
@@ -1717,7 +1717,7 @@ private struct SessionPayload: Encodable, Sendable {
     /// SERVER-RESOLVED presentation truth (R4 item 3). `title` is the one board
     /// title; `status` is the 4-state machine's answer ("active"|"working"|
     /// "waiting") with `stale` marking the idle-fallback provenance (a dropped
-    /// Stop self-healed to waiting). `last_user_message` is the 7-day window's
+    /// Stop self-healed to waiting). `last_user_message` is the 48h window's
     /// actual gate + sort key — on the wire so the board is auditable.
     /// `is_mission` = this session needs the user (the noun, as a field).
     /// The raw fields above remain as the debug layer; clients should render

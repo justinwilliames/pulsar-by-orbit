@@ -44,28 +44,33 @@ enum DroneRegistry {
     /// Daniel, the male UK orchestrator voice.
     static let pulsarVoice = "Daniel"
 
-    /// The LOCKED taxonomy + colours, plus a unique humanoid voice per character.
+    /// The LOCKED taxonomy + colours, plus a unique voice per character —
+    /// EVERY voice ships on a STOCK Mac (2026-07-20, Justin: any user who
+    /// downloads Pulsar gets the full unique-voice cast, zero voice downloads).
     /// Order is the canonical category list.
     ///
-    /// Voice choices — persona + assumed gender → a distinct, genuinely humanoid
-    /// ENGLISH voice installed on this machine. This box has only three humanoid
-    /// Only DEFAULT-installed voices are used — ones macOS enumerates via
-    /// AVSpeechSynthesisVoice (so `say` always finds them). Tara/Aman are NOT
-    /// enumerated / are Siri-clashed, so they silently fell back to Daniel — hence
-    /// this roster sticks to the eight reliable gendered English voices. Each is
-    /// UNIQUE and matches the character's gender + aesthetic. Three male voices
-    /// exist (Daniel, Rishi, Fred), so the three male characters are Pulsar,
-    /// Voyager, Atlas; the five female voices (Karen, Samantha, Moira, Tessa,
-    /// Kathy) go to the five female characters.
+    /// Voice mechanics — a voice is resolvable by the daemon only if macOS
+    /// enumerates it via AVSpeechSynthesisVoice AND it either reports a real
+    /// gender (the modern compacts + Fred) or is whitelisted in
+    /// NativeVoiceClient.roboticVoiceNames (the legacy MacinTalk set reports
+    /// unspecified gender and is otherwise FILTERED — Kathy fell to this and
+    /// silently spoke as Daniel; Tara/Aman fail enumeration entirely). Stock
+    /// gendered English voices number SEVEN (Daniel, Fred, Rishi + Karen,
+    /// Samantha, Moira, Tessa) for eight speakers, so exactly one character
+    /// carries a whitelisted legacy voice — Echo, the retired auto-category who
+    /// speaks only in team reviews (least ear-time), whose young round-faced
+    /// comms-kid design carries Junior's boyish timbre naturally.
     ///   • pulsar   (M, orchestrator)         → Daniel   (en-GB) — authoritative conductor
-    ///   • voyager  (M, rugged explorer)      → Fred     (en-US) — gruff, characterful (the
-    ///     only remaining default male; a touch retro, which suits a rugged scout)
-    ///   • sentinel (F, precise reviewer)     → Karen    (en-AU) — crisp, authoritative
+    ///   • voyager  (M, rugged explorer)      → Fred     (en-US) — gruff retro rasp, suits the
+    ///     prospector aesthetic (legacy but reports MALE, so it resolves cleanly)
+    ///   • sentinel (F, precise reviewer)     → Karen    (en-AU) — crisp, clipped auditor
     ///   • nova     (F, eager builder)        → Samantha (en-US) — bright, upbeat
     ///   • nebula   (F, artist)               → Moira    (en-IE) — warm, lyrical
-    ///   • echo     (F, writer/communicator)  → Tessa    (en-ZA) — clear, articulate
+    ///   • echo     (young comms-kid, writer) → Junior   (en-US) — light, boyish; whitelisted
     ///   • atlas    (M, sturdy generalist)    → Rishi    (en-IN) — deep, steady
-    ///   • iris     (F, marketing: brand/paid/search/SEO/content/lifecycle) → Kathy (en-US) — warm, engaging communicator
+    ///   • iris     (F, marketing: brand/paid/search/SEO/content/lifecycle) → Tessa (en-ZA) —
+    ///     clear + warm, the welcoming communicator (took Tessa from Echo in the
+    ///     2026-07-20 stock-voice shuffle)
     /// Colours: voyager/nova/nebula unchanged. echo/sentinel/atlas were
     /// re-separated (the old cyan/teal/slate blurred together) per the colour-
     /// distinctness review — echo → deeper teal, sentinel → bluer azure, atlas →
@@ -85,11 +90,11 @@ enum DroneRegistry {
               motion: MotionTrait(bobAmplitude: 2.6, bobFrequency: 1.6,  activeScale: 2.45)), // green — busy, bouncy
         Drone(category: "nebula",   role: "artist",     color: Color(red: 0.91, green: 0.36, blue: 0.82), voice: "Moira",    badge: "A",
               motion: MotionTrait(bobAmplitude: 2.4, bobFrequency: 0.85, activeScale: 2.4)),  // magenta — smooth, flowing
-        Drone(category: "echo",     role: "writer",     color: Color(red: 0.18, green: 0.75, blue: 0.72), voice: "Tessa",    badge: "W",
+        Drone(category: "echo",     role: "writer",     color: Color(red: 0.18, green: 0.75, blue: 0.72), voice: "Junior",   badge: "W",
               motion: MotionTrait(bobAmplitude: 1.6, bobFrequency: 1.0,  activeScale: 2.4)),  // teal — steady
         Drone(category: "atlas",    role: "generalist", color: Color(red: 0.50, green: 0.25, blue: 0.75), voice: "Rishi",    badge: "G",
               motion: MotionTrait(bobAmplitude: 2.0, bobFrequency: 0.9,  activeScale: 2.4)),  // deep grape #8040C0 — ΔE>34 from both pulsar-indigo + nebula-magenta
-        Drone(category: "iris",     role: "marketer",   color: Color(red: 0.949, green: 0.380, blue: 0.471), voice: "Kathy",   badge: "M",
+        Drone(category: "iris",     role: "marketer",   color: Color(red: 0.949, green: 0.380, blue: 0.471), voice: "Tessa",   badge: "M",
               motion: MotionTrait(bobAmplitude: 2.2, bobFrequency: 1.15, activeScale: 2.45)), // coral-rose #F26178 — warm, rhythmic; ΔE76≥51 from every sibling
         // "unknown" — a neutral catch-all for unrecognised agent categories.
         // Desaturated mid-grey rim so it reads as "generic agent" without competing

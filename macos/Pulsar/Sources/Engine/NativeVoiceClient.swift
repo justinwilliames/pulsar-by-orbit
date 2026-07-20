@@ -35,7 +35,7 @@ enum NativeVoiceClient {
     static let roboticVoiceNames: Set<String> = [
         "zarvox", "trinoids", "fred", "albert", "ralph", "whisper", "wobble",
         "bahh", "boing", "bells", "bubbles", "cellos", "organ", "jester",
-        "superstar", "bad news", "good news",
+        "superstar", "bad news", "good news", "junior", "kathy",
     ]
 
     private struct ResolvedVoice {

@@ -37,7 +37,7 @@ enum VoiceCategory: String, CaseIterable, Identifiable {
     private static let roboticNames: Set<String> = [
         "zarvox", "trinoids", "fred", "albert", "ralph", "whisper", "wobble",
         "bahh", "boing", "bells", "bubbles", "cellos", "organ", "jester",
-        "superstar", "bad news", "good news",
+        "superstar", "bad news", "good news", "junior", "kathy",
     ]
 
     /// Categorise a voice by its (base) name. Anything not in the robotic set —

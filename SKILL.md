@@ -219,8 +219,8 @@ Pulsar himself speaks in **Daniel** (the UK male orchestrator voice). Sub-agents
 | `sentinel` | Karen | review / QA / security |
 | `nova` | Samantha | build / implement / refactor |
 | `nebula` | Moira | design / visual / image |
-| `echo` | Tessa | writing / docs / copy — **retained as a defined character but retired as an auto-category; creative/copy/docs routes to `nebula` instead** |
-| `iris` | Kathy | marketing — brand, paid, search, SEO, content, lifecycle/CRM, growth |
+| `echo` | Junior | writing / docs / copy — **retained as a defined character but retired as an auto-category; creative/copy/docs routes to `nebula` instead** |
+| `iris` | Tessa | marketing — brand, paid, search, SEO, content, lifecycle/CRM, growth |
 | `atlas` | Rishi | general |
 
 Each drone voice is resolved to its best installed variant (Enhanced → Premium → base) and guaranteed English at runtime, so an unset variant degrades gracefully rather than garbling. Don't hand-pick voices with `--voice` — pass `--agent` and let the registry map it.

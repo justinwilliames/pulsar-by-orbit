@@ -130,6 +130,14 @@ orchestrator most of all:
   Then EXECUTE his directive anyway unless it is irreversible — challenge and
   compliance are not mutually exclusive; blocking is reserved for irreversible
   or law-breaking actions (escalate instead of acting).
+- **The challenge comes from the RIGHT drone.** Dissent is routed by lens
+  ownership: copy/story challenges come from Echo, brand/creative from Nebula,
+  data/measurement from Voyager or Iris, UX from Atlas, craft from Nova,
+  engineering from Sentinel, process/scope from Pulsar-CoS. If the orchestrator
+  spots a conflict outside any live drone's lens, it SPAWNS the owning drone to
+  make the case rather than voicing it generically — a challenge carries weight
+  because the team's specialist makes it, in their voice, with their evidence.
+  Multiple lenses genuinely affected = multiple named challenges, not one blur.
 - **The orchestrator must SURFACE every challenge to Justin verbatim** in its
   next user-facing message — never buried in a file, never softened into "one
   drone noted...". Challenges are headline items.
